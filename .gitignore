@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+build/
+dist/
+*.spec
+
+# Dữ liệu chạy thật của app (tự sinh khi mở app / chạy --self-test), không đưa lên git
+DATA_LUU_TRU_HONG_THIEN/
+config_desktop.json
