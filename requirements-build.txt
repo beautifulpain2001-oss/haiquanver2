@@ -1,0 +1,6 @@
+-r requirements.txt
+pyinstaller>=6.10
+# Tùy chọn cho OCR (chỉ hoạt động khi máy đã cài Tesseract)
+pillow>=10.0
+pytesseract>=0.3.10
+pypdfium2>=4.0

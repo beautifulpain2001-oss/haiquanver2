@@ -12,3 +12,9 @@
 1. Đặt thư mục phần mềm này trên **Máy chủ Host** (hoặc ổ mạng LAN dùng chung `Z:\`).
 2. Bấm đúp vào **`1_CHAY_APP_DESKTOP.bat`** để mở phần mềm ngay (hoặc chạy **`2_DONG_GOI_RA_FILE_EXE.bat`** một lần để tạo file `HongThien_HaiQuan_Desktop.exe`).
 3. Trên các máy trạm trong mạng LAN, bấm nút **"📂 Chọn Thư Mục Lưu Trữ Tập Trung (Host / Ổ Mạng LAN Z:\)"** trên góc phải phần mềm và trỏ về thư mục `DATA_LUU_TRU_HONG_THIEN` trên Máy chủ Host.
+
+## 3. Bản `.exe` Không Cần Cài Python
+- **Tải bản dựng sẵn:** vào tab **Actions → build-exe** trên GitHub, mở lần chạy mới nhất và tải `HongThien_HaiQuan_Desktop_Windows` ở mục *Artifacts* (hoặc tải ở trang **Releases** nếu đã đăng). Giải nén rồi bấm đúp `HongThien_HaiQuan_Desktop.exe`.
+- **Tự đóng gói trên máy có Python:** chạy `2_DONG_GOI_RA_FILE_EXE.bat` (dùng `build_exe.py`: build bằng PyInstaller, tự chạy `--self-test` trên bản `.exe`, rồi nén zip vào `dist/`).
+- Dữ liệu `DATA_LUU_TRU_HONG_THIEN/` và `config_desktop.json` nằm **cạnh file `.exe`**, không nằm trong thư mục tạm.
+- OCR PDF scan/ảnh cần cài Tesseract riêng (không đóng gói kèm). Chi tiết ở `HUONG_DAN_BAN_EXE.md`.

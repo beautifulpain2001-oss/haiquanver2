@@ -1,0 +1,54 @@
+name: build-exe
+
+# Đóng gói app thành file .exe chạy trên Windows không cần cài Python.
+# - Mỗi lần push / PR: file zip được đính kèm ở mục "Artifacts" của lần chạy.
+# - Đẩy tag dạng v1.0.0 hoặc bấm "Run workflow" (chọn tạo release): file zip được
+#   đăng lên trang Releases để tải trực tiếp.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Đăng bản build lên trang Releases"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-build.txt
+      - run: pip install -r requirements-build.txt
+      - name: Build .exe + self-test + mở thử giao diện
+        run: python build_exe.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HongThien_HaiQuan_Desktop_Windows
+          path: dist/HongThien_HaiQuan_Desktop_Windows.zip
+          retention-days: 90
+      - name: Đăng lên Releases
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('build-{0}', github.run_number) }}
+          name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('Bản build {0}', github.run_number) }}
+          target_commitish: ${{ github.sha }}
+          files: dist/HongThien_HaiQuan_Desktop_Windows.zip
+          body: |
+            Tải file HongThien_HaiQuan_Desktop_Windows.zip bên dưới, giải nén rồi bấm đúp HongThien_HaiQuan_Desktop.exe.
+            Không cần cài Python. Xem HUONG_DAN.txt trong file zip.
