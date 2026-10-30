@@ -87,6 +87,9 @@ def bundle_ocr():
             shutil.copy2(path, os.path.join(OCR_DIR, "tessdata"))
     size = sum(os.path.getsize(os.path.join(r, f)) for r, _, fs in os.walk(OCR_DIR) for f in fs)
     print(f"Đã chép bộ OCR từ {src} -> {OCR_DIR} ({size / 1e6:.1f} MB)")
+    for r, _, fs in os.walk(OCR_DIR):
+        for f in fs:
+            print(f"   {os.path.getsize(os.path.join(r, f)) / 1e6:7.2f} MB  {os.path.relpath(os.path.join(r, f), OCR_DIR)}")
 
 
 def self_test(with_ocr=True):
