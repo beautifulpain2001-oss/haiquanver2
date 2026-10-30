@@ -12,3 +12,13 @@
 1. Đặt thư mục phần mềm này trên **Máy chủ Host** (hoặc ổ mạng LAN dùng chung `Z:\`).
 2. Bấm đúp vào **`1_CHAY_APP_DESKTOP.bat`** để mở phần mềm ngay (hoặc chạy **`2_DONG_GOI_RA_FILE_EXE.bat`** một lần để tạo file `HongThien_HaiQuan_Desktop.exe`).
 3. Trên các máy trạm trong mạng LAN, bấm nút **"📂 Chọn Thư Mục Lưu Trữ Tập Trung (Host / Ổ Mạng LAN Z:\)"** trên góc phải phần mềm và trỏ về thư mục `DATA_LUU_TRU_HONG_THIEN` trên Máy chủ Host.
+
+## 3. Thêm Khách Hàng Mới Bằng Chứng Từ Mẫu (Học Offline)
+1. Bấm **"🧠 Thêm Khách Mới Từ Chứng Từ Mẫu"** trên thanh trên cùng, chọn một lúc nhiều file mẫu của khách:
+   - **XML hóa đơn VAT** (TT78): app lấy tên công ty, MST, địa chỉ, email, mã hàng, tên hàng, ĐVT, đơn giá.
+   - **XML PXK kiêm VCNB**: app lấy địa chỉ kho nhận, lái xe, biển xe, ký hiệu.
+   - **Invoice / Bảng kê PKL Excel**: app suy ra định mức **SL/kiện** (Số lượng ÷ Số kiện) và **kg/chiếc** (N.W ÷ Số lượng), mã HS.
+   - **PO mẫu** (PDF có chữ, Excel, ảnh nếu có Tesseract, hoặc .txt): app đoán số PO; bạn sửa lại nếu sai, app tự tạo mẫu nhận dạng số PO.
+2. Kiểm tra, sửa các ô và xóa dòng hàng sai, bấm **"🔍 Thử đọc PO mẫu"** để xem app đọc đúng chưa, rồi bấm **"💾 Lưu Khách Hàng Mới"**. Chưa bấm Lưu thì không có gì được ghi.
+3. Khách mới xuất hiện ở hàng chọn khách của Bước 1. Quét PO như bình thường: app nhận dòng hàng theo mã/tên đã học, tính kiện và cân nặng theo định mức, xuất đủ VAT, PXK, Invoice/PKL, DNTT.
+4. Dữ liệu học được lưu trong `master_catalog.json` (`custom_profiles`, `custom_items`), dùng chung qua ổ mạng LAN như danh mục hiện có.

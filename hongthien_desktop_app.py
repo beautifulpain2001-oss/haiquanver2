@@ -322,6 +322,8 @@ class DedicatedDataStore:
         self.kodi_items = list(DEFAULT_KODI_ITEMS)
         self.tesa_items = list(DEFAULT_TESA_ITEMS)
         self.item_mem = {}
+        self.custom_profiles = {}
+        self.custom_items = {}
         self.records = []
         self.load_all()
 
@@ -367,8 +369,11 @@ class DedicatedDataStore:
                     self.tesa_items = data["tesa_items"]
                 if data.get("item_mem"):
                     self.item_mem = data["item_mem"]
+                self.custom_profiles = data.get("custom_profiles") or {}
+                self.custom_items = data.get("custom_items") or {}
             except Exception:
                 pass
+        self.register_custom_profiles()
         self.rebuild_erp_map()
 
         if os.path.exists(self.records_file):
@@ -392,7 +397,7 @@ class DedicatedDataStore:
         if not name:
             return
         self.item_mem[name] = {"div": div, "kg": kg, "hs": hs}
-        for lst in (self.kodi_items, self.tesa_items):
+        for lst in (self.kodi_items, self.tesa_items, *self.custom_items.values()):
             for it in lst:
                 if it["name"] == name:
                     if div > 0:
@@ -405,6 +410,49 @@ class DedicatedDataStore:
 
     def get_item_norm(self, name):
         return self.item_mem.get(name)
+
+    def register_custom_profiles(self):
+        """Đưa khách hàng đã học vào PROFILES để mọi biểu mẫu xuất (VAT/PXK/PKL/DNTT) dùng chung."""
+        for key, prof in self.custom_profiles.items():
+            if key not in BUILTIN_CUSTOMERS:
+                PROFILES[key] = build_custom_profile(key, prof)
+
+    def items_for_customer(self, key):
+        return {"kodi": self.kodi_items, "tesa": self.tesa_items}.get(key) or self.custom_items.get(key, [])
+
+    def save_learned_customer(self, key, profile_fields, items):
+        """Lưu khách hàng mới (đã được người dùng xác nhận) vào master_catalog.json."""
+        key = re.sub(r"[^a-z0-9_]", "", (key or "").lower())
+        if not key or key in BUILTIN_CUSTOMERS:
+            raise ValueError("Mã khách hàng trống hoặc trùng khách có sẵn (shirai/kodi/tesa).")
+        prof = build_custom_profile(key, profile_fields)
+        self.custom_profiles[key] = prof
+        lst = self.custom_items.setdefault(key, [])
+        for it in items:
+            name = str(it.get("name") or "").strip()
+            if not name:
+                continue
+            hit = next((x for x in lst if (it.get("code") and x.get("code") == it.get("code")) or x["name"] == name), None)
+            row = {
+                "name": name,
+                "code": str(it.get("code") or ""),
+                "price": it.get("price") or 0,
+                "div": it.get("div") or 0,
+                "kg": it.get("kg") or 0,
+                "hs": str(it.get("hs") or ""),
+                "unit": it.get("unit") or prof["unit"],
+                "ten_hq": it.get("ten_hq") or name,
+                "tare": prof.get("tare", 0.0),
+            }
+            if hit:
+                hit.update({k: v for k, v in row.items() if v})
+            else:
+                lst.append(row)
+            if row["div"] or row["kg"] or row["hs"]:
+                self.item_mem[name] = {"div": row["div"], "kg": row["kg"], "hs": row["hs"]}
+        PROFILES[key] = prof
+        self.save_catalog()
+        return key
 
     def save_catalog(self):
         try:
@@ -419,6 +467,8 @@ class DedicatedDataStore:
                         "kodi_items": self.kodi_items,
                         "tesa_items": self.tesa_items,
                         "item_mem": self.item_mem,
+                        "custom_profiles": self.custom_profiles,
+                        "custom_items": self.custom_items,
                     },
                     f,
                     ensure_ascii=False,
@@ -959,6 +1009,8 @@ def get_vat_and_pxk_ids(rec):
     if cust == "tesa":
         suf = " pl" if is_pallet else ""
         return f"tesa{d}.{m}{suf}", f"tesa{d}.{m}{suf}"
+    if cust not in BUILTIN_CUSTOMERS:
+        return f"{cust}{d}.{m}", f"{cust}{d}.{m}"
     return f"shirai ngày {short_d}", f"Shirai ngày {short_d}"
 
 
@@ -1725,6 +1777,448 @@ def build_so_shirai_sheet(wb, rec, sheet_name="SO"):
 
 
 # ==============================================================================
+# 4B. HỌC KHÁCH HÀNG MỚI TỪ CHỨNG TỪ MẪU (100% OFFLINE, NGƯỜI DÙNG XÁC NHẬN TRƯỚC KHI LƯU)
+#   - XML hóa đơn VAT / PXK điện tử (chuẩn TT78): tên, MST, địa chỉ, email, ký hiệu, lái xe,
+#     biển xe, mã hàng, tên hàng, ĐVT, đơn giá.
+#   - Excel Invoice / Bảng kê PKL: định mức SL/kiện và kg/chiếc suy ra từ Số kiện và N.W.
+#   - PO mẫu (PDF/Excel/ảnh/txt): số PO mẫu -> mẫu nhận dạng số PO cho các PO sau.
+# ==============================================================================
+BUILTIN_CUSTOMERS = ("shirai", "kodi", "tesa")
+
+CUSTOM_PROFILE_DEFAULTS = {
+    "unit": "cái",
+    "poInDocs": True,
+    "linePo": False,
+    "vatPoSuffix": False,
+    "lenhSeq": "01",
+    "veViec": "xuất kho bán hàng cho",
+    "driver": "",
+    "carrier": "Hồng Thiên",
+    "xe": "",
+    "emails": "",
+    "symbol": "6C26NAA",
+    "tare": 0.0,
+    "po_pattern": "",
+}
+
+# Từ khóa tiêu đề cột Invoice/PKL (đã bỏ dấu, viết hoa); thứ tự = ưu tiên khi một tiêu đề khớp nhiều trường
+INVOICE_HEADER_KEYS = [
+    ("amount", ["THANH TIEN", "AMOUNT", "TRI GIA"]),
+    ("price", ["DON GIA", "UNIT PRICE", "PRICE"]),
+    ("net", ["N.W", "NW", "NET WEIGHT", "NET", "TRONG LUONG TINH", "KHOI LUONG TINH", "KL TINH"]),
+    ("gross", ["G.W", "GW", "GROSS", "CA BI", "TRONG LUONG CA", "KHOI LUONG CA"]),
+    ("kien", ["SO KIEN", "KIEN", "PACKAGE", "PACKAGES", "CTNS", "CARTON", "PKGS"]),
+    ("qty", ["SO LUONG", "QTY", "QUANTITY", "SL"]),
+    ("unit", ["DVT", "DON VI TINH", "DON VI", "UNIT", "UOM"]),
+    ("hs", ["MA HS", "HS CODE", "HS"]),
+    ("po", ["SO PO", "PO NO", "PO"]),
+    ("code", ["MA HANG", "MA SP", "MA SAN PHAM", "ITEM CODE", "PART NO", "CODE", "MA"]),
+    ("name", ["TEN HANG", "TEN SAN PHAM", "TEN SP", "HANG HOA", "MO TA", "DESCRIPTION", "TEN"]),
+]
+
+PO_NUMBER_HINT_RE = re.compile(
+    r"(?:P\.?\s?O\.?\s*(?:No\.?|Number|#)?|Purchase\s*Order(?:\s*No\.?)?|S[ốo]\s*(?:PO|đơn\s*hàng|don\s*hang)"
+    r"|Đơn\s*đặt\s*hàng\s*(?:số)?|Don\s*dat\s*hang\s*(?:so)?)\s*[:#.]?\s*([A-Za-z0-9][A-Za-z0-9/_.-]{3,})",
+    re.I,
+)
+
+
+def parse_vn_number(s):
+    """'1.000' -> 1000, '31.500.000' -> 31500000, '1,5' -> 1.5, '1,234.50' -> 1234.5, 12 -> 12."""
+    if isinstance(s, (int, float)):
+        return s
+    t = re.sub(r"[^\d.,-]", "", str(s or ""))
+    if not re.search(r"\d", t):
+        return 0
+    if "." in t and "," in t:
+        dec = "." if t.rfind(".") > t.rfind(",") else ","
+        t = t.replace("," if dec == "." else ".", "").replace(dec, ".")
+    else:
+        sep = "." if "." in t else ("," if "," in t else "")
+        if sep:
+            parts = t.split(sep)
+            if len(parts) > 2 or (len(parts[-1]) == 3 and parts[0].lstrip("-") not in ("", "0")):
+                t = t.replace(sep, "")
+            else:
+                t = t.replace(sep, ".")
+    try:
+        v = float(t)
+    except ValueError:
+        return 0
+    return int(v) if v == int(v) else v
+
+
+def _num_or_zero(v):
+    try:
+        return parse_vn_number(v) if v not in (None, "") else 0
+    except Exception:
+        return 0
+
+
+def _xml_local(tag):
+    return str(tag).rsplit("}", 1)[-1]
+
+
+def _xml_find(node, *names):
+    if node is None:
+        return None
+    for el in node.iter():
+        if _xml_local(el.tag) in names:
+            return el
+    return None
+
+
+def _xml_text(node, *names):
+    el = _xml_find(node, *names)
+    return (el.text or "").strip() if el is not None and el.text else ""
+
+
+def learn_from_einvoice_xml(file_path):
+    """Đọc XML hóa đơn VAT / PXK kiêm VCNB điện tử (TT78, BKAV/VNPT/Viettel... cùng chuẩn thẻ)."""
+    import xml.etree.ElementTree as ET
+
+    root = ET.parse(file_path).getroot()
+    ttchung = _xml_find(root, "TTChung")
+    mau_so = _xml_text(ttchung, "KHMSHDon")
+    ky_hieu = _xml_text(ttchung, "KHHDon")
+    doc_type = "pxk" if mau_so == "6" or _xml_find(root, "LDDNBo", "TNVChuyen", "PTVChuyen") is not None else "vat"
+    buyer = _xml_find(root, "NMua", "NNhan")
+    profile = {
+        "name": _xml_text(buyer, "Ten", "TNNhan"),
+        "mst": _xml_text(buyer, "MST"),
+        "addr": _xml_text(buyer, "DChi"),
+        "emails": _xml_text(buyer, "DCTDTu"),
+        "symbol": f"{mau_so}{ky_hieu}" if ky_hieu else "",
+    }
+    if doc_type == "pxk":
+        # địa chỉ trên PXK là kho nhận hàng; địa chỉ đăng ký lấy từ hóa đơn VAT
+        profile["addrKho"] = _xml_text(root, "DCNHang", "DChiNHang") or profile.pop("addr")
+        profile["driver"] = _xml_text(root, "TNVChuyen")
+        profile["xe"] = _xml_text(root, "PTVChuyen")
+        profile["symbol"] = profile["symbol"] or "6C26NAA"
+    items = []
+    for el in root.iter():
+        if _xml_local(el.tag) != "HHDVu":
+            continue
+        name = _xml_text(el, "THHDVu")
+        qty = _num_or_zero(_xml_text(el, "SLuong"))
+        if not name or _xml_text(el, "TChat") in ("2", "3", "4"):
+            continue
+        items.append({
+            "code": _xml_text(el, "MHHDVu"),
+            "name": name,
+            "unit": _xml_text(el, "DVTinh"),
+            "qty": qty,
+            "price": _num_or_zero(_xml_text(el, "DGia")),
+        })
+    meta = {"doc_type": doc_type, "so": _xml_text(ttchung, "SHDon"), "ngay": _xml_text(ttchung, "NLap")}
+    return {"source": os.path.basename(file_path), "kind": doc_type, "profile": profile, "items": items, "meta": meta}
+
+
+def _match_invoice_header(row):
+    cols = {}
+    for c_i, v in enumerate(row):
+        h = re.sub(r"\s+", " ", strip_accents_upper(v or "")).strip()
+        if not h or len(h) > 60:
+            continue
+        for field, keys in INVOICE_HEADER_KEYS:
+            if field in cols:
+                continue
+            if any(re.search(r"(?<![A-Z])" + re.escape(k) + r"(?![A-Z])", h) for k in keys):
+                cols[field] = c_i
+                break
+    return cols if ("name" in cols and "qty" in cols) else None
+
+
+def learn_from_invoice_excel(file_path):
+    """Đọc Invoice / Bảng kê PKL Excel của khách: tìm dòng tiêu đề, suy ra kg/chiếc và SL/kiện."""
+    wb = openpyxl.load_workbook(file_path, data_only=True)
+    items = []
+    for ws in wb.worksheets:
+        rows = list(ws.iter_rows(values_only=True))
+        h_idx, cols = -1, None
+        for i, r in enumerate(rows[:60]):
+            cols = _match_invoice_header(r)
+            if cols:
+                h_idx = i
+                break
+        if not cols:
+            continue
+        blank = 0
+        for r in rows[h_idx + 1:]:
+            def get(f):
+                return r[cols[f]] if f in cols and cols[f] < len(r) else None
+            name = str(get("name") or "").strip()
+            if not name:
+                blank += 1
+                if blank >= 3:
+                    break
+                continue
+            blank = 0
+            if re.match(r"^(TONG|TOTAL|CONG|SUM)", strip_accents_upper(name)):
+                break
+            qty = _num_or_zero(get("qty"))
+            if not isinstance(qty, (int, float)) or qty <= 0:
+                continue
+            net = _num_or_zero(get("net"))
+            kien = _num_or_zero(get("kien"))
+            it = {
+                "code": str(get("code") or "").strip(),
+                "name": name,
+                "unit": str(get("unit") or "").strip(),
+                "qty": qty,
+                "price": _num_or_zero(get("price")),
+                "hs": re.sub(r"\D", "", str(get("hs") or "")),
+                "po": str(get("po") or "").strip(),
+            }
+            if net:
+                it["kg"] = round(net / qty, 6)
+            if kien:
+                div = qty / kien
+                it["div"] = int(round(div)) if abs(div - round(div)) < 1e-6 else round(div, 3)
+            items.append(it)
+        if items:
+            break
+    return {"source": os.path.basename(file_path), "kind": "invoice", "profile": {}, "items": items, "meta": {}}
+
+
+def excel_to_text(file_path):
+    """Chuyển Excel thành văn bản từng dòng (ô cách nhau ' | ') để dùng chung bộ đọc PO văn bản."""
+    wb = openpyxl.load_workbook(file_path, data_only=True)
+    out = []
+    for ws in wb.worksheets:
+        for r in ws.iter_rows(values_only=True):
+            cells = []
+            for v in r:
+                if v is None or v == "":
+                    continue
+                if isinstance(v, float) and v.is_integer():
+                    v = int(v)
+                cells.append(str(v))
+            if cells:
+                out.append(" | ".join(cells))
+    return "\n".join(out)
+
+
+def read_document_text(file_path):
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext in (".txt", ".csv"):
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            return f.read()
+    if ext in (".xlsx", ".xlsm"):
+        return excel_to_text(file_path)
+    return extract_text_from_pdf_or_image_offline(file_path)
+
+
+def guess_po_number(text):
+    m = PO_NUMBER_HINT_RE.search(text or "")
+    return m.group(1).rstrip(".-/") if m else ""
+
+
+def infer_po_pattern(sample_po):
+    """Học dạng số PO từ 1 ví dụ: chữ giữ nguyên (mã cố định của khách), số -> \\d{n}.
+    VD '03102026-01KDHT' -> '\\d{8}-\\d{1,2}KDHT'."""
+    sample_po = (sample_po or "").strip()
+    if not sample_po:
+        return ""
+    out = []
+    for tok in re.findall(r"\d+|[A-Za-z]+|\s+|.", sample_po):
+        if tok.isdigit():
+            out.append(r"\d{1,2}" if len(tok) <= 2 else r"\d{%d}" % len(tok))
+        elif tok.isspace():
+            out.append(r"\s*")
+        else:
+            out.append(re.escape(tok))
+    return r"(?<![A-Za-z0-9])" + "".join(out) + r"(?![A-Za-z0-9])"
+
+
+def find_po_date(text):
+    m = re.search(r"ng[àa]y\W{0,4}(\d{1,2})\s*th[áa]ng\s*(\d{1,2})\s*n[ăa]m\s*(\d{4})", text or "", re.I) or re.search(
+        r"(?<!\d)(\d{1,2})[/.-](\d{1,2})[/.-](20\d{2})(?!\d)", text or ""
+    )
+    return f"{int(m.group(1)):02d}/{int(m.group(2)):02d}/{m.group(3)}" if m else ""
+
+
+def merge_learned_docs(results):
+    """Gộp kết quả nhiều chứng từ: XML làm chuẩn cho thông tin khách, Excel PKL bổ sung định mức."""
+    profile = {}
+    order = sorted(results, key=lambda r: {"pxk": 0, "vat": 1}.get(r.get("kind"), 2))
+    for res in order:
+        for k, v in res.get("profile", {}).items():
+            if v and not profile.get(k):
+                profile[k] = v
+    items = []
+
+    def find(it):
+        ck = clean_str(it.get("name"))
+        for x in items:
+            if it.get("code") and x.get("code") == it["code"]:
+                return x
+            if ck and clean_str(x.get("name")) == ck:
+                return x
+        return None
+
+    for res in results:
+        for it in res.get("items", []):
+            hit = find(it)
+            if hit is None:
+                hit = {"code": "", "name": "", "unit": "", "price": 0, "div": 0, "kg": 0, "hs": ""}
+                items.append(hit)
+            for k in ("code", "name", "unit", "price", "div", "kg", "hs"):
+                if it.get(k) and not hit.get(k):
+                    hit[k] = it[k]
+    units = [x["unit"] for x in items if x.get("unit")]
+    if units and not profile.get("unit"):
+        profile["unit"] = max(set(units), key=units.count)
+    return {"profile": profile, "items": items, "sources": [r.get("source", "") for r in results]}
+
+
+def learn_customer_from_documents(paths):
+    """Phân tích danh sách file mẫu, trả về bản nháp {profile, items, sources, po_text, sample_po, errors}."""
+    results, errors, po_text = [], [], ""
+    for p in paths:
+        ext = os.path.splitext(p)[1].lower()
+        try:
+            if ext == ".xml":
+                results.append(learn_from_einvoice_xml(p))
+                continue
+            if ext in (".xlsx", ".xlsm"):
+                res = learn_from_invoice_excel(p)
+                if res["items"]:
+                    results.append(res)
+                    continue
+            txt = read_document_text(p)
+            if txt.strip():
+                po_text += ("\n" if po_text else "") + txt
+            else:
+                errors.append(f"{os.path.basename(p)}: không đọc được chữ (PDF ảnh cần Tesseract OCR)")
+        except Exception as e:
+            errors.append(f"{os.path.basename(p)}: {e}")
+    draft = merge_learned_docs(results)
+    draft["po_text"] = po_text
+    draft["sample_po"] = guess_po_number(po_text)
+    draft["errors"] = errors
+    return draft
+
+
+def customer_key_from_name(name, taken=()):
+    words = re.findall(r"[A-Z0-9]+", strip_accents_upper(name))
+    stop = {"CONG", "TY", "TNHH", "CO", "PHAN", "CP", "MTV", "VIET", "NAM", "VN", "VIETNAM", "CHI", "NHANH", "CN", "CO.", "LTD", "CORP"}
+    core = [w for w in words if w not in stop]
+    base = (core[0] if core else (words[0] if words else "khach")).lower()[:16]
+    key, n = base, 2
+    while key in taken:
+        key = f"{base}{n}"
+        n += 1
+    return key
+
+
+def build_custom_profile(key, fields):
+    prof = dict(CUSTOM_PROFILE_DEFAULTS)
+    prof.update({k: v for k, v in fields.items() if v not in (None, "")})
+    prof["key"] = key
+    prof["file"] = key
+    prof.setdefault("name", key.upper())
+    prof.setdefault("label", key.capitalize())
+    prof.setdefault("mst", "")
+    prof.setdefault("addr", "")
+    prof["addrKho"] = prof.get("addrKho") or prof["addr"]
+    prof["custom"] = True
+    return prof
+
+
+def parse_generic_po_text(text, profile, catalog_items, data_store=None, tare_val=0.0):
+    """Đọc PO của khách mới: số PO theo mẫu đã học, dòng hàng = dòng có mã/tên hàng đã học."""
+    pat = profile.get("po_pattern") or ""
+    po_no = ""
+    if pat:
+        try:
+            m = re.search(pat, text, re.I)
+            po_no = re.sub(r"\s+", "", m.group(0)) if m else ""
+        except re.error:
+            po_no = ""
+    po_no = po_no or guess_po_number(text)
+    po_date = find_po_date(text)
+
+    def locate(line):
+        for it in catalog_items:
+            code = str(it.get("code") or "")
+            if len(code) >= 4:
+                ix = line.find(code)
+                if ix >= 0:
+                    return it, ix + len(code)
+        flat = clean_str(line)
+        for it in sorted(catalog_items, key=lambda x: -len(clean_str(x.get("name")))):
+            ck = clean_str(it.get("name"))
+            if len(ck) >= 6 and ck in flat:
+                # vị trí ký tự cuối của tên trong dòng gốc
+                seen, end = 0, len(line)
+                target = flat.find(ck) + len(ck)
+                for i, ch in enumerate(line):
+                    if re.match(r"[a-z0-9]", clean_str(ch) or "#"):
+                        seen += 1
+                        if seen == target:
+                            end = i + 1
+                            break
+                return it, end
+        return None, 0
+
+    lines = []
+    for raw in (text or "").splitlines():
+        known, end = locate(raw)
+        if not known:
+            continue
+        nums = [parse_vn_number(x) for x in re.findall(r"\d[\d.,]*\d|\d", raw[end:])]
+        nums = [n for n in nums if n]
+        price = known.get("price") or 0
+        qty = 0
+        # tìm cặp SL x Đơn giá = Thành tiền trong các số sau tên hàng
+        for i, a in enumerate(nums):
+            for j, b in enumerate(nums):
+                if i == j:
+                    continue
+                if any(abs(a * b - c) < 1 for k, c in enumerate(nums) if k not in (i, j)):
+                    if price and b == price:
+                        qty = a
+                    elif price and a == price:
+                        qty = b
+                    elif not qty:
+                        qty, price = a, b
+            if qty:
+                break
+        if not qty:
+            others = [n for n in nums if n != price]
+            qty = others[0] if others else 0
+        if qty <= 0:
+            continue
+        mem = data_store.get_item_norm(known["name"]) if data_store else None
+        div = (mem or {}).get("div") or known.get("div") or 0
+        kg = (mem or {}).get("kg") or known.get("kg") or 0
+        kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
+        net = round(qty * kg, 2) if kg > 0 else 0.0
+        gross = round(net + tare_val, 2) if net > 0 else 0.0
+        lines.append({
+            "stt": len(lines) + 1,
+            "po": po_no,
+            "hs": (mem or {}).get("hs") or known.get("hs", ""),
+            "ma_sp": known.get("code", ""),
+            "ten_sp": known["name"],
+            "ten_hq": known.get("ten_hq") or known["name"],
+            "unit": known.get("unit") or profile.get("unit", "cái"),
+            "qty": qty,
+            "price": price,
+            "amount": round(qty * price),
+            "div": div,
+            "kg": kg,
+            "kien": kien,
+            "net": net,
+            "gross": gross,
+            "tare": tare_val,
+        })
+    return po_no, po_date, lines
+
+
+# ==============================================================================
 # 5. GIAO DIỆN CHÍNH DESKTOP APP (TKINTER / TTK) - GIỮ ĐẦY ĐỦ 100% TÍNH NĂNG
 # ==============================================================================
 class HongThienCustomsDesktopApp:
@@ -1845,6 +2339,16 @@ class HongThienCustomsDesktopApp:
             pady=3,
             command=self.import_erp_excel_file,
         ).pack(side="right", padx=4)
+        tk.Button(
+            store_bar,
+            text="🧠 Thêm Khách Mới Từ Chứng Từ Mẫu",
+            font=("Segoe UI", 9, "bold"),
+            bg="#FDF6B2",
+            fg="#723B13",
+            padx=10,
+            pady=3,
+            command=self.open_learn_customer_wizard,
+        ).pack(side="right", padx=4)
 
         self.nb = ttk.Notebook(self.root)
         self.nb.pack(fill="both", expand=True, padx=12, pady=4)
@@ -1879,18 +2383,9 @@ class HongThienCustomsDesktopApp:
         row1 = tk.Frame(top, bg="#FFFFFF")
         row1.pack(fill="x", pady=2)
         tk.Label(row1, text="Khách hàng:", font=("Segoe UI", 9, "bold"), bg="#FFFFFF").pack(side="left")
-        for c_key, c_lbl in [("shirai", "Shirai (Excel PO)"), ("kodi", "Kodi (PDF/Scan PO)"), ("tesa", "Tesa (PDF Trang chẵn 2,4,6...)")]:
-            tk.Radiobutton(
-                row1,
-                text=c_lbl,
-                variable=self.cur_customer,
-                value=c_key,
-                font=("Segoe UI", 9, "bold"),
-                bg="#FFFFFF",
-                command=lambda k=c_key: self.on_switch_customer(k),
-            ).pack(side="left", padx=6)
-
-        tk.Button(
+        self.cust_row = row1
+        self.cust_radios = {}
+        self.btn_scan_po = tk.Button(
             row1,
             text="📂 Quét File PO Offline (.PDF / .XLSX / .XLS / Ảnh)",
             font=("Segoe UI", 9, "bold"),
@@ -1899,7 +2394,12 @@ class HongThienCustomsDesktopApp:
             padx=10,
             pady=3,
             command=self.scan_po_file_offline,
-        ).pack(side="left", padx=6)
+        )
+        self.btn_scan_po.pack(side="left", padx=6)
+        for c_key, c_lbl in [("shirai", "Shirai (Excel PO)"), ("kodi", "Kodi (PDF/Scan PO)"), ("tesa", "Tesa (PDF Trang chẵn 2,4,6...)")]:
+            self.add_customer_radio(c_key, c_lbl)
+        for c_key, prof in self.store.custom_profiles.items():
+            self.add_customer_radio(c_key, prof.get("label") or c_key)
 
         tk.Button(
             row1,
@@ -2029,6 +2529,22 @@ class HongThienCustomsDesktopApp:
             pady=5,
             command=self.transfer_step1_to_step2,
         ).pack(side="right", padx=4)
+
+    def add_customer_radio(self, c_key, c_lbl):
+        if c_key in self.cust_radios:
+            self.cust_radios[c_key].config(text=c_lbl)
+            return
+        rb = tk.Radiobutton(
+            self.cust_row,
+            text=c_lbl,
+            variable=self.cur_customer,
+            value=c_key,
+            font=("Segoe UI", 9, "bold"),
+            bg="#FFFFFF",
+            command=lambda k=c_key: self.on_switch_customer(k),
+        )
+        rb.pack(side="left", padx=6, before=self.btn_scan_po)
+        self.cust_radios[c_key] = rb
 
     def build_tab_step2(self):
         wb_frame = tk.LabelFrame(
@@ -2225,7 +2741,10 @@ class HongThienCustomsDesktopApp:
         self.cur_xe.set(prof["xe"])
         self.cur_driver.set(prof["driver"])
         self.cur_ldd.set(prof["lenhSeq"])
-        self.cur_tare.set("0.0" if cust_key == "tesa" else ("0.02" if cust_key == "shirai" else "1.0"))
+        if cust_key in BUILTIN_CUSTOMERS:
+            self.cur_tare.set("0.0" if cust_key == "tesa" else ("0.02" if cust_key == "shirai" else "1.0"))
+        else:
+            self.cur_tare.set(str(prof.get("tare", 0.0)))
         self.load_sample_batch(cust_key)
 
     def load_tesa_batch_choice(self):
@@ -2328,6 +2847,12 @@ class HongThienCustomsDesktopApp:
             self.cur_ldd.set(rec.get("lddSeq", PROFILES[cust_key]["lenhSeq"]))
             self.cur_items = [dict(x) for x in rec.get("items", [])]
             self.refresh_step1_tree()
+        elif cust_key not in BUILTIN_CUSTOMERS:
+            # khách mới chưa có hồ sơ: để trống, chờ quét PO
+            for v in (self.cur_po, self.cur_po_date, self.cur_pxk, self.cur_hd, self.cur_tk):
+                v.set("")
+            self.cur_items = []
+            self.refresh_step1_tree()
 
     def refresh_step1_tree(self):
         self.tree_items.delete(*self.tree_items.get_children())
@@ -2376,6 +2901,9 @@ class HongThienCustomsDesktopApp:
             return
         ext = os.path.splitext(fpath)[1].lower()
         cust = self.cur_customer.get()
+        if cust not in BUILTIN_CUSTOMERS:
+            self.scan_custom_po_text(read_document_text(fpath))
+            return
         if ext in (".xlsx", ".xls"):
             po_no, schedules = parse_shirai_po_excel(fpath, self.store)
             if schedules:
@@ -2418,6 +2946,146 @@ class HongThienCustomsDesktopApp:
         else:
             messagebox.showwarning("Quét PO Offline", "File PDF là ảnh scan chưa có lớp chữ nhúng. Bạn có thể bấm 'Dán Văn Bản PO' hoặc thêm dòng trực tiếp.")
 
+    def open_learn_customer_wizard(self, paths=None):
+        """Trình thêm khách mới: nạp XML hóa đơn/PXK, Invoice Excel, PO mẫu -> xem lại -> Lưu."""
+        if paths is None:
+            paths = filedialog.askopenfilenames(
+                title="Chọn chứng từ mẫu của khách mới (chọn được nhiều file)",
+                filetypes=[
+                    ("Chứng từ mẫu", "*.xml *.xlsx *.xlsm *.pdf *.png *.jpg *.jpeg *.txt"),
+                    ("XML hóa đơn / PXK điện tử", "*.xml"),
+                    ("Invoice / PKL / PO Excel", "*.xlsx *.xlsm"),
+                    ("PO PDF / Ảnh", "*.pdf *.png *.jpg *.jpeg"),
+                ],
+            )
+            if not paths:
+                return None
+        draft = learn_customer_from_documents(list(paths))
+        prof = draft["profile"]
+        taken = set(PROFILES) | set(self.store.custom_profiles)
+        key = customer_key_from_name(prof.get("name", ""), taken)
+
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Thêm Khách Hàng Mới Từ Chứng Từ Mẫu (Học Offline - Bạn Xác Nhận Trước Khi Lưu)")
+        dlg.geometry("980x720")
+        tk.Label(
+            dlg,
+            text=f"Đã đọc {len(paths)} file: {', '.join(os.path.basename(p) for p in paths)}\n"
+                 "Kiểm tra và sửa các ô bên dưới. Chưa có gì được lưu cho đến khi bấm 'Lưu Khách Hàng Mới'.",
+            font=("Segoe UI", 9, "bold"), fg="#1B365D", justify="left", wraplength=940,
+        ).pack(anchor="w", padx=12, pady=(10, 4))
+        if draft["errors"]:
+            tk.Label(dlg, text="⚠ " + "\n⚠ ".join(draft["errors"]), font=("Segoe UI", 8), fg="#C81E1E", justify="left").pack(anchor="w", padx=12)
+
+        form = tk.Frame(dlg)
+        form.pack(fill="x", padx=12, pady=4)
+        fields = [
+            ("key", "Mã khách (không dấu):", key), ("label", "Tên ngắn hiển thị:", key.capitalize()),
+            ("name", "Tên công ty khách:", prof.get("name", "")), ("mst", "Mã số thuế:", prof.get("mst", "")),
+            ("addr", "Địa chỉ:", prof.get("addr", "")), ("addrKho", "Địa chỉ kho nhận:", prof.get("addrKho", "")),
+            ("emails", "Email nhận hóa đơn:", prof.get("emails", "")), ("unit", "Đơn vị tính mặc định:", prof.get("unit", "cái")),
+            ("driver", "Lái xe:", prof.get("driver", "")), ("xe", "Biển xe:", prof.get("xe", "")),
+            ("symbol", "Ký hiệu PXK:", prof.get("symbol", "6C26NAA")), ("veViec", "Về việc (PXK):", "xuất kho bán hàng cho"),
+            ("tare", "Bì / kiện (kg):", "0.0"), ("sample_po", "Số PO trong file mẫu:", draft.get("sample_po", "")),
+            ("po_pattern", "Mẫu nhận dạng số PO:", infer_po_pattern(draft.get("sample_po", ""))),
+        ]
+        vars_map = {}
+        for i, (k, lbl, val) in enumerate(fields):
+            r, c = divmod(i, 2)
+            tk.Label(form, text=lbl, font=("Segoe UI", 9, "bold")).grid(row=r, column=c * 2, sticky="w", padx=4, pady=3)
+            v = tk.StringVar(value=str(val or ""))
+            vars_map[k] = v
+            tk.Entry(form, textvariable=v, width=44, font=("Segoe UI", 9)).grid(row=r, column=c * 2 + 1, sticky="w", padx=4, pady=3)
+        vars_map["sample_po"].trace_add("write", lambda *_: vars_map["po_pattern"].set(infer_po_pattern(vars_map["sample_po"].get())))
+
+        tk.Label(dlg, text=f"Mã hàng / định mức học được ({len(draft['items'])} dòng) - chọn dòng sai rồi bấm Xóa:", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=12, pady=(6, 2))
+        cols = ("code", "name", "unit", "price", "div", "kg", "hs")
+        tree = ttk.Treeview(dlg, columns=cols, show="headings", height=9)
+        for c, h, w in zip(cols, ("Mã hàng", "Tên hàng", "ĐVT", "Đơn giá", "SL/kiện", "kg/chiếc", "Mã HS"), (120, 380, 60, 90, 70, 80, 90)):
+            tree.heading(c, text=h)
+            tree.column(c, width=w, anchor="w" if c == "name" else "center")
+        tree.pack(fill="both", expand=True, padx=12)
+
+        def refresh_tree():
+            tree.delete(*tree.get_children())
+            for idx, it in enumerate(draft["items"]):
+                tree.insert("", "end", iid=str(idx), values=tuple(it.get(c, "") for c in cols))
+
+        def delete_rows():
+            for iid in sorted((int(x) for x in tree.selection()), reverse=True):
+                draft["items"].pop(iid)
+            refresh_tree()
+
+        lbl_test = tk.Label(dlg, text="", font=("Segoe UI", 9), fg="#03543F")
+
+        def collect():
+            out = {k: v.get().strip() for k, v in vars_map.items() if k not in ("key", "sample_po")}
+            try:
+                out["tare"] = float(out.get("tare") or 0.0)
+            except ValueError:
+                out["tare"] = 0.0
+            return out
+
+        def try_po():
+            if not draft["po_text"]:
+                lbl_test.config(text="Chưa nạp PO mẫu (PDF/Excel/ảnh/txt) nên chưa thử đọc được.")
+                return None
+            prof_try = build_custom_profile("tmp", collect())
+            po_no, _, lines = parse_generic_po_text(draft["po_text"], prof_try, draft["items"])
+            lbl_test.config(text=f"Thử đọc PO mẫu: số PO = {po_no or '(không thấy)'}, {len(lines)} dòng hàng khớp.")
+            return po_no, lines
+
+        def save():
+            try:
+                saved = self.store.save_learned_customer(vars_map["key"].get(), collect(), draft["items"])
+            except ValueError as e:
+                messagebox.showwarning("Thêm khách hàng mới", str(e))
+                return None
+            self.add_customer_radio(saved, PROFILES[saved]["label"])
+            self.cur_customer.set(saved)
+            self.on_switch_customer(saved)
+            dlg.destroy()
+            messagebox.showinfo(
+                "Thêm khách hàng mới",
+                f"Đã lưu khách '{PROFILES[saved]['label']}' với {len(self.store.custom_items.get(saved, []))} mã hàng.\n"
+                "Chọn khách này ở Bước 1 rồi quét PO như bình thường.",
+            )
+            return saved
+
+        btns = tk.Frame(dlg)
+        btns.pack(fill="x", padx=12, pady=8)
+        tk.Button(btns, text="🗑 Xóa dòng đã chọn", command=delete_rows).pack(side="left")
+        tk.Button(btns, text="🔍 Thử đọc PO mẫu", command=try_po).pack(side="left", padx=6)
+        lbl_test.pack(in_=btns, side="left", padx=6)
+        tk.Button(btns, text="💾 Lưu Khách Hàng Mới", bg="#1B365D", fg="#FFFFFF", font=("Segoe UI", 9, "bold"), padx=14, pady=4, command=save).pack(side="right")
+        refresh_tree()
+        self.learn_wizard = {"dlg": dlg, "vars": vars_map, "draft": draft, "tree": tree, "save": save, "try_po": try_po, "delete_rows": delete_rows}
+        return self.learn_wizard
+
+    def scan_custom_po_text(self, text):
+        """Đọc PO của khách hàng đã học bằng mẫu số PO + danh mục mã/tên hàng đã học."""
+        cust = self.cur_customer.get()
+        prof = PROFILES[cust]
+        try:
+            tare_v = float(self.cur_tare.get() or 0.0)
+        except Exception:
+            tare_v = 0.0
+        po_no, po_date, lines = parse_generic_po_text(text, prof, self.store.items_for_customer(cust), data_store=self.store, tare_val=tare_v)
+        if not lines:
+            messagebox.showwarning(
+                f"Quét PO {prof['label']}",
+                "Không tìm thấy dòng hàng nào khớp mã/tên hàng đã học. Hãy thêm dòng trực tiếp, hoặc nạp thêm chứng từ mẫu cho khách này.",
+            )
+            return False
+        if po_no:
+            self.cur_po.set(po_no)
+        if po_date:
+            self.cur_po_date.set(po_date)
+        self.cur_items = lines
+        self.refresh_step1_tree()
+        messagebox.showinfo(f"Quét PO {prof['label']}", f"Đã đọc PO {po_no or '(chưa rõ số)'} gồm {len(lines)} dòng hàng. Vui lòng kiểm tra lại trước khi xuất.")
+        return True
+
     def paste_po_text_dialog(self):
         dlg = tk.Toplevel(self.root)
         dlg.title("Dán Văn Bản PO Để Phân Tích Offline Trên Máy")
@@ -2429,6 +3097,10 @@ class HongThienCustomsDesktopApp:
 
         def do_parse():
             content = txt_box.get("1.0", "end")
+            if self.cur_customer.get() not in BUILTIN_CUSTOMERS:
+                if self.scan_custom_po_text(content):
+                    dlg.destroy()
+                return
             if "8600" in content:
                 self.cur_customer.set("tesa")
                 po_no, lines = parse_tesa_po_text(content, self.store.tesa_items, data_store=self.store)
@@ -2497,7 +3169,8 @@ class HongThienCustomsDesktopApp:
             if k == "ma_sp":
                 def on_code_change(*_):
                     c_val = vars_map["ma_sp"].get().strip()
-                    hit = next((x for x in self.store.tesa_items if x["code"] == c_val), None)
+                    pool = self.store.tesa_items + self.store.custom_items.get(self.cur_customer.get(), [])
+                    hit = next((x for x in pool if c_val and x.get("code") == c_val), None)
                     if hit:
                         vars_map["ten_sp"].set(hit["name"])
                         vars_map["hs"].set(hit.get("hs", "48229090"))
