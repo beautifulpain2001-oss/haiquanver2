@@ -3649,14 +3649,14 @@ def run_ocr_self_test():
         po, po_date, lines = parse_kodi_po_text(txt, store.kodi_items, store)
         assert po == "03102026-01KDHT", f"Kodi: sai số PO {po!r}\n{txt}"
         assert po_date == "03/10/2026", f"Kodi: sai ngày {po_date!r}"
-        assert [(x["qty"], x["amount"]) for x in lines] == [(1000, 31_500_000), (500, 44_850_000)], f"Kodi: sai dòng hàng {lines}"
+        assert [(x["qty"], x["amount"]) for x in lines] == [(1000, 31_500_000), (500, 44_850_000)], f"Kodi: sai dòng hàng {lines}\n{txt}"
 
         tesa_pdf = os.path.join(tmp, "tesa_scan.pdf")
         make_scanned_pdf(tesa_pdf, ["GENERAL TERMS AND CONDITIONS OF PURCHASE", OCR_SAMPLE_TESA])
         txt = extract_text_from_pdf_or_image_offline(tesa_pdf, is_tesa=True)
         first_po, lines = parse_tesa_po_text(txt, store.tesa_items, store)
         assert first_po == "8600226354", f"Tesa: sai số PO {first_po!r}\n{txt}"
-        assert [(x["ma_sp"], x["qty"]) for x in lines] == [("39778-90019-00", 136000)], f"Tesa: sai dòng hàng {lines}"
+        assert [(x["ma_sp"], x["qty"]) for x in lines] == [("39778-90019-00", 136000)], f"Tesa: sai dòng hàng {lines}\n{txt}"
     print("OCR PDF scan OK: Kodi + Tesa")
 
 

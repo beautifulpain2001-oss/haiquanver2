@@ -28,7 +28,7 @@ EXE = os.path.join(DIST, NAME + (".exe" if os.name == "nt" else ""))
 ZIP = os.path.join(DIST, NAME + "_Windows.zip")
 GUIDE = os.path.join(ROOT, "HUONG_DAN_BAN_EXE.md")
 OCR_DIR = os.path.join(DIST, "Tesseract-OCR")
-OCR_LANGS = ("eng", "vie", "osd")
+OCR_LANGS = ("eng", "vie")  # osd (xoay trang tự động) không dùng tới
 
 
 def build():
@@ -69,7 +69,7 @@ def find_tesseract_dir():
 
 
 def bundle_ocr():
-    """Chép bản gọn của Tesseract (tesseract.exe + DLL + dữ liệu eng/vie/osd) ra dist/Tesseract-OCR."""
+    """Chép bản gọn của Tesseract (tesseract.exe + DLL + dữ liệu eng/vie) ra dist/Tesseract-OCR."""
     src = find_tesseract_dir()
     if not os.path.isfile(os.path.join(src, "tessdata", "vie.traineddata")):
         sys.exit(f"Thiếu {os.path.join(src, 'tessdata', 'vie.traineddata')} (dữ liệu OCR tiếng Việt)")
@@ -87,6 +87,9 @@ def bundle_ocr():
             shutil.copy2(path, os.path.join(OCR_DIR, "tessdata"))
     size = sum(os.path.getsize(os.path.join(r, f)) for r, _, fs in os.walk(OCR_DIR) for f in fs)
     print(f"Đã chép bộ OCR từ {src} -> {OCR_DIR} ({size / 1e6:.1f} MB)")
+    for r, _, fs in os.walk(OCR_DIR):
+        for f in fs:
+            print(f"   {os.path.getsize(os.path.join(r, f)) / 1e6:7.2f} MB  {os.path.relpath(os.path.join(r, f), OCR_DIR)}")
 
 
 def self_test(with_ocr=True):
