@@ -21,16 +21,22 @@ PHẦN MỀM HỒ SƠ HẢI QUAN HỒNG THIÊN - BẢN .EXE (KHÔNG CẦN CÀI P
      Bấm "More info" -> "Run anyway". Nếu phần mềm diệt virus xóa file,
      hãy thêm thư mục phần mềm vào danh sách ngoại lệ.
 
-4. ĐỌC PDF SCAN / ẢNH (OCR) - KHÔNG BẮT BUỘC
-   - PDF có chữ (xuất từ phần mềm) đọc được ngay, không cần cài gì thêm.
-   - PDF scan và file ảnh cần OCR Tesseract, chương trình này KHÔNG có sẵn
-     trong file .exe (quá lớn). Nếu cần, cài Tesseract cho Windows
-     (bản UB Mannheim, chọn thêm ngôn ngữ Vietnamese) vào vị trí mặc định
-     C:\Program Files\Tesseract-OCR\ - phần mềm sẽ tự nhận ra.
-   - Không cài Tesseract thì mọi chức năng khác vẫn hoạt động bình thường.
+4. ĐỌC PDF SCAN / ẢNH (OCR) - CÓ SẴN, KHÔNG CẦN CÀI GÌ
+   - PDF có chữ (xuất từ phần mềm) đọc trực tiếp lớp chữ như trước.
+   - PDF scan (PO dạng ảnh) và file ảnh .png/.jpg được đọc bằng bộ OCR
+     Tesseract (tiếng Việt + tiếng Anh) nằm trong thư mục Tesseract-OCR
+     đi kèm file zip. Chạy 100% offline trên máy, không gửi file đi đâu.
+   - Giữ thư mục Tesseract-OCR NẰM CẠNH file HongThien_HaiQuan_Desktop.exe.
+     Nếu chỉ chép riêng file .exe sang máy khác thì nhớ chép cả thư mục này,
+     nếu không phần mềm vẫn chạy nhưng không đọc được PDF scan.
+   - Mỗi trang scan mất khoảng 1-3 giây. Bản scan càng thẳng, rõ (từ 200 dpi)
+     thì càng ít lỗi; luôn soát lại số PO, số lượng trước khi xuất chứng từ.
+   - Tesseract là phần mềm mã nguồn mở (giấy phép Apache 2.0).
 
 5. KIỂM TRA NHANH (không bắt buộc)
    - Mở Command Prompt tại thư mục phần mềm, gõ:
        HongThien_HaiQuan_Desktop.exe --self-test
      Nếu chạy đúng, 3 file Test_Full_*.xlsx sẽ xuất hiện trong
      DATA_LUU_TRU_HONG_THIEN\01_WORKING_LAM_CHUNG_TU\
+   - Kiểm tra bộ OCR: HongThien_HaiQuan_Desktop.exe --ocr-self-test
+     (không báo lỗi và không sinh file SELF_TEST_LOI.txt là OCR hoạt động).
