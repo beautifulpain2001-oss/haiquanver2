@@ -1,0 +1,3883 @@
+{
+ "DNTT": {
+  "cells": {
+   "A1": {
+    "b": true,
+    "fmt": "General",
+    "v": "CỘNG HOÀ XÃ HỘI CHỦ NGHĨA VIỆT NAM"
+   },
+   "A10": {
+    "b": false,
+    "fmt": "General",
+    "v": "Trước hết CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN chúng tôi xin cảm ơn công ty đã đồng hành cùng Công ty chúng tôi trong suốt thời gian qua."
+   },
+   "A12": {
+    "b": false,
+    "fmt": "General",
+    "v": "Tháng 10/2026 Công ty chúng tôi có giao lô hàng cùng hóa đơn đã đến hạn thanh toán  của  Quý  công ty theo nội dung:"
+   },
+   "A14": {
+    "b": true,
+    "fmt": "General",
+    "v": "Ngày"
+   },
+   "A16": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "A18": {
+    "b": true,
+    "fmt": "General",
+    "v": "Cộng phát sinh "
+   },
+   "A20": {
+    "b": false,
+    "fmt": "General",
+    "v": "Tổng số tiền phải thanh toán:   "
+   },
+   "A22": {
+    "b": false,
+    "fmt": "General",
+    "v": "Số tiền bằng chữ:"
+   },
+   "A24": {
+    "b": false,
+    "fmt": "General",
+    "v": "Vậy đề nghị Quý Công ty xác nhận và  thanh toán cho công ty chúng tôi số nợ trên. Xin trân trọng cảm ơn và  rất mong nhận được sự hợp tác từ Qúy công ty nhiều  hơn nữa."
+   },
+   "A26": {
+    "b": false,
+    "fmt": "General",
+    "v": "Quý Công ty thanh toán cho  chúng tôi  theo thông tin:"
+   },
+   "A28": {
+    "b": false,
+    "fmt": "General",
+    "v": "Tên tài khoản: CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN"
+   },
+   "A30": {
+    "b": false,
+    "fmt": "General",
+    "v": "Vào tài khoản số:  0301101186008  Tại Ngân hàng MB Bank - CN Bắc Ninh"
+   },
+   "A32": {
+    "b": false,
+    "fmt": "General",
+    "v": "hoặc Tài khoản :   115623456668  Ngân hàng TMCP Công Thương Việt Nam"
+   },
+   "A34": {
+    "b": true,
+    "fmt": "General",
+    "v": "Trân Trọng cảm ơn !"
+   },
+   "A6": {
+    "b": true,
+    "fmt": "General",
+    "v": "GIẤY ĐỀ NGHỊ THANH TOÁN"
+   },
+   "A7": {
+    "b": true,
+    "fmt": "General",
+    "v": "Kính gửi: CÔNG TY TNHH TESA SITE HẢI PHÒNG"
+   },
+   "B3": {
+    "b": true,
+    "fmt": "General",
+    "v": "Độc Lập - Tự do - Hạnh phúc"
+   },
+   "C22": {
+    "b": false,
+    "fmt": "General",
+    "v": "Hai trăm sáu mươi tám triệu bốn trăm sáu mươi tám nghìn năm trăm đồng"
+   },
+   "D14": {
+    "b": true,
+    "fmt": "General",
+    "v": "Số hóa đơn"
+   },
+   "D16": {
+    "b": false,
+    "fmt": "General",
+    "v": "0000412"
+   },
+   "E20": {
+    "b": false,
+    "fmt": "General",
+    "v": "268,468,500  VNĐ"
+   },
+   "E5": {
+    "b": false,
+    "fmt": "General",
+    "v": "Bắc Ninh, ngày 30 tháng 10 năm 2026"
+   },
+   "F14": {
+    "b": true,
+    "fmt": "General",
+    "v": "Giá trị HĐ"
+   },
+   "F16": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 268468500
+   },
+   "F18": {
+    "b": true,
+    "fmt": "#,##0",
+    "v": 268468500
+   },
+   "G36": {
+    "b": true,
+    "fmt": "General",
+    "v": "CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN"
+   },
+   "H14": {
+    "b": true,
+    "fmt": "General",
+    "v": "Đã TT"
+   },
+   "K14": {
+    "b": true,
+    "fmt": "General",
+    "v": "Còn lại TT"
+   },
+   "K16": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 268468500
+   },
+   "K18": {
+    "b": true,
+    "fmt": "#,##0",
+    "v": 268468500
+   }
+  },
+  "merged": [
+   "A10:K11",
+   "A12:L12",
+   "A14:C14",
+   "A16:C16",
+   "A18:E18",
+   "A1:L2",
+   "A20:D20",
+   "A22:B22",
+   "A24:L25",
+   "A26:K26",
+   "A28:K28",
+   "A30:K30",
+   "A32:K32",
+   "A34:K34",
+   "A6:L6",
+   "A7:L7",
+   "B3:L3",
+   "C22:L22",
+   "D14:E14",
+   "D16:E16",
+   "E20:I20",
+   "E5:L5",
+   "F14:G14",
+   "F16:G16",
+   "F18:G18",
+   "G36:L36",
+   "H14:J14",
+   "H16:J16",
+   "H18:J18"
+  ],
+  "widths": {
+   "A": 1.75,
+   "B": 12.62,
+   "C": 1.25,
+   "D": 6.0,
+   "E": 12.0,
+   "F": 10.25,
+   "G": 9.62,
+   "H": 1.75,
+   "I": 9.5,
+   "J": 6.12,
+   "K": 18.0,
+   "L": 1.25
+  }
+ },
+ "Invoice_30.10": {
+  "cells": {
+   "A1": {
+    "b": true,
+    "fmt": "General",
+    "v": "HÓA ĐƠN THƯƠNG MẠI - BẢNG KÊ CHI TIẾT"
+   },
+   "A10": {
+    "b": false,
+    "fmt": "General",
+    "v": "Từ:CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN\nĐến: CÔNG TY TNHH TESA SITE HẢI PHÒNG"
+   },
+   "A11": {
+    "b": false,
+    "fmt": "General",
+    "v": "Diễn giải:"
+   },
+   "A12": {
+    "b": true,
+    "fmt": "General",
+    "v": "STT"
+   },
+   "A13": {
+    "b": false,
+    "fmt": "General",
+    "v": "=ROW()-12"
+   },
+   "A14": {
+    "b": false,
+    "fmt": "General",
+    "v": "=ROW()-12"
+   },
+   "A15": {
+    "b": false,
+    "fmt": "General",
+    "v": "=ROW()-12"
+   },
+   "A16": {
+    "b": false,
+    "fmt": "General",
+    "v": "=ROW()-12"
+   },
+   "A17": {
+    "b": false,
+    "fmt": "General",
+    "v": "=ROW()-12"
+   },
+   "A18": {
+    "b": false,
+    "fmt": "General",
+    "v": "=ROW()-12"
+   },
+   "A19": {
+    "b": false,
+    "fmt": "General",
+    "v": "=ROW()-12"
+   },
+   "A2": {
+    "b": false,
+    "fmt": "General",
+    "v": "Người Xuất khẩu: "
+   },
+   "A20": {
+    "b": false,
+    "fmt": "General",
+    "v": "=ROW()-12"
+   },
+   "A4": {
+    "b": true,
+    "fmt": "General",
+    "v": "CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN"
+   },
+   "A5": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô CN-15.1, KCN Thuận Thành II, Phường Mão Điền, Thành phố Bắc Ninh, Việt Nam."
+   },
+   "A6": {
+    "b": false,
+    "fmt": "General",
+    "v": "Người nhận hàng:"
+   },
+   "A7": {
+    "b": true,
+    "fmt": "General",
+    "v": "CÔNG TY TNHH TESA SITE HẢI PHÒNG"
+   },
+   "A8": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô đất CN2A, Khu công nghiệp và dịch vụ hàng hải (DEEP C2B), thuộc Khu kinh tế Đình Vũ – Cát Hải, Phường Đông Hải, TP Hải Phòng,Việt Nam"
+   },
+   "A9": {
+    "b": false,
+    "fmt": "General",
+    "v": "Phương tiện vận tải: Xe Ôtô"
+   },
+   "B12": {
+    "b": true,
+    "fmt": "General",
+    "v": "Tên Hàng"
+   },
+   "B13": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Black (39778-90019-00), có logo tesa, chữ tesa màu trắng, nền màu đỏ, có vạch đen trên lõi"
+   },
+   "B14": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Black (39778-90019-00), có logo tesa, chữ tesa màu trắng, nền màu đỏ, có vạch đen trên lõi"
+   },
+   "B15": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Black (39778-90019-00), có logo tesa, chữ tesa màu trắng, nền màu đỏ, có vạch đen trên lõi"
+   },
+   "B16": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_51036 (39777-90019-00), có logo tesa, chữ tesa màu trắng, số 51036 màu trắng, nền màu đỏ"
+   },
+   "B17": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 76.5 x 3 x 1390mm_Blue (39753-91390-00), có logo tesa, chữ tesa màu trắng, nền màu đỏ, có vạch xanh dương trên lõi"
+   },
+   "B18": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.02 x 2.65 x 1750mm_51036 blue red (39817-91750-00), có logo tesa, chữ tesa màu trắng, số 51036 màu trắng, nền màu đỏ, có vạch xanh dương trên lõi"
+   },
+   "B19": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.02 x 2.65 x 1750mm_51036 blue red (39817-91750-00), có logo tesa, chữ tesa màu trắng, số 51036 màu trắng, nền màu đỏ, có vạch xanh dương trên lõi"
+   },
+   "B20": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 1750mm_Black (39778-91750-00), có logo tesa, chữ tesa màu trắng, nền màu đỏ, có vạch đen trên lõi"
+   },
+   "B21": {
+    "b": true,
+    "fmt": "General",
+    "v": "Tổng cộng"
+   },
+   "B22": {
+    "b": true,
+    "fmt": "General",
+    "v": "Tổng:"
+   },
+   "B23": {
+    "b": true,
+    "fmt": "General",
+    "v": "Hàng được sản xuất tại Việt Nam, mới 100 %"
+   },
+   "C12": {
+    "b": true,
+    "fmt": "General",
+    "v": "PO"
+   },
+   "C13": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226354"
+   },
+   "C14": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226355"
+   },
+   "C15": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226356"
+   },
+   "C16": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226364"
+   },
+   "C17": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226365"
+   },
+   "C18": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226379"
+   },
+   "C19": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226380"
+   },
+   "C20": {
+    "b": false,
+    "fmt": "General",
+    "v": "nợ po"
+   },
+   "D12": {
+    "b": true,
+    "fmt": "General",
+    "v": "ĐVT"
+   },
+   "D13": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "D14": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "D15": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "D16": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "D17": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "D18": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "D19": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "D20": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "D22": {
+    "b": true,
+    "fmt": "General",
+    "v": "=I21"
+   },
+   "D24": {
+    "b": true,
+    "fmt": "General",
+    "v": "CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN"
+   },
+   "E12": {
+    "b": true,
+    "fmt": "General",
+    "v": "Số \nLượng"
+   },
+   "E13": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 136000
+   },
+   "E14": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 136000
+   },
+   "E15": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 136000
+   },
+   "E16": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 136000
+   },
+   "E17": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 2000
+   },
+   "E18": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 1200
+   },
+   "E19": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 1200
+   },
+   "E2": {
+    "b": false,
+    "fmt": "General",
+    "v": "PXKKVCNB :00000287"
+   },
+   "E20": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 100
+   },
+   "E21": {
+    "b": true,
+    "fmt": "#,##0",
+    "v": "=SUBTOTAL(9,E13:E20)"
+   },
+   "E22": {
+    "b": true,
+    "fmt": "General",
+    "v": "kiện"
+   },
+   "E4": {
+    "b": false,
+    "fmt": "General",
+    "v": "Phương thức thanh toán: "
+   },
+   "E5": {
+    "b": false,
+    "fmt": "General",
+    "v": "Chuyển khoản"
+   },
+   "E6": {
+    "b": false,
+    "fmt": "General",
+    "v": "Người nhập khẩu"
+   },
+   "E7": {
+    "b": true,
+    "fmt": "General",
+    "v": "=A7"
+   },
+   "E8": {
+    "b": false,
+    "fmt": "General",
+    "v": "=A8"
+   },
+   "E9": {
+    "b": false,
+    "fmt": "General",
+    "v": "Phương thức giao hàng: DAP"
+   },
+   "F12": {
+    "b": true,
+    "fmt": "General",
+    "v": "Trọng lượng(kg)"
+   },
+   "F13": {
+    "b": false,
+    "fmt": "0.000",
+    "v": 0.005
+   },
+   "F14": {
+    "b": false,
+    "fmt": "0.000",
+    "v": 0.005
+   },
+   "F15": {
+    "b": false,
+    "fmt": "0.000",
+    "v": 0.005
+   },
+   "F16": {
+    "b": false,
+    "fmt": "0.000",
+    "v": 0.005
+   },
+   "F17": {
+    "b": false,
+    "fmt": "0.000",
+    "v": 0.858
+   },
+   "F18": {
+    "b": false,
+    "fmt": "0.000",
+    "v": 0.427
+   },
+   "F19": {
+    "b": false,
+    "fmt": "0.000",
+    "v": 0.427
+   },
+   "F20": {
+    "b": false,
+    "fmt": "0.000",
+    "v": 0.437
+   },
+   "G12": {
+    "b": true,
+    "fmt": "General",
+    "v": "Trọng lượng\n cả bì(kg)"
+   },
+   "G13": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": 681
+   },
+   "G14": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": 681
+   },
+   "G15": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": 681
+   },
+   "G16": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": 681
+   },
+   "G17": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": 1718
+   },
+   "G18": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": 513.4
+   },
+   "G19": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": 513.4
+   },
+   "G20": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": 44.7
+   },
+   "G21": {
+    "b": true,
+    "fmt": "#,##0.00",
+    "v": "=SUBTOTAL(9,G13:G20)"
+   },
+   "H12": {
+    "b": true,
+    "fmt": "General",
+    "v": "Trọng lượng\n tịnh(kg)"
+   },
+   "H13": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": "=ROUND(E13*F13,2)"
+   },
+   "H14": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": "=ROUND(E14*F14,2)"
+   },
+   "H15": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": "=ROUND(E15*F15,2)"
+   },
+   "H16": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": "=ROUND(E16*F16,2)"
+   },
+   "H17": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": "=ROUND(E17*F17,2)"
+   },
+   "H18": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": "=ROUND(E18*F18,2)"
+   },
+   "H19": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": "=ROUND(E19*F19,2)"
+   },
+   "H20": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": "=ROUND(E20*F20,2)"
+   },
+   "H21": {
+    "b": true,
+    "fmt": "#,##0.00",
+    "v": "=SUBTOTAL(9,H13:H20)"
+   },
+   "I12": {
+    "b": true,
+    "fmt": "General",
+    "v": "Số kiện"
+   },
+   "I13": {
+    "b": false,
+    "fmt": "0.00",
+    "v": 4
+   },
+   "I14": {
+    "b": false,
+    "fmt": "0.00",
+    "v": 4
+   },
+   "I15": {
+    "b": false,
+    "fmt": "0.00",
+    "v": 4
+   },
+   "I16": {
+    "b": false,
+    "fmt": "0.00",
+    "v": 4
+   },
+   "I17": {
+    "b": false,
+    "fmt": "0.00",
+    "v": 8
+   },
+   "I18": {
+    "b": false,
+    "fmt": "0.00",
+    "v": 1
+   },
+   "I19": {
+    "b": false,
+    "fmt": "0.00",
+    "v": 1
+   },
+   "I2": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ngày:30/10/2026"
+   },
+   "I20": {
+    "b": false,
+    "fmt": "0.00",
+    "v": 1
+   },
+   "I21": {
+    "b": true,
+    "fmt": "0",
+    "v": "=SUBTOTAL(9,I13:I20)"
+   },
+   "J12": {
+    "b": true,
+    "fmt": "General",
+    "v": "Đơn Giá \nVND"
+   },
+   "J13": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 265
+   },
+   "J14": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 265
+   },
+   "J15": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 265
+   },
+   "J16": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 265
+   },
+   "J17": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 29998
+   },
+   "J18": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 25725
+   },
+   "J19": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 25725
+   },
+   "J20": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 25725
+   },
+   "K12": {
+    "b": true,
+    "fmt": "General",
+    "v": "Thành Tiền \nVND"
+   },
+   "K13": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": "=J13*E13"
+   },
+   "K14": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": "=J14*E14"
+   },
+   "K15": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": "=J15*E15"
+   },
+   "K16": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": "=J16*E16"
+   },
+   "K17": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": "=J17*E17"
+   },
+   "K18": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": "=J18*E18"
+   },
+   "K19": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": "=J19*E19"
+   },
+   "K20": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": "=J20*E20"
+   },
+   "K21": {
+    "b": true,
+    "fmt": "#,##0",
+    "v": "=SUBTOTAL(9,K13:K20)"
+   }
+  },
+  "merged": [
+   "A10:K10",
+   "A11:B11",
+   "A1:K1",
+   "A2:D2",
+   "A3:D3",
+   "A4:D4",
+   "A5:D5",
+   "A6:D6",
+   "A7:D7",
+   "A8:D8",
+   "A9:D9",
+   "D24:K25",
+   "E2:H2",
+   "E3:H3",
+   "E4:K4",
+   "E5:K5",
+   "E6:K6",
+   "E7:K7",
+   "E8:K8",
+   "E9:K9",
+   "I2:K2"
+  ],
+  "widths": {
+   "A": 6.57,
+   "B": 56.28,
+   "C": 17.14,
+   "D": 13.85,
+   "E": 16.57,
+   "F": 14.71,
+   "G": 17.28,
+   "H": 17.71,
+   "I": 11.14,
+   "J": 12.85,
+   "K": 23.42
+  }
+ },
+ "PLX_30.10": {
+  "cells": {
+   "A1": {
+    "b": true,
+    "fmt": "General",
+    "v": "  Phụ lục X"
+   },
+   "A11": {
+    "b": true,
+    "fmt": "General",
+    "v": "Tên sản phẩm"
+   },
+   "A12": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Black (39778-90019-00), có logo tesa, chữ tesa màu trắng, nền màu đỏ, có vạch đen trên lõi"
+   },
+   "A13": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Black (39778-90019-00), có logo tesa, chữ tesa màu trắng, nền màu đỏ, có vạch đen trên lõi"
+   },
+   "A14": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Black (39778-90019-00), có logo tesa, chữ tesa màu trắng, nền màu đỏ, có vạch đen trên lõi"
+   },
+   "A15": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_51036 (39777-90019-00), có logo tesa, chữ tesa màu trắng, số 51036 màu trắng, nền màu đỏ"
+   },
+   "A16": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 76.5 x 3 x 1390mm_Blue (39753-91390-00), có logo tesa, chữ tesa màu trắng, nền màu đỏ, có vạch xanh dương trên lõi"
+   },
+   "A17": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.02 x 2.65 x 1750mm_51036 blue red (39817-91750-00), có logo tesa, chữ tesa màu trắng, số 51036 màu trắng, nền màu đỏ, có vạch xanh dương trên lõi"
+   },
+   "A18": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.02 x 2.65 x 1750mm_51036 blue red (39817-91750-00), có logo tesa, chữ tesa màu trắng, số 51036 màu trắng, nền màu đỏ, có vạch xanh dương trên lõi"
+   },
+   "A19": {
+    "b": true,
+    "fmt": "General",
+    "v": "Tổng cộng"
+   },
+   "A2": {
+    "b": true,
+    "fmt": "General",
+    "v": "BẢN KHAI BÁO XUẤT XỨ CỦA NHÀ SẢN XUẤT/NHÀ CUNG CẤP NGUYÊN LIỆU TRONG NƯỚC"
+   },
+   "A21": {
+    "b": false,
+    "fmt": "General",
+    "v": "      Khai tại văn bản này, được sản xuất tại nhà máy của Công ty chúng tôi tại (2) Lô CN-15.1, KCN Thuận Thành II, Phường Mão Điền, Thành phố Bắc Ninh, Việt Nam có xuất xứ Việt Nam và đáp ứng tiêu chí CTH theo Thông tư số 05 /2018/TT-BCT ngày 03 tháng 4 năm 2018;đáp ứng tiêu chí CTSH+RVC 35% theo AIFTA/TT15/2010/TT-BTC ngày 15/04/2010; EVFTA// 11/2020/TT-BCT ngày 15/06/2020; tiêu chí RVC 40% theo quy định tại Chương Quy tắc xuất xứ hàng hóa trong (4) hiệp định ACFTA điểm a khoản 1 điều 7 thông tư 12/2019/TT-BCT ngày 30/07/2019 của  bộ Công Thương."
+   },
+   "A22": {
+    "b": false,
+    "fmt": "General",
+    "v": "Công ty cam kết thông tin khai báo trên là đúng và chịu trách nhiệm trước pháp luật về thông tin đã khai"
+   },
+   "A3": {
+    "b": false,
+    "fmt": "General",
+    "v": "(ban hành kèm theo Thông tư số 05/2018/TT-BCT ngày 03 tháng 4 năm 2018  quy định về xuất xứ hàng hóa)"
+   },
+   "A4": {
+    "b": false,
+    "fmt": "General",
+    "v": "                                                   Số:     0000412 ngày 30/10/2026"
+   },
+   "A5": {
+    "b": false,
+    "fmt": "General",
+    "v": "Tên nhà sản xuất: CÔNG TY CỔ PHẦN GIẤY  BAO BÌ HỒNG THIÊN"
+   },
+   "A6": {
+    "b": false,
+    "fmt": "General",
+    "v": "Mã số Doanh nghiệp : 2300723980"
+   },
+   "A7": {
+    "b": false,
+    "fmt": "General",
+    "v": "Số lượng hàng hóa: "
+   },
+   "A8": {
+    "b": false,
+    "fmt": "General",
+    "v": "Trị giá hàng hóa (FOB):        "
+   },
+   "A9": {
+    "b": false,
+    "fmt": "General",
+    "v": "Hóa đơn giá trị gia tăng số:  0000412 ngày 30/10/2026 CÔNG TY CỔ PHẦN GIẤY  BAO BÌ HỒNG THIÊN xác nhận rằng nguyên liệu/hàng hóa (1) có tên sau:  "
+   },
+   "B11": {
+    "b": true,
+    "fmt": "General",
+    "v": "PO"
+   },
+   "B12": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226354"
+   },
+   "B13": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226355"
+   },
+   "B14": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226356"
+   },
+   "B15": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226364"
+   },
+   "B16": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226365"
+   },
+   "B17": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226379"
+   },
+   "B18": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226380"
+   },
+   "B19": {
+    "b": false,
+    "fmt": "General",
+    "v": "nợ po"
+   },
+   "B23": {
+    "b": false,
+    "fmt": "General",
+    "v": "   Bắc Ninh, ngày 30 tháng 10  năm 2026"
+   },
+   "B25": {
+    "b": false,
+    "fmt": "General",
+    "v": "Người đại diện theo pháp luật của thương nhân"
+   },
+   "B7": {
+    "b": true,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \\-??_);_(@_)",
+    "v": "=D19"
+   },
+   "B8": {
+    "b": true,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \\-??_);_(@_)",
+    "v": "=E19"
+   },
+   "C11": {
+    "b": true,
+    "fmt": "General",
+    "v": "Mã HS"
+   },
+   "C12": {
+    "b": false,
+    "fmt": "General",
+    "v": 48229090
+   },
+   "C13": {
+    "b": false,
+    "fmt": "General",
+    "v": 48229090
+   },
+   "C14": {
+    "b": false,
+    "fmt": "General",
+    "v": 48229090
+   },
+   "C15": {
+    "b": false,
+    "fmt": "General",
+    "v": 48229090
+   },
+   "C16": {
+    "b": false,
+    "fmt": "General",
+    "v": 48229090
+   },
+   "C17": {
+    "b": false,
+    "fmt": "General",
+    "v": 48229090
+   },
+   "C18": {
+    "b": false,
+    "fmt": "General",
+    "v": 48229090
+   },
+   "C19": {
+    "b": false,
+    "fmt": "General",
+    "v": 48229090
+   },
+   "C7": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "C8": {
+    "b": false,
+    "fmt": "General",
+    "v": "VNĐ"
+   },
+   "D11": {
+    "b": true,
+    "fmt": "General",
+    "v": "Số lượng (ống)"
+   },
+   "D12": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 136000
+   },
+   "D13": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 136000
+   },
+   "D14": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 136000
+   },
+   "D15": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 136000
+   },
+   "D16": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 2000
+   },
+   "D17": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 1200
+   },
+   "D18": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 1200
+   },
+   "D19": {
+    "b": true,
+    "fmt": "#,##0",
+    "v": "=SUM(D12:D18)"
+   },
+   "E11": {
+    "b": true,
+    "fmt": "General",
+    "v": "Trị giá hàng hóa (FOB)"
+   },
+   "E12": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \\-??_);_(@_)",
+    "v": 36040000
+   },
+   "E13": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \\-??_);_(@_)",
+    "v": 36040000
+   },
+   "E14": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \\-??_);_(@_)",
+    "v": 36040000
+   },
+   "E15": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \\-??_);_(@_)",
+    "v": 36040000
+   },
+   "E16": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \\-??_);_(@_)",
+    "v": 59996000
+   },
+   "E17": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \\-??_);_(@_)",
+    "v": 30870000
+   },
+   "E18": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \\-??_);_(@_)",
+    "v": 30870000
+   },
+   "E19": {
+    "b": true,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \\-??_);_(@_)",
+    "v": "=SUM(E12:E18)"
+   }
+  },
+  "merged": [
+   "A1:E1",
+   "A21:E21",
+   "A22:E22",
+   "A2:E2",
+   "A3:E3",
+   "A9:E9",
+   "B23:E23",
+   "B25:E25"
+  ],
+  "widths": {
+   "A": 64.0,
+   "B": 18.0,
+   "C": 13.0,
+   "D": 16.0,
+   "E": 20.0
+  }
+ },
+ "PXK_30.10": {
+  "cells": {
+   "A1": {
+    "b": false,
+    "fmt": "General",
+    "v": "File Import vào hệ thống Hóa đơn điện tử của Bkav (Bkav eHoadon), dùng để tạo Phiếu xuất kho kiêm VCNB trên hệ thống Bkav eHoadon.\nBkav Template File (BTF.eHD v1.00) - Xem Lưu ý và Hướng dẫn nhập thông tin ở bên dưới"
+   },
+   "A10": {
+    "b": false,
+    "fmt": "General",
+    "v": 8
+   },
+   "A2": {
+    "b": true,
+    "fmt": "General",
+    "v": "STT"
+   },
+   "A3": {
+    "b": false,
+    "fmt": "General",
+    "v": 1
+   },
+   "A4": {
+    "b": false,
+    "fmt": "General",
+    "v": 2
+   },
+   "A5": {
+    "b": false,
+    "fmt": "General",
+    "v": 3
+   },
+   "A6": {
+    "b": false,
+    "fmt": "General",
+    "v": 4
+   },
+   "A7": {
+    "b": false,
+    "fmt": "General",
+    "v": 5
+   },
+   "A8": {
+    "b": false,
+    "fmt": "General",
+    "v": 6
+   },
+   "A9": {
+    "b": false,
+    "fmt": "General",
+    "v": 7
+   },
+   "B10": {
+    "b": false,
+    "fmt": "General",
+    "v": "pxk"
+   },
+   "B2": {
+    "b": true,
+    "fmt": "General",
+    "v": "LoaiHoaDon"
+   },
+   "B3": {
+    "b": false,
+    "fmt": "General",
+    "v": "pxk"
+   },
+   "B4": {
+    "b": false,
+    "fmt": "General",
+    "v": "pxk"
+   },
+   "B5": {
+    "b": false,
+    "fmt": "General",
+    "v": "pxk"
+   },
+   "B6": {
+    "b": false,
+    "fmt": "General",
+    "v": "pxk"
+   },
+   "B7": {
+    "b": false,
+    "fmt": "General",
+    "v": "pxk"
+   },
+   "B8": {
+    "b": false,
+    "fmt": "General",
+    "v": "pxk"
+   },
+   "B9": {
+    "b": false,
+    "fmt": "General",
+    "v": "pxk"
+   },
+   "C10": {
+    "b": false,
+    "fmt": "General",
+    "v": "tesa30.10"
+   },
+   "C2": {
+    "b": true,
+    "fmt": "General",
+    "v": "IDChungTu/MaBill"
+   },
+   "C3": {
+    "b": false,
+    "fmt": "General",
+    "v": "tesa30.10"
+   },
+   "C4": {
+    "b": false,
+    "fmt": "General",
+    "v": "tesa30.10"
+   },
+   "C5": {
+    "b": false,
+    "fmt": "General",
+    "v": "tesa30.10"
+   },
+   "C6": {
+    "b": false,
+    "fmt": "General",
+    "v": "tesa30.10"
+   },
+   "C7": {
+    "b": false,
+    "fmt": "General",
+    "v": "tesa30.10"
+   },
+   "C8": {
+    "b": false,
+    "fmt": "General",
+    "v": "tesa30.10"
+   },
+   "C9": {
+    "b": false,
+    "fmt": "General",
+    "v": "tesa30.10"
+   },
+   "D10": {
+    "b": false,
+    "fmt": "General",
+    "v": "nợ po"
+   },
+   "D2": {
+    "b": true,
+    "fmt": "General",
+    "v": "UDD_PO"
+   },
+   "D3": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226354"
+   },
+   "D4": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226355"
+   },
+   "D5": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226356"
+   },
+   "D6": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226364"
+   },
+   "D7": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226365"
+   },
+   "D8": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226379"
+   },
+   "D9": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226380"
+   },
+   "E10": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 1750mm_Black (39778-91750-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550)"
+   },
+   "E2": {
+    "b": true,
+    "fmt": "General",
+    "v": "TenHangHoaDichVu"
+   },
+   "E3": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Black (39778-90019-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550)"
+   },
+   "E4": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Black (39778-90019-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550)"
+   },
+   "E5": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Black (39778-90019-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550)"
+   },
+   "E6": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_51036 (39777-90019-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550)"
+   },
+   "E7": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 76.5 x 3 x 1390mm_Blue (39753-91390-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550)"
+   },
+   "E8": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.02 x 2.65 x 1750mm_51036 blue red (39817-91750-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550)"
+   },
+   "E9": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.02 x 2.65 x 1750mm_51036 blue red (39817-91750-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550)"
+   },
+   "F10": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "F2": {
+    "b": true,
+    "fmt": "General",
+    "v": "DonViTinh/ChietKhau"
+   },
+   "F3": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "F4": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "F5": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "F6": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "F7": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "F8": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "F9": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "G10": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 100
+   },
+   "G2": {
+    "b": true,
+    "fmt": "General",
+    "v": "SoLuong"
+   },
+   "G3": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 136000
+   },
+   "G4": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 136000
+   },
+   "G5": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 136000
+   },
+   "G6": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 136000
+   },
+   "G7": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 2000
+   },
+   "G8": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 1200
+   },
+   "G9": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 1200
+   },
+   "H10": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": 25725
+   },
+   "H2": {
+    "b": true,
+    "fmt": "General",
+    "v": "DonGia"
+   },
+   "H3": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": 265
+   },
+   "H4": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": 265
+   },
+   "H5": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": 265
+   },
+   "H6": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": 265
+   },
+   "H7": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": 29998
+   },
+   "H8": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": 25725
+   },
+   "H9": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": 25725
+   },
+   "I10": {
+    "b": false,
+    "fmt": "@",
+    "v": 2572500
+   },
+   "I2": {
+    "b": true,
+    "fmt": "General",
+    "v": "ThanhTien"
+   },
+   "I3": {
+    "b": false,
+    "fmt": "@",
+    "v": 36040000
+   },
+   "I4": {
+    "b": false,
+    "fmt": "@",
+    "v": 36040000
+   },
+   "I5": {
+    "b": false,
+    "fmt": "@",
+    "v": 36040000
+   },
+   "I6": {
+    "b": false,
+    "fmt": "@",
+    "v": 36040000
+   },
+   "I7": {
+    "b": false,
+    "fmt": "@",
+    "v": 59996000
+   },
+   "I8": {
+    "b": false,
+    "fmt": "@",
+    "v": 30870000
+   },
+   "I9": {
+    "b": false,
+    "fmt": "@",
+    "v": 30870000
+   },
+   "J2": {
+    "b": true,
+    "fmt": "General",
+    "v": "MaTienTe"
+   },
+   "K2": {
+    "b": true,
+    "fmt": "General",
+    "v": "TyGia"
+   },
+   "L10": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "L2": {
+    "b": true,
+    "fmt": "General",
+    "v": "NgayXuatKho"
+   },
+   "L3": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "L4": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "L5": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "L6": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "L7": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "L8": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "L9": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "M10": {
+    "b": false,
+    "fmt": "General",
+    "v": "LĐĐ30102026-01"
+   },
+   "M2": {
+    "b": true,
+    "fmt": "General",
+    "v": "CanCuLenh"
+   },
+   "M3": {
+    "b": false,
+    "fmt": "General",
+    "v": "LĐĐ30102026-01"
+   },
+   "M4": {
+    "b": false,
+    "fmt": "General",
+    "v": "LĐĐ30102026-01"
+   },
+   "M5": {
+    "b": false,
+    "fmt": "General",
+    "v": "LĐĐ30102026-01"
+   },
+   "M6": {
+    "b": false,
+    "fmt": "General",
+    "v": "LĐĐ30102026-01"
+   },
+   "M7": {
+    "b": false,
+    "fmt": "General",
+    "v": "LĐĐ30102026-01"
+   },
+   "M8": {
+    "b": false,
+    "fmt": "General",
+    "v": "LĐĐ30102026-01"
+   },
+   "M9": {
+    "b": false,
+    "fmt": "General",
+    "v": "LĐĐ30102026-01"
+   },
+   "N10": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "N2": {
+    "b": true,
+    "fmt": "General",
+    "v": "Ngay"
+   },
+   "N3": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "N4": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "N5": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "N6": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "N7": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "N8": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "N9": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "O10": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN"
+   },
+   "O2": {
+    "b": true,
+    "fmt": "General",
+    "v": "Cua"
+   },
+   "O3": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN"
+   },
+   "O4": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN"
+   },
+   "O5": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN"
+   },
+   "O6": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN"
+   },
+   "O7": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN"
+   },
+   "O8": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN"
+   },
+   "O9": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN"
+   },
+   "P10": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY TNHH TESA SITE HẢI PHÒNG"
+   },
+   "P2": {
+    "b": true,
+    "fmt": "General",
+    "v": "VeViec"
+   },
+   "P3": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY TNHH TESA SITE HẢI PHÒNG"
+   },
+   "P4": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY TNHH TESA SITE HẢI PHÒNG"
+   },
+   "P5": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY TNHH TESA SITE HẢI PHÒNG"
+   },
+   "P6": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY TNHH TESA SITE HẢI PHÒNG"
+   },
+   "P7": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY TNHH TESA SITE HẢI PHÒNG"
+   },
+   "P8": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY TNHH TESA SITE HẢI PHÒNG"
+   },
+   "P9": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY TNHH TESA SITE HẢI PHÒNG"
+   },
+   "Q10": {
+    "b": false,
+    "fmt": "General",
+    "v": "Xuất chuyển kho"
+   },
+   "Q2": {
+    "b": true,
+    "fmt": "General",
+    "v": "LyDoXuatKho"
+   },
+   "Q3": {
+    "b": false,
+    "fmt": "General",
+    "v": "Xuất chuyển kho"
+   },
+   "Q4": {
+    "b": false,
+    "fmt": "General",
+    "v": "Xuất chuyển kho"
+   },
+   "Q5": {
+    "b": false,
+    "fmt": "General",
+    "v": "Xuất chuyển kho"
+   },
+   "Q6": {
+    "b": false,
+    "fmt": "General",
+    "v": "Xuất chuyển kho"
+   },
+   "Q7": {
+    "b": false,
+    "fmt": "General",
+    "v": "Xuất chuyển kho"
+   },
+   "Q8": {
+    "b": false,
+    "fmt": "General",
+    "v": "Xuất chuyển kho"
+   },
+   "Q9": {
+    "b": false,
+    "fmt": "General",
+    "v": "Xuất chuyển kho"
+   },
+   "R10": {
+    "b": false,
+    "fmt": "General",
+    "v": "Tô Anh Tiến"
+   },
+   "R2": {
+    "b": true,
+    "fmt": "General",
+    "v": "NguoiVanChuyen"
+   },
+   "R3": {
+    "b": false,
+    "fmt": "General",
+    "v": "Tô Anh Tiến"
+   },
+   "R4": {
+    "b": false,
+    "fmt": "General",
+    "v": "Tô Anh Tiến"
+   },
+   "R5": {
+    "b": false,
+    "fmt": "General",
+    "v": "Tô Anh Tiến"
+   },
+   "R6": {
+    "b": false,
+    "fmt": "General",
+    "v": "Tô Anh Tiến"
+   },
+   "R7": {
+    "b": false,
+    "fmt": "General",
+    "v": "Tô Anh Tiến"
+   },
+   "R8": {
+    "b": false,
+    "fmt": "General",
+    "v": "Tô Anh Tiến"
+   },
+   "R9": {
+    "b": false,
+    "fmt": "General",
+    "v": "Tô Anh Tiến"
+   },
+   "S10": {
+    "b": false,
+    "fmt": "General",
+    "v": "Hồng Thiên"
+   },
+   "S2": {
+    "b": true,
+    "fmt": "General",
+    "v": "DonViVanChuyen"
+   },
+   "S3": {
+    "b": false,
+    "fmt": "General",
+    "v": "Hồng Thiên"
+   },
+   "S4": {
+    "b": false,
+    "fmt": "General",
+    "v": "Hồng Thiên"
+   },
+   "S5": {
+    "b": false,
+    "fmt": "General",
+    "v": "Hồng Thiên"
+   },
+   "S6": {
+    "b": false,
+    "fmt": "General",
+    "v": "Hồng Thiên"
+   },
+   "S7": {
+    "b": false,
+    "fmt": "General",
+    "v": "Hồng Thiên"
+   },
+   "S8": {
+    "b": false,
+    "fmt": "General",
+    "v": "Hồng Thiên"
+   },
+   "S9": {
+    "b": false,
+    "fmt": "General",
+    "v": "Hồng Thiên"
+   },
+   "T2": {
+    "b": true,
+    "fmt": "General",
+    "v": "HopDongSo"
+   },
+   "U10": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ô tô tải:99C-052.64"
+   },
+   "U2": {
+    "b": true,
+    "fmt": "General",
+    "v": "PhuongTienVanChuyen"
+   },
+   "U3": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ô tô tải:99C-052.64"
+   },
+   "U4": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ô tô tải:99C-052.64"
+   },
+   "U5": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ô tô tải:99C-052.64"
+   },
+   "U6": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ô tô tải:99C-052.64"
+   },
+   "U7": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ô tô tải:99C-052.64"
+   },
+   "U8": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ô tô tải:99C-052.64"
+   },
+   "U9": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ô tô tải:99C-052.64"
+   },
+   "V10": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô CN-15.1, KCN Thuận Thành II, Phường Mão Điền, Thành phố Bắc Ninh, Việt Nam."
+   },
+   "V2": {
+    "b": true,
+    "fmt": "General",
+    "v": "XuatKhoTai"
+   },
+   "V3": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô CN-15.1, KCN Thuận Thành II, Phường Mão Điền, Thành phố Bắc Ninh, Việt Nam."
+   },
+   "V4": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô CN-15.1, KCN Thuận Thành II, Phường Mão Điền, Thành phố Bắc Ninh, Việt Nam."
+   },
+   "V5": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô CN-15.1, KCN Thuận Thành II, Phường Mão Điền, Thành phố Bắc Ninh, Việt Nam."
+   },
+   "V6": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô CN-15.1, KCN Thuận Thành II, Phường Mão Điền, Thành phố Bắc Ninh, Việt Nam."
+   },
+   "V7": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô CN-15.1, KCN Thuận Thành II, Phường Mão Điền, Thành phố Bắc Ninh, Việt Nam."
+   },
+   "V8": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô CN-15.1, KCN Thuận Thành II, Phường Mão Điền, Thành phố Bắc Ninh, Việt Nam."
+   },
+   "V9": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô CN-15.1, KCN Thuận Thành II, Phường Mão Điền, Thành phố Bắc Ninh, Việt Nam."
+   },
+   "W10": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô đất CN2A, Khu công nghiệp và dịch vụ hàng hải (DEEP C2B), thuộc Khu kinh tế Đình Vũ – Cát Hải, Phường Đông Hải, TP Hải Phòng,Việt Nam"
+   },
+   "W2": {
+    "b": true,
+    "fmt": "General",
+    "v": "NhapKhoTai"
+   },
+   "W3": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô đất CN2A, Khu công nghiệp và dịch vụ hàng hải (DEEP C2B), thuộc Khu kinh tế Đình Vũ – Cát Hải, Phường Đông Hải, TP Hải Phòng,Việt Nam"
+   },
+   "W4": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô đất CN2A, Khu công nghiệp và dịch vụ hàng hải (DEEP C2B), thuộc Khu kinh tế Đình Vũ – Cát Hải, Phường Đông Hải, TP Hải Phòng,Việt Nam"
+   },
+   "W5": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô đất CN2A, Khu công nghiệp và dịch vụ hàng hải (DEEP C2B), thuộc Khu kinh tế Đình Vũ – Cát Hải, Phường Đông Hải, TP Hải Phòng,Việt Nam"
+   },
+   "W6": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô đất CN2A, Khu công nghiệp và dịch vụ hàng hải (DEEP C2B), thuộc Khu kinh tế Đình Vũ – Cát Hải, Phường Đông Hải, TP Hải Phòng,Việt Nam"
+   },
+   "W7": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô đất CN2A, Khu công nghiệp và dịch vụ hàng hải (DEEP C2B), thuộc Khu kinh tế Đình Vũ – Cát Hải, Phường Đông Hải, TP Hải Phòng,Việt Nam"
+   },
+   "W8": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô đất CN2A, Khu công nghiệp và dịch vụ hàng hải (DEEP C2B), thuộc Khu kinh tế Đình Vũ – Cát Hải, Phường Đông Hải, TP Hải Phòng,Việt Nam"
+   },
+   "W9": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô đất CN2A, Khu công nghiệp và dịch vụ hàng hải (DEEP C2B), thuộc Khu kinh tế Đình Vũ – Cát Hải, Phường Đông Hải, TP Hải Phòng,Việt Nam"
+   },
+   "X2": {
+    "b": true,
+    "fmt": "General",
+    "v": "GhiChu"
+   }
+  },
+  "merged": [
+   "A1:O1"
+  ],
+  "widths": {
+   "A": 5.71,
+   "B": 17.0,
+   "C": 24.57,
+   "D": 19.71,
+   "E": 55.28,
+   "F": 11.71,
+   "G": 14.42,
+   "H": 21.0,
+   "I": 19.14,
+   "J": 19.14,
+   "K": 19.14,
+   "L": 19.0,
+   "M": 21.57,
+   "N": 14.85,
+   "O": 66.57,
+   "P": 24.28,
+   "Q": 16.0,
+   "R": 19.0,
+   "S": 18.85,
+   "T": 15.0,
+   "U": 22.71,
+   "V": 15.14,
+   "W": 62.14,
+   "X": 14.42
+  }
+ },
+ "ToKhai_B11_30.10": {
+  "cells": {
+   "A1": {
+    "b": true,
+    "fmt": "General",
+    "v": "1. THÔNG TIN CHUNG TỜ KHAI (nhập vào VNACCS)"
+   },
+   "A10": {
+    "b": false,
+    "fmt": "General",
+    "v": "Người nhập khẩu: mã"
+   },
+   "A11": {
+    "b": false,
+    "fmt": "General",
+    "v": "Người nhập khẩu: tên"
+   },
+   "A12": {
+    "b": false,
+    "fmt": "General",
+    "v": "Người nhập khẩu: địa chỉ"
+   },
+   "A13": {
+    "b": false,
+    "fmt": "General",
+    "v": "Mã nước"
+   },
+   "A14": {
+    "b": false,
+    "fmt": "General",
+    "v": "Số vận đơn"
+   },
+   "A15": {
+    "b": false,
+    "fmt": "General",
+    "v": "Số lượng kiện"
+   },
+   "A16": {
+    "b": false,
+    "fmt": "General",
+    "v": "Tổng trọng lượng (Gross)"
+   },
+   "A17": {
+    "b": false,
+    "fmt": "General",
+    "v": "Địa điểm lưu kho"
+   },
+   "A18": {
+    "b": false,
+    "fmt": "General",
+    "v": "Địa điểm nhận hàng cuối cùng"
+   },
+   "A19": {
+    "b": false,
+    "fmt": "General",
+    "v": "Địa điểm xếp hàng"
+   },
+   "A2": {
+    "b": false,
+    "fmt": "General",
+    "v": "Mã loại hình"
+   },
+   "A20": {
+    "b": false,
+    "fmt": "General",
+    "v": "Địa điểm xếp hàng lên xe chở hàng"
+   },
+   "A21": {
+    "b": false,
+    "fmt": "General",
+    "v": "Phương tiện vận chuyển"
+   },
+   "A22": {
+    "b": false,
+    "fmt": "General",
+    "v": "Điều kiện giao hàng / tiền tệ"
+   },
+   "A23": {
+    "b": false,
+    "fmt": "General",
+    "v": "Tổng trị giá hóa đơn"
+   },
+   "A24": {
+    "b": false,
+    "fmt": "General",
+    "v": "Tổng trị giá tính thuế"
+   },
+   "A25": {
+    "b": false,
+    "fmt": "General",
+    "v": "Phân loại nộp thuế"
+   },
+   "A26": {
+    "b": false,
+    "fmt": "General",
+    "v": "Tổng số dòng hàng của tờ khai"
+   },
+   "A27": {
+    "b": false,
+    "fmt": "General",
+    "v": "Phần ghi chú"
+   },
+   "A28": {
+    "b": false,
+    "fmt": "General",
+    "v": "Số quản lý nội bộ doanh nghiệp"
+   },
+   "A29": {
+    "b": false,
+    "fmt": "General",
+    "v": "Thời hạn vận chuyển bảo thuế / ngày hàng đi"
+   },
+   "A3": {
+    "b": false,
+    "fmt": "General",
+    "v": "Cơ quan hải quan tiếp nhận"
+   },
+   "A30": {
+    "b": false,
+    "fmt": "General",
+    "v": "Địa điểm đích cho vận chuyển bảo thuế"
+   },
+   "A32": {
+    "b": true,
+    "fmt": "General",
+    "v": "2. CHI TIẾT DÒNG HÀNG"
+   },
+   "A33": {
+    "b": true,
+    "fmt": "General",
+    "v": "Dòng"
+   },
+   "A34": {
+    "b": false,
+    "fmt": "General",
+    "v": "<01>"
+   },
+   "A35": {
+    "b": false,
+    "fmt": "General",
+    "v": "<02>"
+   },
+   "A36": {
+    "b": false,
+    "fmt": "General",
+    "v": "<03>"
+   },
+   "A37": {
+    "b": false,
+    "fmt": "General",
+    "v": "<04>"
+   },
+   "A38": {
+    "b": false,
+    "fmt": "General",
+    "v": "<05>"
+   },
+   "A39": {
+    "b": false,
+    "fmt": "General",
+    "v": "<06>"
+   },
+   "A4": {
+    "b": false,
+    "fmt": "General",
+    "v": "Mã bộ phận xử lý"
+   },
+   "A40": {
+    "b": false,
+    "fmt": "General",
+    "v": "<07>"
+   },
+   "A41": {
+    "b": false,
+    "fmt": "General",
+    "v": "<08>"
+   },
+   "A43": {
+    "b": true,
+    "fmt": "General",
+    "v": "3. KIỂM TRA CHÉO TRƯỚC KHI ĐĂNG KÝ"
+   },
+   "A44": {
+    "b": false,
+    "fmt": "General",
+    "v": "Số PO đúng 10 chữ số, bắt đầu 8600"
+   },
+   "A45": {
+    "b": false,
+    "fmt": "General",
+    "v": "Không trùng số PO giữa các dòng"
+   },
+   "A46": {
+    "b": false,
+    "fmt": "General",
+    "v": "Số lượng x đơn giá = thành tiền từng dòng"
+   },
+   "A47": {
+    "b": false,
+    "fmt": "General",
+    "v": "Tổng trị giá = tổng các dòng"
+   },
+   "A48": {
+    "b": false,
+    "fmt": "General",
+    "v": "Tổng số dòng hàng tờ khai = số dòng PO"
+   },
+   "A49": {
+    "b": false,
+    "fmt": "General",
+    "v": "Mã HS đã điền cho mọi dòng"
+   },
+   "A5": {
+    "b": false,
+    "fmt": "General",
+    "v": "Mã số hàng hóa đại diện"
+   },
+   "A50": {
+    "b": false,
+    "fmt": "General",
+    "v": "Trọng lượng cả bì >= tịnh và có số kiện"
+   },
+   "A51": {
+    "b": false,
+    "fmt": "General",
+    "v": "Số PXK ghi trên invoice = số PXK ghi chú tờ khai"
+   },
+   "A52": {
+    "b": false,
+    "fmt": "General",
+    "v": "Mã số thuế người nhập khẩu"
+   },
+   "A6": {
+    "b": false,
+    "fmt": "General",
+    "v": "Người xuất khẩu: mã"
+   },
+   "A7": {
+    "b": false,
+    "fmt": "General",
+    "v": "Người xuất khẩu: tên"
+   },
+   "A8": {
+    "b": false,
+    "fmt": "General",
+    "v": "Người xuất khẩu: địa chỉ"
+   },
+   "A9": {
+    "b": false,
+    "fmt": "General",
+    "v": "Người xuất khẩu: mã bưu chính"
+   },
+   "B10": {
+    "b": true,
+    "fmt": "General",
+    "v": "0202090415"
+   },
+   "B11": {
+    "b": true,
+    "fmt": "General",
+    "v": "CONG TY TNHH TESA SITE HAI PHONG"
+   },
+   "B12": {
+    "b": true,
+    "fmt": "General",
+    "v": "LO DAT CN2A, KHU CONG NGHIEP VA DICH VU HANG HAI (DEEP C2B), THUOC KHU KINH TE DINH VU – CAT HAI, PHUONG DONG HAI, TP HAI PHONG,VIET NAM"
+   },
+   "B13": {
+    "b": true,
+    "fmt": "General",
+    "v": "VN"
+   },
+   "B15": {
+    "b": true,
+    "fmt": "General",
+    "v": 27
+   },
+   "B16": {
+    "b": true,
+    "fmt": "General",
+    "v": 5513.5
+   },
+   "B17": {
+    "b": true,
+    "fmt": "General",
+    "v": "18A3CA3"
+   },
+   "B18": {
+    "b": true,
+    "fmt": "General",
+    "v": "VNZZZ · CONG TY TNHH TESA SITE HAI PHONG"
+   },
+   "B19": {
+    "b": true,
+    "fmt": "General",
+    "v": "VNZZZ · CTY CO PHAN GIAY BAO BI HONG THIEN"
+   },
+   "B2": {
+    "b": true,
+    "fmt": "General",
+    "v": "B11"
+   },
+   "B20": {
+    "b": true,
+    "fmt": "General",
+    "v": "18A3CA3 · CONG TY CO PHAN GIAY BAO BI HONG THIEN"
+   },
+   "B21": {
+    "b": true,
+    "fmt": "General",
+    "v": "XETAI"
+   },
+   "B22": {
+    "b": true,
+    "fmt": "General",
+    "v": "DAP - VND"
+   },
+   "B23": {
+    "b": true,
+    "fmt": "General",
+    "v": 268468500
+   },
+   "B24": {
+    "b": true,
+    "fmt": "General",
+    "v": 268468500
+   },
+   "B25": {
+    "b": true,
+    "fmt": "General",
+    "v": "A"
+   },
+   "B26": {
+    "b": true,
+    "fmt": "General",
+    "v": 8
+   },
+   "B27": {
+    "b": true,
+    "fmt": "General",
+    "v": "Phuong thuc thanh toan: TT. PXKKVCNB 00000287. Ký hiệu 6C26NAA ngày  30/10/2026"
+   },
+   "B28": {
+    "b": true,
+    "fmt": "General",
+    "v": "#&XKPTQ"
+   },
+   "B29": {
+    "b": true,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "B3": {
+    "b": true,
+    "fmt": "General",
+    "v": "HQBACNINH"
+   },
+   "B30": {
+    "b": true,
+    "fmt": "General",
+    "v": "03PACGD"
+   },
+   "B33": {
+    "b": true,
+    "fmt": "General",
+    "v": "Mã HS"
+   },
+   "B34": {
+    "b": false,
+    "fmt": "General",
+    "v": "48229090"
+   },
+   "B35": {
+    "b": false,
+    "fmt": "General",
+    "v": "48229090"
+   },
+   "B36": {
+    "b": false,
+    "fmt": "General",
+    "v": "48229090"
+   },
+   "B37": {
+    "b": false,
+    "fmt": "General",
+    "v": "48229090"
+   },
+   "B38": {
+    "b": false,
+    "fmt": "General",
+    "v": "48229090"
+   },
+   "B39": {
+    "b": false,
+    "fmt": "General",
+    "v": "48229090"
+   },
+   "B4": {
+    "b": true,
+    "fmt": "General",
+    "v": "00"
+   },
+   "B40": {
+    "b": false,
+    "fmt": "General",
+    "v": "48229090"
+   },
+   "B41": {
+    "b": false,
+    "fmt": "General",
+    "v": "48229090"
+   },
+   "B44": {
+    "b": true,
+    "fmt": "General",
+    "v": "CẦN SỬA"
+   },
+   "B45": {
+    "b": true,
+    "fmt": "General",
+    "v": "ĐẠT"
+   },
+   "B46": {
+    "b": true,
+    "fmt": "General",
+    "v": "ĐẠT"
+   },
+   "B47": {
+    "b": true,
+    "fmt": "General",
+    "v": "ĐẠT"
+   },
+   "B48": {
+    "b": true,
+    "fmt": "General",
+    "v": "ĐẠT"
+   },
+   "B49": {
+    "b": true,
+    "fmt": "General",
+    "v": "ĐẠT"
+   },
+   "B5": {
+    "b": true,
+    "fmt": "General",
+    "v": "4415"
+   },
+   "B50": {
+    "b": true,
+    "fmt": "General",
+    "v": "ĐẠT"
+   },
+   "B51": {
+    "b": true,
+    "fmt": "General",
+    "v": "ĐẠT"
+   },
+   "B52": {
+    "b": true,
+    "fmt": "General",
+    "v": "ĐẠT"
+   },
+   "B6": {
+    "b": true,
+    "fmt": "General",
+    "v": "2300723980"
+   },
+   "B7": {
+    "b": true,
+    "fmt": "General",
+    "v": "CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN"
+   },
+   "B8": {
+    "b": true,
+    "fmt": "General",
+    "v": "Lô CN-15.1, KCN Thuận Thành II, Phường Mão Điền, Thành phố Bắc Ninh, Việt Nam."
+   },
+   "C10": {
+    "b": false,
+    "fmt": "General",
+    "v": "Bắt buộc điền (lỗi thường gặp: để trống)"
+   },
+   "C14": {
+    "b": false,
+    "fmt": "General",
+    "v": "Nhập theo chứng từ vận chuyển của lô"
+   },
+   "C15": {
+    "b": false,
+    "fmt": "General",
+    "v": "PK"
+   },
+   "C16": {
+    "b": false,
+    "fmt": "General",
+    "v": "KGM"
+   },
+   "C17": {
+    "b": false,
+    "fmt": "General",
+    "v": "Tên ghi trên mẫu: DOI NVU CCBN; tra danh mục mã địa điểm cho đúng"
+   },
+   "C26": {
+    "b": false,
+    "fmt": "General",
+    "v": "Phải bằng số dòng PO/invoice (lỗi thường gặp: khai thừa)"
+   },
+   "C30": {
+    "b": false,
+    "fmt": "General",
+    "v": "ngày đến 30/10/2026"
+   },
+   "C33": {
+    "b": true,
+    "fmt": "General",
+    "v": "Mô tả hàng hóa"
+   },
+   "C34": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Black (39778-90019-00), có logo tesa, chữ tesa màu trắng, nền màu đỏ, có vạch đen trên lõi ,PO:8600226354. Mới 100% "
+   },
+   "C35": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Black (39778-90019-00), có logo tesa, chữ tesa màu trắng, nền màu đỏ, có vạch đen trên lõi ,PO:8600226355. Mới 100% "
+   },
+   "C36": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Black (39778-90019-00), có logo tesa, chữ tesa màu trắng, nền màu đỏ, có vạch đen trên lõi ,PO:8600226356. Mới 100% "
+   },
+   "C37": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_51036 (39777-90019-00), có logo tesa, chữ tesa màu trắng, số 51036 màu trắng, nền màu đỏ ,PO:8600226364. Mới 100% "
+   },
+   "C38": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 76.5 x 3 x 1390mm_Blue (39753-91390-00), có logo tesa, chữ tesa màu trắng, nền màu đỏ, có vạch xanh dương trên lõi ,PO:8600226365. Mới 100% "
+   },
+   "C39": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.02 x 2.65 x 1750mm_51036 blue red (39817-91750-00), có logo tesa, chữ tesa màu trắng, số 51036 màu trắng, nền màu đỏ, có vạch xanh dương trên lõi ,PO:8600226379. Mới 100% "
+   },
+   "C40": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.02 x 2.65 x 1750mm_51036 blue red (39817-91750-00), có logo tesa, chữ tesa màu trắng, số 51036 màu trắng, nền màu đỏ, có vạch xanh dương trên lõi ,PO:8600226380. Mới 100% "
+   },
+   "C41": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 1750mm_Black (39778-91750-00), có logo tesa, chữ tesa màu trắng, nền màu đỏ, có vạch đen trên lõi ,PO:nợ po. Mới 100% "
+   },
+   "C44": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226354, 8600226355, 8600226356, 8600226364, 8600226365, 8600226379, 8600226380, nợ po"
+   },
+   "C47": {
+    "b": false,
+    "fmt": "General",
+    "v": "268,468,500"
+   },
+   "C48": {
+    "b": false,
+    "fmt": "General",
+    "v": "8 dòng"
+   },
+   "C50": {
+    "b": false,
+    "fmt": "General",
+    "v": "Cần nhập kg/đơn vị và SL/kiện cho từng mã"
+   },
+   "C51": {
+    "b": false,
+    "fmt": "General",
+    "v": "00000287"
+   },
+   "C52": {
+    "b": false,
+    "fmt": "General",
+    "v": "0202090415"
+   },
+   "C7": {
+    "b": false,
+    "fmt": "General",
+    "v": "Viết hoa đồng nhất, không lẫn chữ thường"
+   },
+   "C9": {
+    "b": false,
+    "fmt": "General",
+    "v": "Điền mã bưu chính đúng hoặc để trống; không dùng mã vùng điện thoại"
+   },
+   "D33": {
+    "b": true,
+    "fmt": "General",
+    "v": "Số lượng (1)"
+   },
+   "D34": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 136000
+   },
+   "D35": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 136000
+   },
+   "D36": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 136000
+   },
+   "D37": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 136000
+   },
+   "D38": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 2000
+   },
+   "D39": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 1200
+   },
+   "D40": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 1200
+   },
+   "D41": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 100
+   },
+   "E33": {
+    "b": true,
+    "fmt": "General",
+    "v": "ĐVT"
+   },
+   "E34": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "E35": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "E36": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "E37": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "E38": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "E39": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "E40": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "E41": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "F33": {
+    "b": true,
+    "fmt": "General",
+    "v": "Số lượng (2) kg"
+   },
+   "F34": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 680
+   },
+   "F35": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 680
+   },
+   "F36": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 680
+   },
+   "F37": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 680
+   },
+   "F38": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 1716
+   },
+   "F39": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 512.4
+   },
+   "F40": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 512.4
+   },
+   "F41": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 43.7
+   },
+   "G33": {
+    "b": true,
+    "fmt": "General",
+    "v": "Đơn giá HĐ"
+   },
+   "G34": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 265
+   },
+   "G35": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 265
+   },
+   "G36": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 265
+   },
+   "G37": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 265
+   },
+   "G38": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 29998
+   },
+   "G39": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 25725
+   },
+   "G40": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 25725
+   },
+   "G41": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 25725
+   },
+   "H33": {
+    "b": true,
+    "fmt": "General",
+    "v": "Trị giá hóa đơn"
+   },
+   "H34": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 36040000
+   },
+   "H35": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 36040000
+   },
+   "H36": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 36040000
+   },
+   "H37": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 36040000
+   },
+   "H38": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 59996000
+   },
+   "H39": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 30870000
+   },
+   "H40": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 30870000
+   },
+   "H41": {
+    "b": false,
+    "fmt": "#,##0.###",
+    "v": 2572500
+   }
+  },
+  "merged": [
+   "A1:H1",
+   "A32:H32",
+   "A43:H43"
+  ],
+  "widths": {
+   "A": 34.0,
+   "B": 26.0,
+   "C": 70.0,
+   "D": 16.0,
+   "E": 14.0,
+   "F": 16.0,
+   "G": 16.0,
+   "H": 20.0
+  }
+ },
+ "VAT_BKAV_30.10": {
+  "cells": {
+   "A1": {
+    "b": true,
+    "fmt": "General",
+    "v": "File Import vào hệ thống Hóa đơn điện tử của Bkav (Bkav eHoadon), dùng để tạo hóa đơn trên hệ thống Bkav eHoadon.\nBkav Template File (BTF.eHD v1.00) - Xem Lưu ý và Hướng dẫn nhập thông tin ở bên dưới"
+   },
+   "A10": {
+    "b": false,
+    "fmt": "General",
+    "v": 5
+   },
+   "A11": {
+    "b": false,
+    "fmt": "General",
+    "v": 6
+   },
+   "A12": {
+    "b": false,
+    "fmt": "General",
+    "v": 7
+   },
+   "A13": {
+    "b": false,
+    "fmt": "General",
+    "v": 8
+   },
+   "A3": {
+    "b": true,
+    "fmt": "General",
+    "v": "LoaiHD: "
+   },
+   "A5": {
+    "b": true,
+    "fmt": "General",
+    "v": "STT"
+   },
+   "A6": {
+    "b": false,
+    "fmt": "General",
+    "v": 1
+   },
+   "A7": {
+    "b": false,
+    "fmt": "General",
+    "v": 2
+   },
+   "A8": {
+    "b": false,
+    "fmt": "General",
+    "v": 3
+   },
+   "A9": {
+    "b": false,
+    "fmt": "General",
+    "v": 4
+   },
+   "AA5": {
+    "b": true,
+    "fmt": "General",
+    "v": "NhanBangBanIN"
+   },
+   "AB5": {
+    "b": true,
+    "fmt": "General",
+    "v": "HoTenNguoiNhan"
+   },
+   "AC5": {
+    "b": true,
+    "fmt": "General",
+    "v": "SoDienThoaiNguoiNhan"
+   },
+   "AD5": {
+    "b": true,
+    "fmt": "General",
+    "v": "SoNha"
+   },
+   "AE5": {
+    "b": true,
+    "fmt": "General",
+    "v": "Tinh/ThanhPho"
+   },
+   "AF5": {
+    "b": true,
+    "fmt": "General",
+    "v": "Huyen/Quan/ThiXa"
+   },
+   "AG5": {
+    "b": true,
+    "fmt": "General",
+    "v": "Xa/Phuong/ThiTran"
+   },
+   "AH5": {
+    "b": true,
+    "fmt": "General",
+    "v": "GhiChu"
+   },
+   "B10": {
+    "b": false,
+    "fmt": "General",
+    "v": "tesa30.10"
+   },
+   "B11": {
+    "b": false,
+    "fmt": "General",
+    "v": "tesa30.10"
+   },
+   "B12": {
+    "b": false,
+    "fmt": "General",
+    "v": "tesa30.10"
+   },
+   "B13": {
+    "b": false,
+    "fmt": "General",
+    "v": "tesa30.10"
+   },
+   "B5": {
+    "b": true,
+    "fmt": "General",
+    "v": "IDChungTu/MaBill"
+   },
+   "B6": {
+    "b": false,
+    "fmt": "General",
+    "v": "tesa30.10"
+   },
+   "B7": {
+    "b": false,
+    "fmt": "General",
+    "v": "tesa30.10"
+   },
+   "B8": {
+    "b": false,
+    "fmt": "General",
+    "v": "tesa30.10"
+   },
+   "B9": {
+    "b": false,
+    "fmt": "General",
+    "v": "tesa30.10"
+   },
+   "C10": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 76.5 x 3 x 1390mm_Blue (39753-91390-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550), PO:8600226365"
+   },
+   "C11": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.02 x 2.65 x 1750mm_51036 blue red (39817-91750-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550), PO:8600226379"
+   },
+   "C12": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.02 x 2.65 x 1750mm_51036 blue red (39817-91750-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550), PO:8600226380"
+   },
+   "C13": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 1750mm_Black (39778-91750-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550), PO:nợ po"
+   },
+   "C3": {
+    "b": true,
+    "fmt": "General",
+    "v": "Hóa đơn Giá trị gia tăng (VAT)"
+   },
+   "C5": {
+    "b": true,
+    "fmt": "General",
+    "v": "TenHangHoaDichVu"
+   },
+   "C6": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Black (39778-90019-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550), PO:8600226354"
+   },
+   "C7": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Black (39778-90019-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550), PO:8600226355"
+   },
+   "C8": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Black (39778-90019-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550), PO:8600226356"
+   },
+   "C9": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_51036 (39777-90019-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550), PO:8600226364"
+   },
+   "D10": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226365"
+   },
+   "D11": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226379"
+   },
+   "D12": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226380"
+   },
+   "D13": {
+    "b": false,
+    "fmt": "General",
+    "v": "nợ po"
+   },
+   "D5": {
+    "b": true,
+    "fmt": "General",
+    "v": "UDD_PO"
+   },
+   "D6": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226354"
+   },
+   "D7": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226355"
+   },
+   "D8": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226356"
+   },
+   "D9": {
+    "b": false,
+    "fmt": "General",
+    "v": "8600226364"
+   },
+   "E10": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "E11": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "E12": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "E13": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "E5": {
+    "b": true,
+    "fmt": "General",
+    "v": "DonViTinh/ChietKhau"
+   },
+   "E6": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "E7": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "E8": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "E9": {
+    "b": false,
+    "fmt": "General",
+    "v": "ống"
+   },
+   "F10": {
+    "b": false,
+    "fmt": "General",
+    "v": 2000
+   },
+   "F11": {
+    "b": false,
+    "fmt": "General",
+    "v": 1200
+   },
+   "F12": {
+    "b": false,
+    "fmt": "General",
+    "v": 1200
+   },
+   "F13": {
+    "b": false,
+    "fmt": "General",
+    "v": 100
+   },
+   "F5": {
+    "b": true,
+    "fmt": "General",
+    "v": "SoLuong"
+   },
+   "F6": {
+    "b": false,
+    "fmt": "General",
+    "v": 136000
+   },
+   "F7": {
+    "b": false,
+    "fmt": "General",
+    "v": 136000
+   },
+   "F8": {
+    "b": false,
+    "fmt": "General",
+    "v": 136000
+   },
+   "F9": {
+    "b": false,
+    "fmt": "General",
+    "v": 136000
+   },
+   "G10": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 29998
+   },
+   "G11": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 25725
+   },
+   "G12": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 25725
+   },
+   "G13": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 25725
+   },
+   "G5": {
+    "b": true,
+    "fmt": "General",
+    "v": "DonGia"
+   },
+   "G6": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 265
+   },
+   "G7": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 265
+   },
+   "G8": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 265
+   },
+   "G9": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 265
+   },
+   "H10": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 59996000
+   },
+   "H11": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 30870000
+   },
+   "H12": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 30870000
+   },
+   "H13": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 2572500
+   },
+   "H5": {
+    "b": true,
+    "fmt": "General",
+    "v": "ThanhTien"
+   },
+   "H6": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 36040000
+   },
+   "H7": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 36040000
+   },
+   "H8": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 36040000
+   },
+   "H9": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 36040000
+   },
+   "I10": {
+    "b": false,
+    "fmt": "0%",
+    "v": 0
+   },
+   "I11": {
+    "b": false,
+    "fmt": "0%",
+    "v": 0
+   },
+   "I12": {
+    "b": false,
+    "fmt": "0%",
+    "v": 0
+   },
+   "I13": {
+    "b": false,
+    "fmt": "0%",
+    "v": 0
+   },
+   "I5": {
+    "b": true,
+    "fmt": "General",
+    "v": "ThueSuat"
+   },
+   "I6": {
+    "b": false,
+    "fmt": "0%",
+    "v": 0
+   },
+   "I7": {
+    "b": false,
+    "fmt": "0%",
+    "v": 0
+   },
+   "I8": {
+    "b": false,
+    "fmt": "0%",
+    "v": 0
+   },
+   "I9": {
+    "b": false,
+    "fmt": "0%",
+    "v": 0
+   },
+   "J10": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 0
+   },
+   "J11": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 0
+   },
+   "J12": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 0
+   },
+   "J13": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 0
+   },
+   "J5": {
+    "b": true,
+    "fmt": "General",
+    "v": "TienThueGTGT"
+   },
+   "J6": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 0
+   },
+   "J7": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 0
+   },
+   "J8": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 0
+   },
+   "J9": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 0
+   },
+   "K5": {
+    "b": true,
+    "fmt": "General",
+    "v": "MaTienTe"
+   },
+   "L5": {
+    "b": true,
+    "fmt": "General",
+    "v": "TyGia"
+   },
+   "M10": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "M11": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "M12": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "M13": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "M5": {
+    "b": true,
+    "fmt": "General",
+    "v": "NgayThangNamHD"
+   },
+   "M6": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "M7": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "M8": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "M9": {
+    "b": false,
+    "fmt": "General",
+    "v": "30/10/2026"
+   },
+   "N5": {
+    "b": true,
+    "fmt": "General",
+    "v": "HoTenNguoiMua"
+   },
+   "O5": {
+    "b": true,
+    "fmt": "General",
+    "v": "CCCD"
+   },
+   "P5": {
+    "b": true,
+    "fmt": "General",
+    "v": "SoHoChieu"
+   },
+   "Q5": {
+    "b": true,
+    "fmt": "General",
+    "v": "MaNganSach"
+   },
+   "R10": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY TNHH TESA SITE HẢI PHÒNG"
+   },
+   "R11": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY TNHH TESA SITE HẢI PHÒNG"
+   },
+   "R12": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY TNHH TESA SITE HẢI PHÒNG"
+   },
+   "R13": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY TNHH TESA SITE HẢI PHÒNG"
+   },
+   "R5": {
+    "b": true,
+    "fmt": "General",
+    "v": "TenDonVi"
+   },
+   "R6": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY TNHH TESA SITE HẢI PHÒNG"
+   },
+   "R7": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY TNHH TESA SITE HẢI PHÒNG"
+   },
+   "R8": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY TNHH TESA SITE HẢI PHÒNG"
+   },
+   "R9": {
+    "b": false,
+    "fmt": "General",
+    "v": "CÔNG TY TNHH TESA SITE HẢI PHÒNG"
+   },
+   "S10": {
+    "b": false,
+    "fmt": "@",
+    "v": "0202090415"
+   },
+   "S11": {
+    "b": false,
+    "fmt": "@",
+    "v": "0202090415"
+   },
+   "S12": {
+    "b": false,
+    "fmt": "@",
+    "v": "0202090415"
+   },
+   "S13": {
+    "b": false,
+    "fmt": "@",
+    "v": "0202090415"
+   },
+   "S5": {
+    "b": true,
+    "fmt": "General",
+    "v": "MaSoThue"
+   },
+   "S6": {
+    "b": false,
+    "fmt": "@",
+    "v": "0202090415"
+   },
+   "S7": {
+    "b": false,
+    "fmt": "@",
+    "v": "0202090415"
+   },
+   "S8": {
+    "b": false,
+    "fmt": "@",
+    "v": "0202090415"
+   },
+   "S9": {
+    "b": false,
+    "fmt": "@",
+    "v": "0202090415"
+   },
+   "T10": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô đất CN2A, Khu công nghiệp và dịch vụ hàng hải (DEEP C2B), thuộc Khu kinh tế Đình Vũ – Cát Hải, Phường Đông Hải, TP Hải Phòng,Việt Nam"
+   },
+   "T11": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô đất CN2A, Khu công nghiệp và dịch vụ hàng hải (DEEP C2B), thuộc Khu kinh tế Đình Vũ – Cát Hải, Phường Đông Hải, TP Hải Phòng,Việt Nam"
+   },
+   "T12": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô đất CN2A, Khu công nghiệp và dịch vụ hàng hải (DEEP C2B), thuộc Khu kinh tế Đình Vũ – Cát Hải, Phường Đông Hải, TP Hải Phòng,Việt Nam"
+   },
+   "T13": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô đất CN2A, Khu công nghiệp và dịch vụ hàng hải (DEEP C2B), thuộc Khu kinh tế Đình Vũ – Cát Hải, Phường Đông Hải, TP Hải Phòng,Việt Nam"
+   },
+   "T5": {
+    "b": true,
+    "fmt": "General",
+    "v": "DiaChi"
+   },
+   "T6": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô đất CN2A, Khu công nghiệp và dịch vụ hàng hải (DEEP C2B), thuộc Khu kinh tế Đình Vũ – Cát Hải, Phường Đông Hải, TP Hải Phòng,Việt Nam"
+   },
+   "T7": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô đất CN2A, Khu công nghiệp và dịch vụ hàng hải (DEEP C2B), thuộc Khu kinh tế Đình Vũ – Cát Hải, Phường Đông Hải, TP Hải Phòng,Việt Nam"
+   },
+   "T8": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô đất CN2A, Khu công nghiệp và dịch vụ hàng hải (DEEP C2B), thuộc Khu kinh tế Đình Vũ – Cát Hải, Phường Đông Hải, TP Hải Phòng,Việt Nam"
+   },
+   "T9": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô đất CN2A, Khu công nghiệp và dịch vụ hàng hải (DEEP C2B), thuộc Khu kinh tế Đình Vũ – Cát Hải, Phường Đông Hải, TP Hải Phòng,Việt Nam"
+   },
+   "U5": {
+    "b": true,
+    "fmt": "General",
+    "v": "SoTaiKhoan"
+   },
+   "V10": {
+    "b": false,
+    "fmt": "General",
+    "v": "CK"
+   },
+   "V11": {
+    "b": false,
+    "fmt": "General",
+    "v": "CK"
+   },
+   "V12": {
+    "b": false,
+    "fmt": "General",
+    "v": "CK"
+   },
+   "V13": {
+    "b": false,
+    "fmt": "General",
+    "v": "CK"
+   },
+   "V5": {
+    "b": true,
+    "fmt": "General",
+    "v": "HinhThucTT"
+   },
+   "V6": {
+    "b": false,
+    "fmt": "General",
+    "v": "CK"
+   },
+   "V7": {
+    "b": false,
+    "fmt": "General",
+    "v": "CK"
+   },
+   "V8": {
+    "b": false,
+    "fmt": "General",
+    "v": "CK"
+   },
+   "V9": {
+    "b": false,
+    "fmt": "General",
+    "v": "CK"
+   },
+   "W10": {
+    "b": false,
+    "fmt": "@",
+    "v": "Có"
+   },
+   "W11": {
+    "b": false,
+    "fmt": "@",
+    "v": "Có"
+   },
+   "W12": {
+    "b": false,
+    "fmt": "@",
+    "v": "Có"
+   },
+   "W13": {
+    "b": false,
+    "fmt": "@",
+    "v": "Có"
+   },
+   "W5": {
+    "b": true,
+    "fmt": "General",
+    "v": "NhanBangEmail"
+   },
+   "W6": {
+    "b": false,
+    "fmt": "@",
+    "v": "Có"
+   },
+   "W7": {
+    "b": false,
+    "fmt": "@",
+    "v": "Có"
+   },
+   "W8": {
+    "b": false,
+    "fmt": "@",
+    "v": "Có"
+   },
+   "W9": {
+    "b": false,
+    "fmt": "@",
+    "v": "Có"
+   },
+   "X5": {
+    "b": true,
+    "fmt": "General",
+    "v": "DSEmail"
+   },
+   "X6": {
+    "b": false,
+    "fmt": "General",
+    "v": "Invoice0342@tesa.com;Hoa.pham@tesa.com;sale01@hongthien.company;Minh.Nguyen@tesa.com;thanh.vu@tesa.com;Ha.Nguyen.external@tesa.com;invoice0342@tesa.com"
+   },
+   "Y5": {
+    "b": true,
+    "fmt": "General",
+    "v": "NhanBangSMS"
+   },
+   "Z5": {
+    "b": true,
+    "fmt": "General",
+    "v": "DSSMS"
+   }
+  },
+  "merged": [
+   "A1:AH1",
+   "A3:B3"
+  ],
+  "widths": {
+   "A": 4.625,
+   "AA": 14.875,
+   "AB": 16.875,
+   "AC": 22.625,
+   "AD": 6.625,
+   "AE": 19.875,
+   "AF": 17.625,
+   "AG": 19.125,
+   "AH": 42.0,
+   "B": 17.125,
+   "C": 30.875,
+   "D": 9.0,
+   "E": 20.125,
+   "F": 8.875,
+   "G": 10.625,
+   "H": 13.5,
+   "I": 14.125,
+   "J": 14.375,
+   "K": 9.0,
+   "L": 9.0,
+   "M": 17.625,
+   "N": 17.375,
+   "O": 9.0,
+   "P": 9.0,
+   "Q": 9.0,
+   "R": 33.625,
+   "S": 16.875,
+   "T": 28.625,
+   "U": 11.875,
+   "V": 18.125,
+   "W": 14.875,
+   "X": 21.375,
+   "Y": 14.375,
+   "Z": 14.875
+  }
+ }
+}
