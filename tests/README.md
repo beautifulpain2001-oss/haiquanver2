@@ -27,5 +27,6 @@ Khi sửa xong, test báo XPASS: gỡ dấu xfail.
 
 - PLX: dòng "Tổng cộng" ghi đè dòng hàng cuối và SUM bỏ sót nó.
 - `num_to_vn_words` từ 1.000 tỷ trở lên.
-- Tài liệu nói Kodi VAT 8%, mã đang xuất 0.
 - Tài liệu nhắc `sort_shirai_pnn_order`, `fmt_vat_name`, `save_step2_archive`, 19 mặt hàng Kodi / 21 mã Tesa; mã hiện có khác.
+
+Thuế suất VAT là 0% cho cả 3 khách (hàng hải quan); chỗ tài liệu ghi Kodi 8% là không đúng.

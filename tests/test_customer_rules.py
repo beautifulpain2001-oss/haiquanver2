@@ -104,6 +104,12 @@ class TestShirai:
 
 
 class TestKodi:
+    def test_vat_rate_is_zero_for_all_customers(self, seed):
+        # Hàng xuất khẩu / hải quan nên thuế suất 0% (tài liệu bàn giao ghi 8% cho Kodi là không đúng)
+        for rec in seed.values():
+            ws = app.build_vat_bkav_sheet(new_wb(), rec)
+            assert {r[8] for r in ws.iter_rows(min_row=6, values_only=True)} == {0}
+
     def test_vat_has_no_line_po(self, seed):
         ws = app.build_vat_bkav_sheet(new_wb(), seed["kodi"])
         assert {r[3] for r in ws.iter_rows(min_row=6, values_only=True)} == {""}
@@ -162,12 +168,6 @@ class TestTesa:
 
 
 # --- Điểm tài liệu bàn giao mô tả nhưng mã nguồn hiện tại chưa có -------------------------
-
-@pytest.mark.xfail(strict=True, reason="Tài liệu: Kodi VAT 8%; mã nguồn đang xuất ThueSuat=0 cho mọi khách")
-def test_doc_kodi_vat_rate_is_8_percent(seed):
-    ws = app.build_vat_bkav_sheet(new_wb(), seed["kodi"])
-    assert {r[8] for r in ws.iter_rows(min_row=6, values_only=True)} == {8}
-
 
 @pytest.mark.xfail(strict=True, reason="Tài liệu: có hàm sort_shirai_pnn_order; mã nguồn xử lý trong parse_shirai_po_excel")
 def test_doc_sort_shirai_pnn_order_exists():
