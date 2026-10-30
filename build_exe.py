@@ -28,7 +28,7 @@ EXE = os.path.join(DIST, NAME + (".exe" if os.name == "nt" else ""))
 ZIP = os.path.join(DIST, NAME + "_Windows.zip")
 GUIDE = os.path.join(ROOT, "HUONG_DAN_BAN_EXE.md")
 OCR_DIR = os.path.join(DIST, "Tesseract-OCR")
-OCR_LANGS = ("eng", "vie", "osd")
+OCR_LANGS = ("eng", "vie")  # osd (xoay trang tự động) không dùng tới
 
 
 def build():
@@ -69,7 +69,7 @@ def find_tesseract_dir():
 
 
 def bundle_ocr():
-    """Chép bản gọn của Tesseract (tesseract.exe + DLL + dữ liệu eng/vie/osd) ra dist/Tesseract-OCR."""
+    """Chép bản gọn của Tesseract (tesseract.exe + DLL + dữ liệu eng/vie) ra dist/Tesseract-OCR."""
     src = find_tesseract_dir()
     if not os.path.isfile(os.path.join(src, "tessdata", "vie.traineddata")):
         sys.exit(f"Thiếu {os.path.join(src, 'tessdata', 'vie.traineddata')} (dữ liệu OCR tiếng Việt)")

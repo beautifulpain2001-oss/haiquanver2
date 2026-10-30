@@ -39,7 +39,11 @@ jobs:
         run: |
           choco install tesseract -y --no-progress
           $tessdata = "$env:ProgramFiles\Tesseract-OCR\tessdata"
-          Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata/raw/4.1.0/vie.traineddata" -OutFile "$tessdata\vie.traineddata"
+          # Dùng đúng bộ dữ liệu "fast" 4.1.0 cho cả eng và vie (giống gói tesseract-ocr-vie trên Linux mà test chạy);
+          # trộn vie bản thường với eng bản fast làm Tesseract bỏ mất dấu tiếng Việt.
+          foreach ($lang in "eng", "vie") {
+            Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata_fast/raw/4.1.0/$lang.traineddata" -OutFile "$tessdata\$lang.traineddata"
+          }
           & "$env:ProgramFiles\Tesseract-OCR\tesseract.exe" --list-langs
       - name: Chẩn đoán OCR (tạm)
         run: python ocr_diag_tmp.py
