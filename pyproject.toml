@@ -1,0 +1,6 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "gui: cần Tkinter và màn hình (hoặc Xvfb); tự bỏ qua nếu không có",
+]
