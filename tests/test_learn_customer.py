@@ -192,6 +192,8 @@ def test_wizard_adds_customer_and_scans_po(store, sample_docs, monkeypatch):
     try:
         ui = app.HongThienCustomsDesktopApp(root, store)
         wz = ui.open_learn_customer_wizard(paths=[sample_docs["vat"], sample_docs["pxk"], sample_docs["inv"]])
+        # Cửa sổ học khách mới phải gắn với cửa sổ chính, không bị cửa sổ chính che mất
+        assert str(wz["dlg"].transient()) == str(root)
         assert wz["vars"]["mst"].get() == "2301234567"
         assert len(wz["tree"].get_children()) == 2
         wz["vars"]["key"].set("daiphat")
@@ -210,3 +212,110 @@ def test_wizard_adds_customer_and_scans_po(store, sample_docs, monkeypatch):
         assert shown[-1][0] == "showinfo"
     finally:
         root.destroy()
+
+
+# ---------------------------------------------------------------------------
+# Khách có Invoice nhiều sheet + PO scan không cùng cách ghi tên hàng (kiểu ABLE / ARIZON)
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def multi_sheet_invoice(tmp_path):
+    wb = openpyxl.Workbook()
+    old = wb.active
+    old.title = "Thang11"
+    old.append(["INVOICE - PACKING LIST", "", "", "", "Ngày: 21/11/2025"])
+    old.append(["Người nhận hàng:"])
+    old.append(["CÔNG TY TNHH BAO BÌ MẪU"])
+    old.append(["Khu A1, KCN Nam Đình Vũ, Hải Phòng"])
+    old.append(["STT", "Mã liệu", "Tên Hàng", "ĐVT", "Số Lượng", "Cân Nặng (kg)", "Trọng lượng cả bì (kg)",
+                "Trọng lượng tịnh (kg)", "Số kiện", "Đơn Giá VND", "Thành Tiền VND"])
+    old.append([1, "", "Ống giấy phi 38 x 5 x 467mm x250g in", "Chiếc", 1380, 0.25, 347, 345, 18.4, 4375, 6037500])
+    new = wb.create_sheet("Thang8")
+    new.append(["INVOICE - PACKING LIST", "", "", "", "Ngày: 27/08/2026"])
+    new.append(["Mã số thuế: 0202226426"])
+    new.append(["STT", "Mã hàng", "", "Tên Hàng", "PO", "ĐVT", "Số Lượng", "Trọng lượng(kg)", "Trọng lượng cả bì(kg)",
+                "Trọng lượng tịnh(kg)", "Số kiện", "Đơn Giá VND", "Thành Tiền VND"])
+    # mã hàng nằm ở cột bên phải tiêu đề 'Mã hàng' (ô tiêu đề bị gộp)
+    new.append([1, "", "3609100670001", "Ống giấy phi 38 x 5 x 467mm x250g in", "20260611-00213", "Chiếc", 2500, 0.25, 626, 625, 29.76, 4725, 11812500])
+    new.append([2, "", "3609100670002", "Ống giấy phi 38 x 5 x 467mm x280g in", "20260611-00213", "Chiếc", 2500, 0.28, 701, 700, 30, 5239, 13097500])
+    new.append(["", "", "", "Tổng", "", "", 5000])
+    norms = wb.create_sheet("CN")
+    norms.append(["Mã code", "Quy Cách", "Số Lượng ống / 1 túi"])
+    norms.append(["3609100670002", "38 x 5 x 467", 90])
+    path = tmp_path / "IV_PK.xlsx"
+    wb.save(path)
+    return str(path)
+
+
+def test_invoice_excel_reads_all_sheets_newest_first(multi_sheet_invoice):
+    res = app.learn_from_invoice_excel(multi_sheet_invoice)
+    g250 = res["items"][0]
+    assert res["items"][0]["price"] == 4725  # sheet tháng 8/2026 đứng trước sheet 11/2025
+    assert g250["code"] == "3609100670001"
+    assert g250["kg"] == 0.25
+    assert g250["div"] == 75  # 29.76 kiện là số lẻ -> lấy SL/kiện nguyên 1380/18.4 = 75
+    g280 = next(x for x in res["items"] if x["code"] == "3609100670002")
+    assert g280["div"] == 90  # bảng định mức 'Số lượng ống / 1 túi' thắng
+    assert res["meta"]["sample_po"] == "20260611-00213"
+    assert res["meta"]["tare"] == 1
+    assert res["profile"]["name"] == "CÔNG TY TNHH BAO BÌ MẪU"
+    assert res["profile"]["addr"].startswith("Khu A1")
+    assert res["profile"]["mst"] == "0202226426"
+
+
+ITEMS_38 = [
+    {"code": "", "name": "Ống giấy phi 38 x 5 x 467mm x280g in", "unit": "Chiếc", "price": 5239, "div": 84, "kg": 0.28},
+    {"code": "", "name": "Ống giấy phi 38 x 5 x467 mm x 250g in", "unit": "Chiếc", "price": 4725, "div": 84, "kg": 0.25},
+    {"code": "3609400670001", "name": "Ống giấy phi 25.4 (1inch) x 6 x 67mm", "unit": "Chiếc", "price": 2314, "div": 400, "kg": 0.032},
+    {"code": "3609100670001", "name": "Ống giấy phi 76.2( 3inch) x 5 x 67 mm", "unit": "chiếc", "price": 3098, "div": 196, "kg": 0.067},
+]
+
+
+def test_generic_po_matches_by_spec_and_price_when_names_differ():
+    # Hợp đồng tiếng Trung đọc qua OCR: tên hàng là chữ Hán (đọc ra rác), chỉ còn quy cách, định lượng, số
+    text = (
+        "合同编号: 20260821-00231\n"
+        "| 1 [am 2508. 38*5*467 2500 725.00 d 11,812,500.00 4\n"   # 250g đọc nhầm '2508', 4,725 mất chữ '4'
+        "EAL CURIA 280g 38°5*467 2500 5,239.00 4 13,097,500.00 #\n"
+    )
+    prof = {"po_pattern": app.infer_po_pattern("20260611-00213")}
+    po, _, lines = app.parse_generic_po_text(text, prof, ITEMS_38, tare_val=1)
+    assert po == "20260821-00231"
+    assert [(x["ten_sp"][-8:], x["qty"], x["price"], x["amount"], x["net"], x["gross"]) for x in lines] == [
+        (" 250g in", 2500, 4725, 11_812_500, 625.0, 626.0),
+        ("x280g in", 2500, 5239, 13_097_500, 700.0, 701.0),
+    ]
+
+
+def test_generic_po_tolerates_ocr_spacing_misread_code_and_dates():
+    text = (
+        "Source N0./Mã đơn xin mua: VN-3101-202609090002\n"
+        "PO N0. /Đơn mua hàng: VN-3501-2026091 10005\n"
+        "PO Date/Ngày xuống đơn: 2026-09-11\n"
+        "3609100870001 U:#j6mn 3, 098. 000000 12, 000. 0000 i ỐNG GIẤY PHI 76.2 (3 inch) x 5 x 67 mm 2026-09-18\n"
+        "3609400670001 U: 67mm, (4/220) | 2,314. 000000 16, 000. 0000 m Ống giấy phi 25.4 (linch) x 6 x 67mm 2026-09-18\n"
+    )
+    prof = {"po_pattern": app.infer_po_pattern("VN-3501-202609110005")}
+    po, po_date, lines = app.parse_generic_po_text(text, prof, ITEMS_38, tare_val=1)
+    assert po == "VN-3501-202609110005"  # số đứng sau chữ 'PO', không lấy mã đơn xin mua
+    assert po_date == "11/09/2026"
+    assert [(x["ma_sp"], x["qty"], x["price"], x["amount"], x["kien"]) for x in lines] == [
+        ("3609100670001", 12000, 3098, 37_176_000, 62),
+        ("3609400670001", 16000, 2314, 37_024_000, 40),
+    ]
+
+
+def test_learned_customer_invoice_has_line_po_unit_and_code(store, multi_sheet_invoice):
+    draft = app.learn_customer_from_documents([multi_sheet_invoice])
+    fields = {**draft["profile"], "po_pattern": app.infer_po_pattern(draft["sample_po"]), "tare": draft["tare"]}
+    key = store.save_learned_customer("baobimau", fields, draft["items"])
+    prof = app.PROFILES[key]
+    assert prof["linePo"] is True and prof["tare"] == 1
+    _, _, lines = app.parse_generic_po_text(
+        "PO 20260901-00001\n3609100670002 38*5*467 280g 3000 5,239 15,717,000\n",
+        prof, store.items_for_customer(key), data_store=store, tare_val=prof["tare"])
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    ws = app.build_invoice_pkl_sheet(wb, {"customer": key, "poNumber": "20260901-00001", "items": lines, "docDate": "2026-09-21"})
+    assert ws["B13"].value.startswith("3609100670002\n")
+    assert (ws["C13"].value, ws["D13"].value, ws["E13"].value, ws["G13"].value, ws["J13"].value) == (
+        "20260901-00001", "Chiếc", 3000, 841.0, 5239)
