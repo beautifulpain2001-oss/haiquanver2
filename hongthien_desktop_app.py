@@ -2262,6 +2262,8 @@ class HongThienCustomsDesktopApp:
     def __init__(self, root, data_store):
         self.root = root
         self.store = data_store
+        # Bản .exe không có console: lỗi trong nút bấm sẽ bị nuốt mất, nên ghi ra file và báo lên màn hình
+        self.root.report_callback_exception = self.report_error
         self.root.title("Phần Mềm Desktop Quét PO Offline & Lưu Trữ Hồ Sơ Hải Quan Tập Trung - Hồng Thiên")
         self.root.geometry("1450x880")
         self.root.minsize(1200, 740)
@@ -2987,6 +2989,28 @@ class HongThienCustomsDesktopApp:
                 msg = "File PDF là ảnh scan chưa có lớp chữ nhúng và máy chưa có bộ OCR (thư mục Tesseract-OCR cạnh file .exe). Bạn có thể bấm 'Dán Văn Bản PO' hoặc thêm dòng trực tiếp."
             messagebox.showwarning("Quét PO Offline", msg)
 
+    def report_error(self, exc_type, exc, tb):
+        import traceback
+        err = "".join(traceback.format_exception(exc_type, exc, tb))
+        log = os.path.join(get_app_dir(), "LOI_PHAN_MEM.txt")
+        try:
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(f"===== {datetime.datetime.now():%d/%m/%Y %H:%M:%S}\n{err}\n")
+        except OSError:
+            log = "(không ghi được file log)"
+        if sys.stderr is not None:
+            sys.stderr.write(err)
+        messagebox.showerror("Lỗi phần mềm", f"{exc_type.__name__}: {exc}\n\nChi tiết đã ghi vào:\n{log}\nGửi file này cho người hỗ trợ.")
+
+    def new_dialog(self):
+        """Cửa sổ con luôn nằm trên cửa sổ chính. Trên Windows, sau khi đóng hộp chọn file thì cửa sổ chính
+        được kéo lên trước và che mất cửa sổ con mới mở (trông như 'hiện lên chớp mắt rồi biến mất')."""
+        dlg = tk.Toplevel(self.root)
+        dlg.transient(self.root)
+        dlg.lift()
+        dlg.after_idle(dlg.focus_force)
+        return dlg
+
     def open_learn_customer_wizard(self, paths=None):
         """Trình thêm khách mới: nạp XML hóa đơn/PXK, Invoice Excel, PO mẫu -> xem lại -> Lưu."""
         if paths is None:
@@ -3006,7 +3030,7 @@ class HongThienCustomsDesktopApp:
         taken = set(PROFILES) | set(self.store.custom_profiles)
         key = customer_key_from_name(prof.get("name", ""), taken)
 
-        dlg = tk.Toplevel(self.root)
+        dlg = self.new_dialog()
         dlg.title("Thêm Khách Hàng Mới Từ Chứng Từ Mẫu (Học Offline - Bạn Xác Nhận Trước Khi Lưu)")
         dlg.geometry("980x720")
         tk.Label(
@@ -3128,7 +3152,7 @@ class HongThienCustomsDesktopApp:
         return True
 
     def paste_po_text_dialog(self):
-        dlg = tk.Toplevel(self.root)
+        dlg = self.new_dialog()
         dlg.title("Dán Văn Bản PO Để Phân Tích Offline Trên Máy")
         dlg.geometry("680x360")
         tk.Label(dlg, text="Dán nội dung PO (Kodi hoặc Tesa) vào ô bên dưới để tự động bóc tách Số PO, Số lượng, Đơn giá:", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=12, pady=8)
@@ -3187,7 +3211,7 @@ class HongThienCustomsDesktopApp:
             self.refresh_step1_tree()
 
     def open_item_editor_modal(self, edit_idx=None):
-        dlg = tk.Toplevel(self.root)
+        dlg = self.new_dialog()
         dlg.title("Thêm / Sửa Dòng Hàng PO (Tự Động Nhớ SL/Kiện & kg/Chiếc Cho Lần Sau)")
         dlg.geometry("560x450")
         cur = self.cur_items[edit_idx] if edit_idx is not None else {

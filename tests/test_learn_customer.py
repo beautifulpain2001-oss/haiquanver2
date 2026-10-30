@@ -192,6 +192,8 @@ def test_wizard_adds_customer_and_scans_po(store, sample_docs, monkeypatch):
     try:
         ui = app.HongThienCustomsDesktopApp(root, store)
         wz = ui.open_learn_customer_wizard(paths=[sample_docs["vat"], sample_docs["pxk"], sample_docs["inv"]])
+        # Cửa sổ học khách mới phải gắn với cửa sổ chính, không bị cửa sổ chính che mất
+        assert str(wz["dlg"].transient()) == str(root)
         assert wz["vars"]["mst"].get() == "2301234567"
         assert len(wz["tree"].get_children()) == 2
         wz["vars"]["key"].set("daiphat")

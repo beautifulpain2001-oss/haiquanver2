@@ -51,3 +51,15 @@ def test_export_all_and_transfer_to_step2(gui, store, customer):
     assert len(store.records) == before  # cùng khách + PO thì cập nhật, không nhân bản
     saved = next(r for r in store.records if r["customer"] == customer and r["poNumber"] == rec["poNumber"])
     assert saved["files"]["vat"]["name"].startswith("Bo_Ho_So_Xuat_Hang_")
+
+
+def test_button_error_is_logged_and_shown(gui, tmp_path, monkeypatch):
+    # Bản .exe không có console: lỗi trong nút bấm phải ghi ra file và hiện hộp thoại, không im lặng
+    monkeypatch.setattr(app, "get_app_dir", lambda: str(tmp_path))
+    try:
+        raise ValueError("lỗi thử")
+    except ValueError as e:
+        gui.root.report_callback_exception(type(e), e, e.__traceback__)
+    assert gui.shown[-1][0] == "showerror"
+    log = (tmp_path / "LOI_PHAN_MEM.txt").read_text(encoding="utf-8")
+    assert "ValueError: lỗi thử" in log
