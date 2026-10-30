@@ -77,17 +77,34 @@ def get_app_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 
-# OCR không bắt buộc: nếu máy đã cài Tesseract ở vị trí mặc định mà chưa có trong PATH thì tự trỏ tới.
-if pytesseract is not None and os.name == "nt" and not shutil.which("tesseract"):
-    for _tess in (
-        os.path.join(get_app_dir(), "Tesseract-OCR", "tesseract.exe"),
-        os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Tesseract-OCR", "tesseract.exe"),
-        os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "Tesseract-OCR", "tesseract.exe"),
-        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Tesseract-OCR", "tesseract.exe"),
-    ):
-        if os.path.isfile(_tess):
-            pytesseract.pytesseract.tesseract_cmd = _tess
-            break
+# OCR cho PDF scan / ảnh: bản .exe mang sẵn thư mục Tesseract-OCR (có tiếng Việt) cạnh file .exe và luôn ưu tiên
+# bản đó; chạy mã nguồn thì dùng Tesseract trong PATH hoặc ở vị trí cài đặt mặc định trên Windows.
+BUNDLED_TESSERACT = os.path.join(get_app_dir(), "Tesseract-OCR", "tesseract.exe")
+if pytesseract is not None and os.name == "nt":
+    if os.path.isfile(BUNDLED_TESSERACT):
+        pytesseract.pytesseract.tesseract_cmd = BUNDLED_TESSERACT
+        # Không để TESSDATA_PREFIX của một bản Tesseract khác trên máy (thường thiếu tiếng Việt) chen vào
+        os.environ["TESSDATA_PREFIX"] = os.path.join(os.path.dirname(BUNDLED_TESSERACT), "tessdata")
+    elif not shutil.which("tesseract"):
+        for _tess in (
+            os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Tesseract-OCR", "tesseract.exe"),
+            os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "Tesseract-OCR", "tesseract.exe"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Tesseract-OCR", "tesseract.exe"),
+        ):
+            if os.path.isfile(_tess):
+                pytesseract.pytesseract.tesseract_cmd = _tess
+                break
+
+
+def ocr_available():
+    """True nếu đọc được PDF scan / ảnh: có pytesseract, pypdfium2 và chạy được chương trình Tesseract."""
+    if pytesseract is None or pdfium is None:
+        return False
+    try:
+        pytesseract.get_tesseract_version()
+        return True
+    except Exception:
+        return False
 
 
 # ==============================================================================
@@ -2111,7 +2128,7 @@ def learn_customer_from_documents(paths):
             if txt.strip():
                 po_text += ("\n" if po_text else "") + txt
             else:
-                errors.append(f"{os.path.basename(p)}: không đọc được chữ (PDF ảnh cần Tesseract OCR)")
+                errors.append(f"{os.path.basename(p)}: không đọc được chữ" + ("" if ocr_available() else " (PDF ảnh cần bộ OCR Tesseract-OCR cạnh file .exe)"))
         except Exception as e:
             errors.append(f"{os.path.basename(p)}: {e}")
     draft = merge_learned_docs(results)
@@ -2964,7 +2981,11 @@ class HongThienCustomsDesktopApp:
             self.refresh_step1_tree()
             messagebox.showinfo("Quét PO Kodi Offline", f"Đã bóc tách PO {po_no} ({len(lines)} dòng hàng) hoàn toàn Offline!")
         else:
-            messagebox.showwarning("Quét PO Offline", "File PDF là ảnh scan chưa có lớp chữ nhúng. Bạn có thể bấm 'Dán Văn Bản PO' hoặc thêm dòng trực tiếp.")
+            if ocr_available():
+                msg = "Không tìm thấy dòng hàng trong file (kể cả sau khi OCR ảnh scan). Bản scan có thể mờ/nghiêng; bạn có thể bấm 'Dán Văn Bản PO' hoặc thêm dòng trực tiếp."
+            else:
+                msg = "File PDF là ảnh scan chưa có lớp chữ nhúng và máy chưa có bộ OCR (thư mục Tesseract-OCR cạnh file .exe). Bạn có thể bấm 'Dán Văn Bản PO' hoặc thêm dòng trực tiếp."
+            messagebox.showwarning("Quét PO Offline", msg)
 
     def open_learn_customer_wizard(self, paths=None):
         """Trình thêm khách mới: nạp XML hóa đơn/PXK, Invoice Excel, PO mẫu -> xem lại -> Lưu."""
@@ -3578,10 +3599,71 @@ def run_self_test():
         print("Verified full workbook for:", rec["customer"], "->", out_f)
 
 
-if __name__ == "__main__":
-    if "--self-test" in sys.argv:
+OCR_SAMPLE_KODI = """CÔNG TY TNHH KODI NEW MATERIAL VIỆT NAM
+ĐƠN ĐẶT HÀNG Số: 03102026 - 01KDHT
+Bắc Ninh, ngày 03 tháng 10 năm 2026
+1 Ống giấy phi 76 x 9 x 1000mm chiếc 31.500 31.500.000
+2 Ống giấy phi 152.4x12x1000mm chiếc 89.700 44.850.000
+Tổng cộng 76.350.000"""
+
+OCR_SAMPLE_TESA = """tesa site Hai Phong
+Purchase Order: 8600226354
+10 136,000 PC 39778-90019-00 26,500.00 100 36,040,000.00
+PAPER CORE 33.2X2.65X19MM, BLACK
+Net Value: VND 36,040,000.00"""
+
+
+def make_scanned_pdf(path, pages_text):
+    """Tạo PDF chỉ có ảnh (giống bản scan, không có lớp chữ), mỗi phần tử của pages_text là một trang A4 200 dpi."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    font = None
+    for name in ("arial.ttf", "DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"):
         try:
-            run_self_test()
+            font = ImageFont.truetype(name, 26)
+            break
+        except OSError:
+            continue
+    if font is None:
+        font = ImageFont.load_default(size=26)
+    imgs = []
+    for text in pages_text:
+        img = Image.new("RGB", (1654, 2339), "white")
+        draw = ImageDraw.Draw(img)
+        for i, line in enumerate(text.splitlines()):
+            draw.text((120, 300 + i * 48), line, fill="black", font=font)
+        imgs.append(img)
+    imgs[0].save(path, "PDF", resolution=200, save_all=True, append_images=imgs[1:])
+
+
+def run_ocr_self_test():
+    """Kiểm tra OCR PDF scan: PO Kodi 1 trang và PO Tesa 2 trang (đọc trang chẵn) dựng thành ảnh rồi bóc tách lại."""
+    assert ocr_available(), "Không chạy được Tesseract OCR (thiếu thư mục Tesseract-OCR cạnh app?)"
+    langs = pytesseract.get_languages(config="")
+    assert "vie" in langs and "eng" in langs, f"Tesseract thiếu dữ liệu ngôn ngữ vie/eng: {langs}"
+    store = DedicatedDataStore()
+    with tempfile.TemporaryDirectory() as tmp:
+        kodi_pdf = os.path.join(tmp, "kodi_scan.pdf")
+        make_scanned_pdf(kodi_pdf, [OCR_SAMPLE_KODI])
+        txt = extract_text_from_pdf_or_image_offline(kodi_pdf)
+        po, po_date, lines = parse_kodi_po_text(txt, store.kodi_items, store)
+        assert po == "03102026-01KDHT", f"Kodi: sai số PO {po!r}\n{txt}"
+        assert po_date == "03/10/2026", f"Kodi: sai ngày {po_date!r}"
+        assert [(x["qty"], x["amount"]) for x in lines] == [(1000, 31_500_000), (500, 44_850_000)], f"Kodi: sai dòng hàng {lines}"
+
+        tesa_pdf = os.path.join(tmp, "tesa_scan.pdf")
+        make_scanned_pdf(tesa_pdf, ["GENERAL TERMS AND CONDITIONS OF PURCHASE", OCR_SAMPLE_TESA])
+        txt = extract_text_from_pdf_or_image_offline(tesa_pdf, is_tesa=True)
+        first_po, lines = parse_tesa_po_text(txt, store.tesa_items, store)
+        assert first_po == "8600226354", f"Tesa: sai số PO {first_po!r}\n{txt}"
+        assert [(x["ma_sp"], x["qty"]) for x in lines] == [("39778-90019-00", 136000)], f"Tesa: sai dòng hàng {lines}"
+    print("OCR PDF scan OK: Kodi + Tesa")
+
+
+if __name__ == "__main__":
+    if "--self-test" in sys.argv or "--ocr-self-test" in sys.argv:
+        try:
+            run_ocr_self_test() if "--ocr-self-test" in sys.argv else run_self_test()
         except Exception:
             # Bản .exe không có cửa sổ console: ghi lỗi ra file cạnh app và trả mã lỗi thay vì hiện hộp thoại treo máy.
             import traceback

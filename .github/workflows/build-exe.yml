@@ -34,6 +34,13 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-build.txt
       - run: pip install -r requirements-build.txt
+      - name: Cài Tesseract OCR + dữ liệu tiếng Việt (để đóng gói kèm .exe)
+        shell: pwsh
+        run: |
+          choco install tesseract -y --no-progress
+          $tessdata = "$env:ProgramFiles\Tesseract-OCR\tessdata"
+          Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata/raw/4.1.0/vie.traineddata" -OutFile "$tessdata\vie.traineddata"
+          & "$env:ProgramFiles\Tesseract-OCR\tesseract.exe" --list-langs
       - name: Build .exe + self-test + mở thử giao diện
         run: python build_exe.py
       - uses: actions/upload-artifact@v4

@@ -1,6 +1,6 @@
 -r requirements.txt
 pyinstaller>=6.10
-# Tùy chọn cho OCR (chỉ hoạt động khi máy đã cài Tesseract)
+# OCR PDF scan: build_exe.py chép kèm chương trình Tesseract (cài sẵn trên máy build) ra cạnh file .exe
 pillow>=10.0
 pytesseract>=0.3.10
 pypdfium2>=4.0
