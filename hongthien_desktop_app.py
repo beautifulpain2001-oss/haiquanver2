@@ -70,6 +70,26 @@ except ImportError:
     pytesseract = None
 
 
+def get_app_dir():
+    """Thư mục chứa app: cạnh file .exe khi đã đóng gói (PyInstaller), cạnh file .py khi chạy mã nguồn."""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+# OCR không bắt buộc: nếu máy đã cài Tesseract ở vị trí mặc định mà chưa có trong PATH thì tự trỏ tới.
+if pytesseract is not None and os.name == "nt" and not shutil.which("tesseract"):
+    for _tess in (
+        os.path.join(get_app_dir(), "Tesseract-OCR", "tesseract.exe"),
+        os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Tesseract-OCR", "tesseract.exe"),
+        os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "Tesseract-OCR", "tesseract.exe"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Tesseract-OCR", "tesseract.exe"),
+    ):
+        if os.path.isfile(_tess):
+            pytesseract.pytesseract.tesseract_cmd = _tess
+            break
+
+
 # ==============================================================================
 # 1. HẰNG SỐ & HỒ SƠ KHÁCH HÀNG (SHIRAI • KODI • TESA)
 # ==============================================================================
@@ -300,7 +320,7 @@ class DedicatedDataStore:
     """Quản lý tập lưu trữ dữ liệu riêng (SQLite + JSON + Cây thư mục Host)."""
 
     def __init__(self, base_dir=None):
-        app_dir = os.path.dirname(os.path.abspath(__file__))
+        app_dir = get_app_dir()
         self.config_file = os.path.join(app_dir, "config_desktop.json")
         saved_dir = None
         if os.path.exists(self.config_file):
@@ -3560,9 +3580,22 @@ def run_self_test():
 
 if __name__ == "__main__":
     if "--self-test" in sys.argv:
-        run_self_test()
+        try:
+            run_self_test()
+        except Exception:
+            # Bản .exe không có cửa sổ console: ghi lỗi ra file cạnh app và trả mã lỗi thay vì hiện hộp thoại treo máy.
+            import traceback
+            err = traceback.format_exc()
+            if sys.stderr is not None:
+                sys.stderr.write(err)
+            with open(os.path.join(get_app_dir(), "SELF_TEST_LOI.txt"), "w", encoding="utf-8") as f:
+                f.write(err)
+            sys.exit(1)
         sys.exit(0)
     store = DedicatedDataStore()
     root = tk.Tk()
     app = HongThienCustomsDesktopApp(root, store)
+    if "--gui-smoke" in sys.argv:
+        # Dùng khi kiểm tra bản đóng gói: mở đủ giao diện rồi tự đóng.
+        root.after(3000, root.destroy)
     root.mainloop()

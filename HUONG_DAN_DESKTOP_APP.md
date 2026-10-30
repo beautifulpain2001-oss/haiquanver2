@@ -22,3 +22,9 @@
 2. Kiểm tra, sửa các ô và xóa dòng hàng sai, bấm **"🔍 Thử đọc PO mẫu"** để xem app đọc đúng chưa, rồi bấm **"💾 Lưu Khách Hàng Mới"**. Chưa bấm Lưu thì không có gì được ghi.
 3. Khách mới xuất hiện ở hàng chọn khách của Bước 1. Quét PO như bình thường: app nhận dòng hàng theo mã/tên đã học, tính kiện và cân nặng theo định mức, xuất đủ VAT, PXK, Invoice/PKL, DNTT.
 4. Dữ liệu học được lưu trong `master_catalog.json` (`custom_profiles`, `custom_items`), dùng chung qua ổ mạng LAN như danh mục hiện có.
+
+## 4. Bản `.exe` Không Cần Cài Python
+- **Tải bản dựng sẵn:** vào tab **Actions → build-exe** trên GitHub, mở lần chạy mới nhất và tải `HongThien_HaiQuan_Desktop_Windows` ở mục *Artifacts* (hoặc tải ở trang **Releases** nếu đã đăng). Giải nén rồi bấm đúp `HongThien_HaiQuan_Desktop.exe`.
+- **Tự đóng gói trên máy có Python:** chạy `2_DONG_GOI_RA_FILE_EXE.bat` (dùng `build_exe.py`: build bằng PyInstaller, tự chạy `--self-test` trên bản `.exe`, rồi nén zip vào `dist/`).
+- Dữ liệu `DATA_LUU_TRU_HONG_THIEN/` và `config_desktop.json` nằm **cạnh file `.exe`**, không nằm trong thư mục tạm.
+- OCR PDF scan/ảnh cần cài Tesseract riêng (không đóng gói kèm). Chi tiết ở `HUONG_DAN_BAN_EXE.md`.
