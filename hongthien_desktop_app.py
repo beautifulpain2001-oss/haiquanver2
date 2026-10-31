@@ -445,6 +445,16 @@ class DedicatedDataStore:
                         it["hs"] = hs
         self.save_catalog()
 
+    def remember_item_refs(self, cust_key, name, refs):
+        """Nhớ mã vật liệu / Inquiry No / Customs No người dùng đã sửa, để lần quét PO sau dùng thay chữ OCR."""
+        for it in self.custom_items.get(cust_key, []):
+            if it.get("name") == name:
+                changed = {k: v for k, v in refs.items() if v and it.get(k) != v}
+                if changed:
+                    it.update(changed)
+                    self.save_catalog()
+                return
+
     def get_item_norm(self, name):
         return self.item_mem.get(name)
 
@@ -1510,12 +1520,16 @@ def build_pkl_kodi_sheet(wb, rec, sheet_name="Invoice_Kodi", skip_h=False):
 
 
 def build_invoice_pkl_sheet(wb, rec, sheet_name="Invoice_PKL", skip_h=False):
+    if is_best_docset(rec):
+        return build_pkl_best_sheet(wb, rec, sheet_name)
     if rec.get("customer") == "kodi":
         return build_pkl_kodi_sheet(wb, rec, sheet_name, skip_h=skip_h)
     return build_pkl_standard_sheet(wb, rec, sheet_name)
 
 
 def build_dntt_sheet(wb, rec, sheet_name="DNTT"):
+    if is_best_docset(rec):
+        return build_dntt_best_sheet(wb, rec, sheet_name)
     ws = wb.create_sheet(title=sheet_name[:31])
     prof = PROFILES.get(rec["customer"], PROFILES["shirai"])
     dt_parts = (rec.get("docDate") or datetime.date.today().strftime("%Y-%m-%d")).split("-")
@@ -1696,8 +1710,9 @@ def build_plx_sheet(wb, rec, sheet_name="PLX"):
 
 def build_customs_b11_sheet(wb, rec, sheet_name="ToKhai_B11"):
     ws = wb.create_sheet(title=sheet_name[:31])
-    prof = PROFILES["tesa"]
-    c_cfg = prof["customs"]
+    is_tesa = rec.get("customer", "tesa") == "tesa"
+    prof = PROFILES["tesa"] if is_tesa else PROFILES.get(rec["customer"], PROFILES["tesa"])
+    c_cfg = prof.get("customs") or PROFILES["tesa"]["customs"]
     dt_parts = (rec.get("docDate") or datetime.date.today().strftime("%Y-%m-%d")).split("-")
     dt_vn = f"{dt_parts[2]}/{dt_parts[1]}/{dt_parts[0]}" if len(dt_parts) == 3 else rec.get("docDate", "")
     pxk_no = rec.get("pxkNo") or "00000287"
@@ -1725,9 +1740,10 @@ def build_customs_b11_sheet(wb, rec, sheet_name="ToKhai_B11"):
             ws.cell(row=r, column=3, value=note).font = Font(name="Arial", size=10, italic=True, color="9B1C1C")
         r += 1
 
-    tot_kien = sum(x.get("kien", 0) for x in items)
+    tot_kien = sum(x.get("kien", 0) for x in items) if is_tesa else lot_totals(rec)["kien"]
     tot_gross = sum(x.get("gross") or x.get("net") or 0 for x in items)
     tot_amt = sum(x.get("amount", 0) for x in items)
+    pos = [p for p, _ in rec_po_list(rec)]
 
     write_title("1. THÔNG TIN CHUNG TỜ KHAI (nhập vào VNACCS)")
     write_kv("Mã loại hình", c_cfg["type"])
@@ -1755,7 +1771,13 @@ def build_customs_b11_sheet(wb, rec, sheet_name="ToKhai_B11"):
     write_kv("Tổng trị giá tính thuế", tot_amt)
     write_kv("Phân loại nộp thuế", "A")
     write_kv("Tổng số dòng hàng của tờ khai", len(items), "Phải bằng số dòng PO/invoice (lỗi thường gặp: khai thừa)")
-    write_kv("Phần ghi chú", f"Phuong thuc thanh toan: TT. PXKKVCNB {pxk_no}. Ký hiệu {prof['symbol']} ngày  {dt_vn}")
+    if is_tesa:
+        write_kv("Phần ghi chú", f"Phuong thuc thanh toan: TT. PXKKVCNB {pxk_no}. Ký hiệu {prof['symbol']} ngày  {dt_vn}")
+    else:
+        write_kv("Ký hiệu và số hiệu", "P/O: " + " + ".join(pos))
+        write_kv("Số hóa đơn", f"B - {pxk_no}", "Ghi số PXKKVCNB (không phải số hóa đơn VAT)")
+        write_kv("Phương thức thanh toán", "KC")
+        write_kv("Phần ghi chú", f"Phuong thuc thanh toan: TT .PXKKVCNB số: {pxk_no} Ky hieu {prof.get('symbol', '6C26NAA')} ngày {dt_vn}")
     write_kv("Số quản lý nội bộ doanh nghiệp", c_cfg["internalNo"])
     write_kv("Thời hạn vận chuyển bảo thuế / ngày hàng đi", dt_vn)
     write_kv("Địa điểm đích cho vận chuyển bảo thuế", c_cfg["bondDest"], f"ngày đến {dt_vn}")
@@ -1771,8 +1793,12 @@ def build_customs_b11_sheet(wb, rec, sheet_name="ToKhai_B11"):
         c.alignment = Alignment(horizontal="center", wrap_text=True)
     r += 1
     for idx, it in enumerate(items, 1):
-        desc = f"{(it.get('ten_hq') or it['ten_sp']).strip()} ,PO:{it.get('po', '')}. Mới 100% "
-        u_val = c_cfg["unitQty"] if strip_accents_upper(it.get("unit", "")) == "CAI" else it.get("unit", "ống")
+        if is_tesa:
+            desc = f"{(it.get('ten_hq') or it['ten_sp']).strip()} ,PO:{it.get('po', '')}. Mới 100% "
+            u_val = c_cfg["unitQty"] if strip_accents_upper(it.get("unit", "")) == "CAI" else it.get("unit", "ống")
+        else:
+            desc = customs_desc(it)
+            u_val = customs_unit(prof, it)
         vals = [f"<{idx:02d}>", it.get("hs", ""), desc, it.get("qty", 0), u_val, it.get("net", ""), it.get("price", 0), it.get("amount", 0)]
         for c_i, v in enumerate(vals, 1):
             c = ws.cell(row=r, column=c_i, value=v)
@@ -1796,9 +1822,12 @@ def build_customs_b11_sheet(wb, rec, sheet_name="ToKhai_B11"):
         ws.cell(row=r, column=3, value=detail).font = Font(name="Arial", size=11)
         r += 1
 
-    pos = [str(x.get("po", "")) for x in items]
-    write_chk("Số PO đúng 10 chữ số, bắt đầu 8600", all(re.match(r"^8600\d{6}$", p) for p in pos), ", ".join(pos))
-    write_chk("Không trùng số PO giữa các dòng", len(set(pos)) == len(pos), "")
+    if is_tesa:
+        pos = [str(x.get("po", "")) for x in items]
+        write_chk("Số PO đúng 10 chữ số, bắt đầu 8600", all(re.match(r"^8600\d{6}$", p) for p in pos), ", ".join(pos))
+        write_chk("Không trùng số PO giữa các dòng", len(set(pos)) == len(pos), "")
+    else:
+        write_chk("Mọi dòng hàng đều có số PO", all(str(x.get("po") or "").strip() for x in items), " + ".join(pos))
     write_chk("Số lượng x đơn giá = thành tiền từng dòng", all(abs(x.get("qty", 0) * x.get("price", 0) - x.get("amount", 0)) < 1e-6 for x in items), "")
     write_chk("Tổng trị giá = tổng các dòng", abs(tot_amt - (rec.get("totalAmount") or tot_amt)) < 1e-6, f"{tot_amt:,.0f}")
     write_chk("Tổng số dòng hàng tờ khai = số dòng PO", True, f"{len(items)} dòng")
@@ -1832,6 +1861,620 @@ def build_so_shirai_sheet(wb, rec, sheet_name="SO"):
             "HÀNG THƯƠNG MẠI", it.get("ma_kh", ""), "Non.FSC"
         ])
     return ws
+
+
+# ==============================================================================
+# 4A. BỘ CHỨNG TỪ KIỂU "BEST" (khách gom nhiều PO một lô, mẫu song ngữ Trung - Việt)
+#   - Invoice nhiều dòng 'Số ĐĐH' + sheet 'CHI TIẾT ĐÓNG GÓI' riêng, số kiện = tổng SL / SL mỗi kiện
+#   - Phiếu giao hàng 送货单, Đối chiếu công nợ 对账单, Phiếu đề nghị thanh toán 請款單 theo mẫu khách
+#   - Tờ khai B11 theo khối 'customs' của từng khách + Danh sách hàng (dsh) để import ECUS
+#   Thông tin khách (tên, MST, địa chỉ, người liên hệ, định mức) KHÔNG nằm trong mã nguồn:
+#   học từ chứng từ mẫu và lưu trong master_catalog.json trên máy người dùng.
+# ==============================================================================
+HT_NAME = "CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN"
+HT_NAME_EN = "HONG THIEN PACKAGING PAPER JOINT STOCK COMPANY"
+HT_TEL = "02223.692.235"
+HT_BANK_ACC = "0301101186008"
+HT_BANK_AT = "MB Bank - CN Bắc Ninh"
+HT_SWIFT = "MSCBVNVX"
+
+BEST_DOCSET_DEFAULTS = {
+    "docSet": "best",
+    "unit": "ống",
+    "tare": 1.0,  # bì 1 kg mỗi dòng hàng
+    "defaultDiv": 20,  # 20 ống / kiện
+    "payDays": 60,  # ĐCCN / DNTT: hạn thanh toán = ngày hóa đơn + số ngày (sửa được ở Bước 1)
+    "dept": "QC Vải",
+    "nameCn": "",
+    "buyerContact": "",
+    "sellerContact": "",
+    "deliveryPlace": "",
+    "ocrLoose": True,
+    "customs": {
+        "type": "B11",
+        "office": "HQBACNINH",
+        "dept": "00",
+        "hsGroup": "4822",
+        "hs": "48229090",
+        "incoterm": "DAP",
+        "exporterCode": MST_HT,
+        "warehouse": "18A3CA3",
+        "warehouseName": "DOI NVU CCBN",
+        "loadPlace": "VNZZZ",
+        "unitQty": "PIP",
+        "unitWt": "KGM",
+        "pack": "PK",
+        "transport": "XETAI",
+        "internalNo": "#&XKPTQ",
+        "bondDest": "03PJCPJ",
+    },
+    # Mã tham chiếu đọc thêm trên từng dòng PO (dùng cho Phiếu giao hàng / ĐCCN)
+    "lineRefs": {
+        "inquiry": r"QS\s?\d{8,12}",
+        "customsNo": r"P[a-z]{2,5}ing\s?[A-Z]?\s?\d{2,4}",  # OCR hay đọc 'PackingF001' thành 'PachingF001'
+        "itemCode": r"(?<![A-Za-z0-9])[A-Z]{2,4}\d{4,7}(?![A-Za-z0-9])",
+    },
+}
+
+
+def is_best_docset(prof_or_rec):
+    prof = prof_or_rec
+    if isinstance(prof_or_rec, dict) and "customer" in prof_or_rec and "items" in prof_or_rec:
+        prof = PROFILES.get(prof_or_rec["customer"], {})
+    return (prof or {}).get("docSet") == "best"
+
+
+def short_place(addr):
+    """'..., Xã Cẩm Giàng, Thành phố Hải Phòng, Việt Nam.' -> 'Cẩm Giàng - Hải Phòng'."""
+    a = re.search(r"(?:Xã|Phường|Thị trấn|Huyện|Quận)\s+([^,.]+)", addr or "", re.I)
+    b = re.search(r"(?:Thành phố|TP\.?|Tỉnh)\s+([^,.]+)", addr or "", re.I)
+    return " - ".join(x.group(1).strip() for x in (a, b) if x)
+
+
+def _iso_to_date(s):
+    try:
+        y, m, d = (int(x) for x in str(s).split("-")[:3])
+        return datetime.date(y, m, d)
+    except Exception:
+        return datetime.date.today()
+
+
+def _dmy(d):
+    return f"{d.day:02d}/{d.month:02d}/{d.year}"
+
+
+def rec_po_list(rec):
+    """[(số PO, ngày PO)] theo thứ tự xuất hiện trên các dòng hàng của lô."""
+    dates = rec.get("poDates") or {}
+    pos = []
+    for it in rec.get("items", []):
+        p = str(it.get("po") or "").strip()
+        if p and p not in pos:
+            pos.append(p)
+    if not pos and rec.get("poNumber"):
+        pos = [rec["poNumber"]]
+    return [(p, dates.get(p) or (rec.get("poDate", "") if p == rec.get("poNumber") or len(pos) == 1 else "")) for p in pos]
+
+
+def lot_totals(rec):
+    items = rec.get("items", [])
+    qty = sum(float(x.get("qty") or 0) for x in items)
+    if is_best_docset(rec):
+        # Mẫu Best: Tổng kiện = tổng số ống / SL mỗi kiện (không làm tròn từng dòng)
+        frac = sum(float(x.get("qty") or 0) / float(x["div"]) for x in items if float(x.get("div") or 0) > 0)
+        kien = math.ceil(round(frac, 6))
+    else:
+        kien = sum(float(x.get("kien") or 0) for x in items)
+    return {
+        "qty": qty,
+        "net": round(sum(float(x.get("net") or 0) for x in items), 3),
+        "gross": round(sum(float(x.get("gross") or x.get("net") or 0) for x in items), 3),
+        "amount": sum(float(x.get("amount") or 0) for x in items),
+        "kien": int(kien) if float(kien).is_integer() else kien,
+    }
+
+
+def split_name_spec(name):
+    """'Ống giấy chống bụi 40 x 4 x 1350mm' -> ('Ống giấy chống bụi', '40 x 4 x 1350mm')."""
+    m = re.search(r"(?:phi\s*|ø|Φ)?\d+(?:[.,]\d+)?\s*(?:mm)?\s*[x*×]\s*\d", name or "", re.I)
+    if not m:
+        return (name or "").strip(), ""
+    return name[:m.start()].strip(" -,"), name[m.start():].strip()
+
+
+def customs_desc(it):
+    base = (it.get("ten_hq") or it.get("ten_sp") or "").strip().rstrip(".")
+    return base if "MỚI 100" in base.upper() else f"{base}. Hàng mới 100%"
+
+
+def customs_unit(prof, it):
+    cfg = prof.get("customs") or {}
+    if prof.get("docSet") == "best":
+        return cfg.get("unitQty", "PIP")
+    u = strip_accents_upper(it.get("unit", ""))
+    return {"CAI": "PCE", "CHIEC": "PCE", "ONG": "PIP", "TAM": "PCE"}.get(u, cfg.get("unitQty", "PCE"))
+
+
+def check_lot(rec):
+    """Kiểm tra chéo trước khi xuất. Trả về danh sách cảnh báo (rỗng = khớp hết)."""
+    prof = PROFILES.get(rec.get("customer"), {})
+    items = rec.get("items", [])
+    out = []
+    if not items:
+        return ["Lô chưa có dòng hàng nào."]
+    for i, it in enumerate(items, 1):
+        name = it.get("ten_sp", "")
+        qty = float(it.get("qty") or 0)
+        price = float(it.get("price") or 0)
+        kg = float(it.get("kg") or 0)
+        div = float(it.get("div") or 0)
+        net = float(it.get("net") or 0)
+        gross = float(it.get("gross") or 0)
+        tag = f"Dòng {i} ({name})"
+        if qty <= 0:
+            out.append(f"{tag}: số lượng bằng 0.")
+        if abs(qty * price - float(it.get("amount") or 0)) > 1:
+            out.append(f"{tag}: SL x đơn giá khác thành tiền.")
+        if kg <= 0:
+            out.append(f"{tag}: chưa có kg/đơn vị nên chưa tính được trọng lượng.")
+        elif abs(qty * kg - net) > 0.01:
+            out.append(f"{tag}: trọng lượng tịnh khác SL x kg/đơn vị ({qty * kg:,.2f}).")
+        if gross + 1e-9 < net:
+            out.append(f"{tag}: trọng lượng cả bì nhỏ hơn tịnh.")
+        if div <= 0:
+            out.append(f"{tag}: chưa có SL/kiện.")
+        elif qty and abs(qty / div - round(qty / div)) > 1e-6:
+            out.append(f"{tag}: {qty:,.0f} không chia hết cho {div:g}/kiện (kiện lẻ).")
+        if not it.get("hs"):
+            out.append(f"{tag}: chưa có mã HS.")
+        if prof.get("linePo") and not str(it.get("po") or "").strip():
+            out.append(f"{tag}: chưa có số PO.")
+    if is_best_docset(prof):
+        if not rec.get("pxkNo"):
+            out.append("Chưa nhập số PXK (dùng trên Invoice, Đóng gói và tờ khai).")
+        if not rec.get("hdNo"):
+            out.append("Chưa nhập số hóa đơn VAT (dùng trên Phiếu giao hàng và ĐCCN).")
+    return out
+
+
+def build_check_sheet(wb, rec, problems, sheet_name="KiemTra"):
+    ws = wb.create_sheet(title=sheet_name[:31])
+    t = lot_totals(rec)
+    ws.column_dimensions["A"].width = 40
+    ws.column_dimensions["B"].width = 90
+    ws["A1"] = "KIỂM TRA CHÉO TRƯỚC KHI PHÁT HÀNH"
+    ws["A1"].font = Font(name="Arial", size=13, bold=True)
+    rows = [
+        ("Số dòng hàng", len(rec.get("items", []))),
+        ("Số PO", " + ".join(p for p, _ in rec_po_list(rec))),
+        ("Tổng số lượng", t["qty"]),
+        ("Tổng số kiện", t["kien"]),
+        ("Tổng trọng lượng tịnh (kg)", t["net"]),
+        ("Tổng trọng lượng cả bì (kg)", t["gross"]),
+        ("Tổng tiền (VND)", t["amount"]),
+    ]
+    r = 3
+    for k, v in rows:
+        ws.cell(row=r, column=1, value=k).font = Font(name="Arial", size=11)
+        c = ws.cell(row=r, column=2, value=v)
+        c.font = Font(name="Arial", size=11, bold=True)
+        c.alignment = Alignment(horizontal="left")
+        if isinstance(v, (int, float)):
+            c.number_format = "#,##0.###"
+        r += 1
+    r += 1
+    head = ws.cell(row=r, column=1, value="KẾT QUẢ" if problems else "KẾT QUẢ: ĐẠT, các chứng từ khớp nhau")
+    head.font = Font(name="Arial", size=11, bold=True, color="9B1C1C" if problems else "03543F")
+    for p in problems:
+        r += 1
+        ws.cell(row=r, column=2, value=p).font = Font(name="Arial", size=11, color="9B1C1C")
+    return ws
+
+
+def _sheet_put(ws, font_name="Times New Roman"):
+    def put(addr, merge_rng, val, sz, bold=False, align_h="left", wrap=False, italic=False, valign="center"):
+        if merge_rng:
+            ws.merge_cells(merge_rng)
+        c = ws[addr]
+        c.value = val
+        c.font = Font(name=font_name, size=sz, bold=bold, italic=italic)
+        c.alignment = Alignment(horizontal=align_h, vertical=valign, wrap_text=wrap)
+        return c
+    return put
+
+
+def _fit_page(ws, landscape=False):
+    """In vừa 1 trang ngang khổ A4 như bản mẫu của khách."""
+    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+    ws.page_setup.orientation = "landscape" if landscape else "portrait"
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = ws.page_margins.right = 0.4
+
+
+def _outline(ws, r1, c1, r2, c2):
+    apply_region_outer_edge(ws, c1, r1, c2, r2, t=True, b=True, l=True, r=True)
+
+
+def _box(ws, r1, c1, r2, c2):
+    for r in range(r1, r2 + 1):
+        for c in range(c1, c2 + 1):
+            ws.cell(row=r, column=c).border = BOX_BORDER
+
+
+def build_pkl_best_sheet(wb, rec, sheet_name="Invoice"):
+    """HÓA ĐƠN THƯƠNG MẠI - BẢNG KÊ CHI TIẾT kiểu Best: một dòng 'Số ĐĐH' cho mỗi PO, tổng kiện = tổng SL / SL mỗi kiện."""
+    ws = wb.create_sheet(title=sheet_name[:31])
+    prof = PROFILES[rec["customer"]]
+    put = _sheet_put(ws)
+    dt = _dmy(_iso_to_date(rec.get("docDate")))
+    pos = rec_po_list(rec) or [("", "")]
+    for i, w in enumerate([5.5, 9, 9, 9, 9, 9, 9, 8, 11, 13, 13, 12, 16], 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    put("A1", "A1:M1", "HÓA ĐƠN THƯƠNG MẠI - BẢNG KÊ CHI TIẾT", 18, True, "center")
+    put("A2", "A2:H2", "Người Xuất khẩu: ", 12)
+    put("I2", "I2:K2", f"PXKKVCNB : {rec.get('pxkNo', '')}", 12)
+    put("L2", "L2:M2", f"Ngày :{dt}", 12)
+    r = 3
+    put(f"A{r}", f"A{r}:H{r}", HT_NAME, 12, True)
+    for po, po_d in pos:
+        put(f"I{r}", f"I{r}:K{r}", f"Số ĐĐH: {po}", 12, True)
+        put(f"L{r}", f"L{r}:M{r}", f"Ngày:{po_d}", 12)
+        r += 1
+    put(f"A{r}", f"A{r}:H{r + 1}", ADDR_HT.rstrip("."), 12, wrap=True, valign="top")
+    put(f"I{r}", f"I{r}:M{r}", "Phương thức thanh toán: ", 12)
+    put(f"I{r + 1}", f"I{r + 1}:M{r + 1}", "Chuyển khoản", 12)
+    r += 2
+    put(f"A{r}", f"A{r}:H{r}", "Người nhận hàng:", 12)
+    put(f"I{r}", f"I{r}:M{r}", "Người nhập khẩu", 12)
+    put(f"A{r + 1}", f"A{r + 1}:H{r + 1}", prof["name"], 12, True, wrap=True)
+    put(f"I{r + 1}", f"I{r + 1}:M{r + 1}", prof["name"], 12, True, wrap=True)
+    put(f"A{r + 2}", f"A{r + 2}:H{r + 2}", prof["addr"], 12, wrap=True)
+    put(f"I{r + 2}", f"I{r + 2}:M{r + 2}", prof["addr"], 12, wrap=True)
+    ws.row_dimensions[r + 2].height = 33
+    put(f"A{r + 3}", f"A{r + 3}:H{r + 3}", "Phương tiện vận tải: Xe Ôtô", 12)
+    put(f"I{r + 3}", f"I{r + 3}:M{r + 3}", f"Phương thức giao hàng: {(prof.get('customs') or {}).get('incoterm', 'DAP')}", 12)
+    put(f"A{r + 4}", f"A{r + 4}:M{r + 4}", f"Từ: {HT_NAME}\nĐến: {prof['name']}", 12, wrap=True)
+    ws.row_dimensions[r + 4].height = 33
+    for top, bot in ((2, 2), (3, r - 1), (r, r + 2), (r + 3, r + 3)):
+        _outline(ws, top, 1, bot, 8)
+        _outline(ws, top, 9, bot, 13)
+    _outline(ws, r + 4, 1, r + 4, 13)
+    put(f"A{r + 5}", f"A{r + 5}:B{r + 5}", "Diễn giải:", 12)
+    r += 6
+
+    hr = r
+    heads = [("A", None, "STT"), ("B", "G", "Tên Hàng"), ("H", None, "ĐVT"), ("I", None, "Số \nLượng"), ("J", None, "Trọng lượng\n cả bì"),
+             ("K", None, "Trọng lượng\n tịnh"), ("L", None, "Đơn Giá \nVND"), ("M", None, "Thành Tiền \nVND")]
+    for c1, c2, h in heads:
+        put(f"{c1}{hr}", f"{c1}{hr}:{c2}{hr}" if c2 else None, h, 12, True, "center", True)
+    ws.row_dimensions[hr].height = 33
+    items = rec.get("items", [])
+    for idx, it in enumerate(items, 1):
+        rr = hr + idx
+        put(f"A{rr}", None, idx, 12, align_h="center")
+        put(f"B{rr}", f"B{rr}:G{rr}", it["ten_sp"], 12)
+        put(f"H{rr}", None, it.get("unit") or prof["unit"], 12, align_h="center")
+        for col, key, fmt in (("I", "qty", "#,##0"), ("J", "gross", "#,##0.00"), ("K", "net", "#,##0.00"), ("L", "price", "#,##0"), ("M", "amount", "#,##0")):
+            c = put(f"{col}{rr}", None, it.get(key, 0), 12, align_h="right")
+            c.number_format = fmt
+    tr = hr + len(items) + 1
+    put(f"B{tr}", f"B{tr}:G{tr}", "Tổng", 12, True, "center")
+    t = lot_totals(rec)
+    for col, key, fmt in (("I", "qty", "#,##0"), ("J", "gross", "#,##0.00"), ("K", "net", "#,##0.00"), ("M", "amount", "#,##0")):
+        c = put(f"{col}{tr}", None, f"=SUM({col}{hr + 1}:{col}{tr - 1})" if items else 0, 12, True, "right")
+        c.number_format = fmt
+    _box(ws, hr, 1, tr, 13)
+    sr = tr + 1
+    put(f"B{sr}", None, "Tổng: ", 12, True)
+    put(f"C{sr}", None, t["kien"], 12, True, "center")
+    put(f"D{sr}", None, "kiện", 12, True)
+    put(f"F{sr}", None, "", 12)
+    c = put(f"G{sr}", None, t["gross"], 12, True, "right")
+    c.number_format = "#,##0.00"
+    put(f"H{sr}", None, "kg", 12, True)
+    c = put(f"I{sr}", None, t["net"], 12, True, "right")
+    c.number_format = "#,##0.00"
+    put(f"J{sr}", None, "kg", 12, True)
+    put(f"B{sr + 1}", f"B{sr + 1}:K{sr + 1}", "Hàng được sản xuất tại Việt Nam, mới 100 %", 12, True)
+    put(f"H{sr + 2}", f"H{sr + 2}:M{sr + 2}", HT_NAME, 12, True, "center")
+    _fit_page(ws, landscape=False)
+    return ws
+
+
+def build_packing_best_sheet(wb, rec, sheet_name="DongGoi"):
+    """CHI TIẾT ĐÓNG GÓI: không có giá; N.W, G.W từng dòng; tổng kiện."""
+    ws = wb.create_sheet(title=sheet_name[:31])
+    prof = PROFILES[rec["customer"]]
+    put = _sheet_put(ws)
+    dt = _dmy(_iso_to_date(rec.get("docDate")))
+    pos = rec_po_list(rec) or [("", "")]
+    city = short_place(prof.get("addr", "")).split(" - ")[-1]
+    incoterm = (prof.get("customs") or {}).get("incoterm", "DAP")
+    for i, w in enumerate([10, 40, 24, 16, 16, 18], 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    put("A1", "A1:F1", "CHI TIẾT ĐÓNG GÓI", 20, True, "center")
+    put("A2", "A2:C2", "Người bán:", 12)
+    put("D2", "D2:E2", f"PXKKVCNB : {rec.get('pxkNo', '')}", 12)
+    put("F2", None, f"Ngày: {dt}", 12)
+    r = 3
+    put(f"A{r}", f"A{r}:C{r}", HT_NAME, 12, True)
+    for po, po_d in pos:
+        put(f"D{r}", f"D{r}:E{r}", f"Số ĐĐH: {po}", 12)
+        put(f"F{r}", None, f"Ngày: {po_d}", 12)
+        r += 1
+    put(f"A{r}", f"A{r}:C{r}", ADDR_HT.rstrip("."), 12, wrap=True, valign="top")
+    put(f"D{r}", f"D{r}:F{r}", "Phương thức thanh toán", 12)
+    put(f"A{r + 1}", f"A{r + 1}:C{r + 1}", f"Tel : {HT_TEL}", 12)
+    put(f"D{r + 1}", f"D{r + 1}:F{r + 1}", "TTR", 12)
+    r += 3
+    put(f"A{r}", f"A{r}:C{r}", "Người mua:", 12)
+    put(f"A{r + 1}", f"A{r + 1}:C{r + 1}", prof["name"], 12, True, wrap=True)
+    put(f"A{r + 2}", f"A{r + 2}:C{r + 2}", prof["addr"], 12, wrap=True)
+    ws.row_dimensions[r + 2].height = 33
+    r += 4
+    put(f"A{r}", f"A{r}:B{r}", "Điểm xuất phát:", 11)
+    put(f"C{r}", None, "Điểm giao hàng", 11)
+    put(f"D{r}", f"D{r}:F{r}", "Điều kiện giao hàng", 11)
+    put(f"A{r + 1}", f"A{r + 1}:B{r + 1}", short_place(ADDR_HT), 11)
+    put(f"C{r + 1}", None, prof.get("deliveryPlace") or short_place(prof.get("addr", "")), 11)
+    put(f"D{r + 1}", f"D{r + 1}:F{r + 1}", f"{incoterm} {city}".strip(), 11)
+    put(f"A{r + 2}", f"A{r + 2}:B{r + 2}", "Phương thức vận chuyển:", 11)
+    put(f"A{r + 3}", f"A{r + 3}:B{r + 3}", "Xe tải", 11)
+    _outline(ws, 2, 1, r - 2, 3)
+    _outline(ws, 2, 4, r - 2, 6)
+    _outline(ws, r - 1, 1, r + 1, 2)
+    _outline(ws, r - 1, 3, r + 1, 3)
+    _outline(ws, r - 1, 4, r + 3, 6)
+    _outline(ws, r + 2, 1, r + 3, 3)
+    r += 4
+
+    hr = r
+    for c1, c2, h in (("A", None, "STT"), ("B", "C", "Mô tả hàng hóa"), ("D", None, "Số lượng"), ("E", None, "N.W (KGS)"), ("F", None, "G.W (KGS)")):
+        put(f"{c1}{hr}", f"{c1}{hr}:{c2}{hr}" if c2 else None, h, 12, True, "center")
+    items = rec.get("items", [])
+    for idx, it in enumerate(items, 1):
+        rr = hr + idx
+        put(f"A{rr}", None, idx, 12, align_h="center")
+        put(f"B{rr}", f"B{rr}:C{rr}", it["ten_sp"], 12)
+        for col, key, fmt in (("D", "qty", "#,##0"), ("E", "net", "#,##0.00"), ("F", "gross", "#,##0.00")):
+            c = put(f"{col}{rr}", None, it.get(key, 0), 12, align_h="right")
+            c.number_format = fmt
+    tr = hr + len(items) + 1
+    put(f"A{tr}", None, "TOTAL:", 12, True)
+    for col, fmt in (("D", "#,##0"), ("E", "#,##0.00"), ("F", "#,##0.00")):
+        c = put(f"{col}{tr}", None, f"=SUM({col}{hr + 1}:{col}{tr - 1})" if items else 0, 12, True, "right")
+        c.number_format = fmt
+    _box(ws, hr, 1, tr, 6)
+    put(f"A{tr + 2}", None, "Tổng", 12)
+    put(f"B{tr + 2}", None, lot_totals(rec)["kien"], 12, True, "right")
+    put(f"C{tr + 2}", None, "kiện", 12)
+    put(f"D{tr + 3}", None, "Signed by: ", 12, True)
+    put(f"C{tr + 4}", f"C{tr + 4}:F{tr + 4}", HT_NAME, 12, True, "right")
+    _fit_page(ws, landscape=False)
+    return ws
+
+
+def build_pgh_best_sheet(wb, rec, sheet_name="PhieuGiaoHang"):
+    """送货单 PHIẾU GIAO HÀNG theo mẫu khách: mã vật liệu, quy cách, Inquiry No, số PO, bộ phận, Customs No."""
+    ws = wb.create_sheet(title=sheet_name[:31])
+    prof = PROFILES[rec["customer"]]
+    put = _sheet_put(ws)
+    d_giao = (_iso_to_date(rec["deliveryDate"]) if re.match(r"^\d{4}-\d{1,2}-\d{1,2}$", str(rec.get("deliveryDate") or "").strip())
+              else _iso_to_date(rec.get("docDate")) + datetime.timedelta(days=1))
+    for i, w in enumerate([6, 14, 22, 18, 10, 8, 10, 12, 12, 18, 16, 12, 14], 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    put("A1", "A1:M1", "送货单\nPHIẾU GIAO HÀNG", 16, True, "center", True)
+    ws.row_dimensions[1].height = 42
+    put("A2", "A2:I2", f"送货单位/ Bên giao hàng：{HT_NAME} ", 11)
+    put("J2", "J2:M2", f"送货单号/Số phiếu giao hàng：XKTLGH-{d_giao:%y%m%d}", 11)
+    put("A3", "A3:I3", f"送货地址/Địa chỉ bên giao hàng ： {ADDR_HT}", 11, wrap=True)
+    put("J3", "J3:M3", f"发票号/ Số hóa đơn: {rec.get('hdNo', '')}", 11)
+    put("A4", "A4:I4", f"收货单位/ Bên nhận hàng：{prof['name']}", 11)
+    put("J4", "J4:M4", f"送货日期/ Ngày giao hàng：{_dmy(d_giao)}", 11)
+    put("A5", "A5:M5", f"收货地址/Địa chỉ nhận hàng：{prof.get('addrKho') or prof['addr']}", 11, wrap=True)
+    put("A6", "A6:E6", f"联系人 Người liên hệ：{prof.get('buyerContact', '')}", 11)
+    put("F6", "F6:M6", "联系电话/ DTDD：", 11)
+    heads = ["序号\nSTT", "Mã vật Liệu \n物料编码", "产品名称\nTên sản phẩm", "规格\nQuy cách", "品牌\nThương hiệu", "单位\nĐơn vị tính",
+             "数量\nSố lượng", "净重\nTrọng lượng tịnh", "毛重\nTrọng lượng thô", "订单号/行号\nSố đơn đặt hàng", "申购单号\nSố đơn xin mua",
+             "使用部门\nBộ phận sử dụng", "备注\nGhi chú"]
+    for i, h in enumerate(heads, 1):
+        put(f"{get_column_letter(i)}7", None, h, 10, True, "center", True)
+    ws.row_dimensions[7].height = 45
+    items = rec.get("items", [])
+    for idx, it in enumerate(items, 1):
+        r = 7 + idx
+        base, spec = split_name_spec(it["ten_sp"])
+        unit = (it.get("unit") or prof["unit"])
+        vals = [idx, it.get("ma_sp", ""), base, spec, "", unit[:1].upper() + unit[1:], it.get("qty", 0), it.get("net", 0), it.get("gross", 0),
+                it.get("inquiry", ""), it.get("po", ""), it.get("dept") or prof.get("dept", ""), it.get("customsNo", "")]
+        for i, v in enumerate(vals, 1):
+            c = put(f"{get_column_letter(i)}{r}", None, v, 11, align_h="right" if i in (7, 8, 9) else "center", wrap=(i == 3))
+            if i == 7:
+                c.number_format = "#,##0"
+            elif i in (8, 9):
+                c.number_format = "#,##0.00"
+    tr = 8 + len(items)
+    put(f"C{tr}", f"C{tr}:F{tr}", "总共/Tổng cộng :", 11, True, "center")
+    for col, fmt in (("G", "#,##0"), ("H", "#,##0.00"), ("I", "#,##0.00")):
+        c = put(f"{col}{tr}", None, f"=SUM({col}8:{col}{tr - 1})" if items else 0, 11, True, "right")
+        c.number_format = fmt
+    _box(ws, 7, 1, tr, 13)
+    put(f"A{tr + 2}", f"A{tr + 2}:F{tr + 2}", "收货单位及经手人（盖章）：\nĐơn vị tiếp nhận và người phụ trách (đóng dấu):", 11, True, wrap=True)
+    put(f"H{tr + 2}", f"H{tr + 2}:M{tr + 2}", "送货单位及经手人（盖章）：\nĐơn vị giao hàng và người phụ trách (đóng dấu):", 11, True, wrap=True)
+    ws.row_dimensions[tr + 2].height = 33
+    _fit_page(ws, landscape=True)
+    return ws
+
+
+def build_dccn_best_sheet(wb, rec, sheet_name="DCCN"):
+    """对账单 Đối Chiếu Công Nợ: mỗi dòng hàng một dòng, hạn thanh toán = ngày hóa đơn + số ngày."""
+    ws = wb.create_sheet(title=sheet_name[:31])
+    prof = PROFILES[rec["customer"]]
+    put = _sheet_put(ws)
+    d_hd = _iso_to_date(rec.get("docDate"))
+    days = int(float(rec.get("payDays") or prof.get("payDays") or 60))
+    due = d_hd + datetime.timedelta(days=days)
+    for i, w in enumerate([7, 11, 12, 15, 12, 36, 11, 12, 15, 8, 12, 14, 10], 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    put("A1", "A1:M1", "对 账 单\n Đối Chiếu Công Nợ", 16, True, "center", True)
+    ws.row_dimensions[1].height = 42
+    put("A2", "A2:G2", f"销售方/Người bán：{HT_NAME}", 11)
+    put("H2", "H2:M2", f"购买方/Người mua：{prof['name']}", 11)
+    put("A3", "A3:G3", f"乙方（卖方）: {HT_NAME_EN}", 11)
+    put("H3", "H3:M3", f"甲方（买方）: {prof.get('nameCn', '')}", 11)
+    put("A4", "A4:G4", f"联系人/Người liên hệ：{prof.get('sellerContact', '')}", 11)
+    put("H4", "H4:M4", f"联系人/Người liên hệ：{prof.get('buyerContact', '')}", 11)
+    put("A5", "A5:G5", "电话/Điện thoại：", 11)
+    put("H5", "H5:M5", "电话/Điện thoại：", 11)
+    put("A6", "A6:G6", "传真/Số Fax：", 11)
+    put("H6", "H6:M6", "传真/Số Fax：", 11)
+    for rr in range(2, 7):
+        _outline(ws, rr, 1, rr, 7)
+        _outline(ws, rr, 8, rr, 13)
+    heads = ["序号 STT", "发票号 \nSố hóa đơn", "发票日期\nNgày Inv", "采购单号\nMã đơn hàng ", "编号\nMã hàng", "产品名称\nTên hàng hóa ",
+             "数量\n Số lượng \n( Gói )", "单价\nĐơn giá (VND/Gói)", "付款总金额 \nTổng tiền thanh toán \n(VND)", "币别\nLoại tiền\n(VND)",
+             "付款方式\n Phương thức thanh toán ", "时间要求付款\nThời gian yêu cầu thanh toán", "备注 \nGhi chú "]
+    for i, h in enumerate(heads, 1):
+        put(f"{get_column_letter(i)}8", None, h, 10, True, "center", True)
+    ws.row_dimensions[8].height = 60
+    items = rec.get("items", [])
+    for idx, it in enumerate(items, 1):
+        r = 8 + idx
+        vals = [idx, rec.get("hdNo", ""), _dmy(d_hd), it.get("po", ""), it.get("ma_sp", ""), it["ten_sp"], it.get("qty", 0),
+                it.get("price", 0), it.get("amount", 0), "VND", f"{days} ngày", _dmy(due), ""]
+        for i, v in enumerate(vals, 1):
+            c = put(f"{get_column_letter(i)}{r}", None, v, 11, align_h="left" if i == 6 else ("right" if i in (7, 8, 9) else "center"))
+            if i in (7, 8, 9):
+                c.number_format = "#,##0"
+    tr = 9 + len(items)
+    put(f"A{tr}", f"A{tr}:F{tr}", "总共/TOTAL ：", 11, True, "center")
+    for col in ("G", "I"):
+        c = put(f"{col}{tr}", None, f"=SUM({col}9:{col}{tr - 1})" if items else 0, 11, True, "right")
+        c.number_format = "#,##0"
+    _box(ws, 8, 1, tr, 13)
+    r = tr + 2
+    put(f"A{r}", f"A{r}:M{r}", "付款账户信息/ THÔNG TIN TÀI KHOẢN THANH TOÁN", 11, True)
+    put(f"A{r + 1}", f"A{r + 1}:H{r + 1}", f"Bên bán 乙方（卖方）:  {HT_NAME}", 11)
+    put(f"A{r + 2}", f"A{r + 2}:H{r + 2}", f"Mã số doanh nghiệp/Mã số thuế 企业编码/税务编码：{MST_HT}", 11)
+    put(f"A{r + 3}", f"A{r + 3}:H{r + 3}", f"Địa chỉ trụ sở chính地址：{ADDR_HT}", 11, wrap=True)
+    put(f"A{r + 4}", f"A{r + 4}:H{r + 4}", f"Số tài khoản账号：{HT_BANK_ACC}", 11)
+    put(f"A{r + 5}", f"A{r + 5}:H{r + 5}", f"tại Ngân hàng 开户行:  {HT_BANK_AT}", 11)
+    put(f"A{r + 6}", f"A{r + 6}:H{r + 6}", "Đơn vị  hưởng thụ 收款单位名称：CT CỔ PHẦN GIẤY  BAO BÌ HỒNG THIÊN", 11)
+    put(f"A{r + 7}", f"A{r + 7}:H{r + 7}", f"Swift code: {HT_SWIFT}", 11)
+    put(f"I{r + 1}", f"I{r + 1}:K{r + 1}", "供货方/Nhà cung cấp ：", 11)
+    put(f"I{r + 2}", f"I{r + 2}:K{r + 3}", "对账人 ：\nNgười đối chiếu", 11, wrap=True, valign="top")
+    put(f"I{r + 4}", f"I{r + 4}:K{r + 5}", "部门 ：\nBộ phận", 11, wrap=True, valign="top")
+    put(f"I{r + 6}", f"I{r + 6}:K{r + 7}", "日期 ：\nNgày tháng năm", 11, wrap=True, valign="top")
+    put(f"L{r + 2}", f"L{r + 2}:M{r + 3}", "数量核对：\nSố lượng đối chiếu", 11, wrap=True, valign="top")
+    put(f"L{r + 4}", f"L{r + 4}:M{r + 5}", "总金额核对：\nTổng tiền đối chiếu", 11, wrap=True, valign="top")
+    put(f"L{r + 6}", f"L{r + 6}:M{r + 7}", f"{prof.get('label', '')} xác nhận ", 11, wrap=True, valign="top")
+    _fit_page(ws, landscape=True)
+    return ws
+
+
+def build_dntt_best_sheet(wb, rec, sheet_name="DNTT"):
+    """請款單 PHIẾU ĐỀ NGHỊ THANH TOÁN theo mẫu khách: ngày xin thanh toán = ngày hóa đơn + số ngày."""
+    ws = wb.create_sheet(title=sheet_name[:31])
+    prof = PROFILES[rec["customer"]]
+    put = _sheet_put(ws)
+    days = int(float(rec.get("payDays") or prof.get("payDays") or 60))
+    d_tt = _iso_to_date(rec.get("docDate")) + datetime.timedelta(days=days)
+    total = round(lot_totals(rec)["amount"])
+    pos = [p for p, _ in rec_po_list(rec)]
+    for i, w in enumerate([16, 12, 14, 10, 10, 6, 12, 10, 20, 5], 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    title = f"{prof.get('nameCn', '')}\n{prof['name']}".strip()
+    put("A1", "A1:J1", title, 13, True, "center", True)
+    ws.row_dimensions[1].height = 36
+    put("A2", "A2:J2", "請款單PHIẾU ĐỀ NGHỊ THANH TOÁN", 14, True, "center")
+    put("A3", "A3:B3", "請款日期 \nNgày xin thanh toán:", 11, wrap=True)
+    put("C3", "C3:E3", _dmy(d_tt), 11, align_h="center")
+    put("G3", "G3:J3", "本表格供应商填写\nPhiếu này dành cho nhà cung ứng điền", 11, italic=True, wrap=True)
+    ws.row_dimensions[3].height = 33
+    put("A4", "A4:B4", "廠商名稱 Tên nhà cung cấp:", 11)
+    put("C4", "C4:J4", HT_NAME, 11, True, "center")
+    put("A5", "A5:B5", "支付金額：", 11)
+    put("G5", "G5:H5", "支付方式：", 11)
+    put("I5", None, "現金/Tiền mặt", 11)
+    put("A6", "A6:B6", "Số tiền thanh toán：", 11)
+    c = put("C6", "C6:E6", total, 11, align_h="center")
+    c.number_format = "#,##0"
+    put("G6", "G6:H6", "Phương thức thanh toán：", 11)
+    put("I6", None, "匯款/Chuyển khoản", 11)
+    put("J6", None, "x", 11, align_h="center")
+    put("A7", "A7:B7", "支付金額(大寫)：", 11)
+    put("A8", "A8:B8", "Viết bằng chữ:   ", 11)
+    put("C8", "C8:J8", num_to_vn_words(total), 11, italic=True, align_h="center")
+    put("A9", "A9:B9", "暫 借 款Tạm ứng:", 11)
+    put("G9", "G9:J9", "領款人\nTên người nhận tiền", 11, wrap=True)
+    put("A10", "A10:B10", "費用說明Nội dung:", 11)
+    put("C10", "C10:J11", f"Chi trả tiền mua lõi giấy cho {HT_NAME} theo PO số: {' và '.join(pos)}", 11, wrap=True, valign="top")
+    put("A12", "A12:J12", "汇款通讯Thông tin chuyển khoản", 11, True, "center")
+    put("A13", "A13:E13", "供應商名稱Tên tài khoản ngân hàng thụ hưởng:  ", 11)
+    put("F13", "F13:J13", "CT CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN", 11)
+    put("A14", "A14:D14", "銀行名稱 Ngân hàng thụ hưởng: ", 11)
+    put("E14", "E14:J14", f"Tại Ngân hàng {HT_BANK_AT}", 11)
+    put("A15", "A15:B15", "帳號 Số tài khoản:", 11)
+    put("C15", "C15:E15", HT_BANK_ACC, 11)
+    put("A16", "A16:B16", "Mã swift code :", 11)
+    put("C16", "C16:E16", HT_SWIFT, 11)
+    put("A17", "A17:J17", "其他通讯（若有）Thông tin khác (nếu có)", 11)
+    put("G18", "G18:J18", "请款单位（签名，盖章）", 11, align_h="center")
+    put("G19", "G19:J19", "Đơn vị xin thanh toán (ký tên, đóng dấu)", 11, align_h="center")
+    _fit_page(ws, landscape=False)
+    return ws
+
+
+ECUS_DSH_HEADS = ["STT", "Mã hàng", "Tên hàng (mô tả chi tiết)", "Mã HS", "Xuất xứ", "Lượng", "Đơn vị tính", "Lượng 2", "Đơn vị tính 2",
+                  "Đơn giá hóa đơn", "Trị giá hóa đơn", "Trị giá tính thuế", "TS XK(%)", "Tiền thuế XK", "Đơn giá tính thuế"]
+
+
+def build_ecus_dsh_sheet(wb, rec, sheet_name="Sheet1"):
+    """Danh sách hàng (dsh) 15 cột để import vào ECUS: Lượng 2 = trọng lượng tịnh (KGM)."""
+    ws = wb.create_sheet(title=sheet_name[:31])
+    prof = PROFILES.get(rec["customer"], PROFILES["shirai"])
+    hs_default = (prof.get("customs") or {}).get("hs", "")
+    for i, h in enumerate(ECUS_DSH_HEADS, 1):
+        c = ws.cell(row=1, column=i, value=h)
+        c.font = Font(name="Arial", size=10, bold=True)
+        ws.column_dimensions[get_column_letter(i)].width = 45 if i == 3 else 14
+    for idx, it in enumerate(rec.get("items", []), 1):
+        vals = [idx, None, customs_desc(it), it.get("hs") or hs_default, "VN", it.get("qty", 0), customs_unit(prof, it),
+                it.get("net", 0), "KGM", it.get("price", 0), it.get("amount", 0)]
+        for i, v in enumerate(vals, 1):
+            ws.cell(row=idx + 1, column=i, value=v).font = Font(name="Arial", size=10)
+    return ws
+
+
+def build_full_bundle(wb, rec, s_key, skip_h=False):
+    """Các sheet của 'Xuất Trọn Bộ' theo khách (dùng chung cho nút bấm và kiểm thử)."""
+    cust = rec["customer"]
+    prof = PROFILES.get(cust, PROFILES["shirai"])
+    if cust == "shirai":
+        clean_po = re.sub(r"[^a-zA-Z0-9_-]", "", rec["poNumber"])[:24]
+        build_so_shirai_sheet(wb, rec, f"SO_{clean_po}_{s_key}")
+    build_invoice_pkl_sheet(wb, rec, f"Invoice_{s_key}", skip_h=skip_h)
+    if is_best_docset(prof):
+        build_packing_best_sheet(wb, rec, f"DongGoi_{s_key}")
+    build_vat_bkav_sheet(wb, rec, f"VAT_BKAV_{s_key}")
+    build_pxk_bkav_sheet(wb, rec, f"PXK_{s_key}")
+    if cust == "tesa":
+        build_customs_b11_sheet(wb, rec, f"ToKhai_B11_{s_key}")
+        build_plx_sheet(wb, rec, f"PLX_{s_key}")
+    elif prof.get("customs"):
+        build_customs_b11_sheet(wb, rec, f"ToKhai_B11_{s_key}")
+    if is_best_docset(prof):
+        build_pgh_best_sheet(wb, rec, f"PGH_{s_key}")
+        build_dccn_best_sheet(wb, rec, f"DCCN_{s_key}")
+    build_dntt_sheet(wb, rec, "DNTT")
+    return wb
 
 
 # ==============================================================================
@@ -1876,7 +2519,7 @@ INVOICE_HEADER_KEYS = [
 ]
 
 PO_NUMBER_HINT_RE = re.compile(
-    r"(?:P\.?\s?O\.?\s*(?:No\.?|Number|#)?|Purchase\s*Order(?:\s*No\.?)?|S[ốo]\s*(?:PO|đơn\s*hàng|don\s*hang)"
+    r"(?:P\.?\s?O\.?\s*(?:No\.?|Number|#)?|Purchase\s*Order(?:\s*No\.?)?|S[ốo]\s*(?:PO|ĐĐH|DDH|đơn\s*hàng|don\s*hang)"
     r"|Đơn\s*đặt\s*hàng\s*(?:số)?|Don\s*dat\s*hang\s*(?:so)?)\s*[:#.]?\s*([A-Za-z0-9][A-Za-z0-9/_.-]{3,})",
     re.I,
 )
@@ -2060,9 +2703,17 @@ def learn_from_invoice_excel(file_path):
     """Đọc Invoice / Bảng kê PKL Excel của khách (mọi sheet): mã, tên, đơn giá, kg/chiếc, SL/kiện, số PO, bì.
     Cùng một mặt hàng xuất hiện ở nhiều sheet thì sheet có ngày mới nhất được ưu tiên."""
     wb = openpyxl.load_workbook(file_path, data_only=True)
-    sheets, norms, profile = [], {}, {}
+    sheets, norms, profile, ddh = [], {}, {}, []
     for ws in wb.worksheets:
         rows = [tuple(r) for r in ws.iter_rows(values_only=True)]
+        # Invoice không có cột PO nhưng ghi 'Số ĐĐH: <PO>' ở phần đầu (kiểu Best); bỏ dòng bị ẩn (PO cũ còn sót)
+        for i, r in enumerate(rows[:20]):
+            if ws.row_dimensions[i + 1].hidden:
+                continue
+            for v in r:
+                m = re.search(r"S[ốo]\s*(?:ĐĐH|DDH)\s*:\s*([A-Za-z0-9][A-Za-z0-9/_.-]{3,})", str(v or ""))
+                if m:
+                    ddh.append(m.group(1))
         norms.update(_learn_norm_table(rows))
         for k, v in _learn_party_from_sheet(rows).items():
             profile.setdefault(k, v)
@@ -2149,7 +2800,7 @@ def learn_from_invoice_excel(file_path):
     with_tare = next((its for _, _, its in sheets if any(x.get("tare") for x in its)), [])
     tares = [it["tare"] for it in with_tare if it.get("tare")]
     meta = {
-        "sample_po": max(set(pos), key=pos.count) if pos else "",
+        "sample_po": max(set(pos), key=pos.count) if pos else (ddh[0] if ddh else ""),
         "tare": min(set(tares), key=lambda t: (-tares.count(t), t)) if tares else 0.0,
         "sheets": [t for _, t, _ in sheets],
     }
@@ -2207,6 +2858,9 @@ def infer_po_pattern(sample_po):
 
 
 def find_po_date(text):
+    m = re.search(r"PO\s*Date\W{0,6}([23]0\d{2})\s*[-/.]\s*(\d{1,2})\s*[-/.]\s*(\d{1,2})(?!\d)", text or "", re.I)
+    if m:  # 'PO Date 3026/10/02': OCR đọc nhầm chữ số đầu của năm
+        return f"{int(m.group(3)):02d}/{int(m.group(2)):02d}/2{m.group(1)[1:]}"
     m = re.search(r"ng[àa]y\W{0,4}(\d{1,2})\s*th[áa]ng\s*(\d{1,2})\s*n[ăa]m\s*(\d{4})", text or "", re.I) or re.search(
         r"(?<!\d)(\d{1,2})[/.-](\d{1,2})[/.-](20\d{2})(?!\d)", text or ""
     )
@@ -2299,6 +2953,8 @@ def customer_key_from_name(name, taken=()):
 
 def build_custom_profile(key, fields):
     prof = dict(CUSTOM_PROFILE_DEFAULTS)
+    if fields.get("docSet") == "best":
+        prof.update(json.loads(json.dumps(BEST_DOCSET_DEFAULTS)))
     prof.update({k: v for k, v in fields.items() if v not in (None, "")})
     prof["key"] = key
     prof["file"] = key
@@ -2371,6 +3027,74 @@ def _qty_price_from_numbers(nums, known_price):
     return 0, known_price or 0, 0
 
 
+def _loose_values(tok):
+    """Các giá trị có thể của một số trên PO scan (PO in số kiểu '1,200.00'), giá trị dễ đúng nhất đứng trước.
+    '2,881,800,00' / '1,200.00' -> phần thập phân 2 chữ số; '120000' -> 1200 (OCR nuốt '.00') rồi mới 120000."""
+    digits = re.sub(r"\D", "", tok)
+    if re.search(r"[.,]\d{2}$", tok) and len(digits) > 2:
+        v = int(digits[:-2]) + int(digits[-2:]) / 100
+        return [int(v) if float(v).is_integer() else v]
+    out = []
+    if len(digits) >= 3 and digits.endswith("00"):
+        out.append(int(digits[:-2]))
+    v = parse_vn_number(tok)
+    if v and v not in out:
+        out.append(v)
+    return out
+
+
+def _loose_po_line(line, catalog_items, skip_spans=()):
+    """Dòng PO scan mờ (kiểu Best): nhận mặt hàng theo chiều dài 'xxxxMM' rồi chọn bộ SL / giá / thành tiền khớp nhất.
+    OCR hay đọc sai đường kính ('ø40*4' -> '£10%4') và nuốt '.00', nên không dựa vào phần quy cách đầu.
+    Trả về (mặt hàng, SL, đơn giá) hoặc None."""
+    m = re.search(r"(\d{3,4})\s*MM", line, re.I)
+    if not m or not re.search(r"[OÔoô0]ng\s*gi", line, re.I):
+        return None
+    cands = [it for it in catalog_items if (_name_dims(it.get("name"))[0] or [""])[-1] == m.group(1)]
+    if not cands:
+        return None
+    tail = list(line)
+    for a_, b_ in skip_spans:
+        tail[a_:b_] = " " * (b_ - a_)
+    tail = "".join(tail)[m.end():]
+    tail = re.sub(r"(?<!\d)[23]0\d{2}/\d{1,2}/\d{1,2}", " ", tail)  # ngày giao (năm có thể đọc sai 3036)
+    tail = re.sub(r"[A-Za-z]+\d+", " ", tail)  # QS.../PRS.../PackingF001: mã, không phải số lượng
+    toks = [t for t in (_loose_values(x) for x in re.findall(r"\d[\d.,]*\d|\d", tail)) if t][:4]
+    best = None
+    for it in cands:
+        price = it.get("price") or 0
+        if not price or not toks:
+            continue
+        is_price = [any(abs(v - price) <= price * 0.002 for v in vals) for vals in toks]
+        found = None
+        # 3: SL x giá đã học = thành tiền
+        for i, qs in enumerate(toks):
+            for q in qs:
+                for j in range(i + 1, len(toks)):
+                    if not found and not is_price[j] and any(abs(q * price - a) <= a * 0.002 for a in toks[j]):
+                        found = (3, q)
+        # 2: thành tiền chia hết cho giá đã học
+        for j in range(1, len(toks)):
+            if found or is_price[j]:
+                continue
+            for a in toks[j]:
+                q = a / price
+                if not found and q >= 1 and abs(q - round(q)) < 1e-6:
+                    found = (2, int(round(q)))
+        # 1: thấy đúng giá đã học, SL là số đứng ngay trước giá
+        if not found:
+            for j in range(1, len(toks)):
+                if is_price[j]:
+                    found = (1, toks[j - 1][0])
+                    break
+        if found and (best is None or found[0] > best[0]):
+            best = (found[0], it, found[1], price)
+    if not best:
+        return None
+    qty = best[2]
+    return best[1], (int(qty) if float(qty).is_integer() else qty), best[3]
+
+
 def parse_generic_po_text(text, profile, catalog_items, data_store=None, tare_val=0.0):
     """Đọc PO của khách mới: số PO theo mẫu đã học, dòng hàng = dòng có mã / tên / quy cách hàng đã học."""
     pat = profile.get("po_pattern") or ""
@@ -2435,44 +3159,65 @@ def parse_generic_po_text(text, profile, catalog_items, data_store=None, tare_va
             return [h[0] for h in hits], spans
         return None, []
 
+    ref_pats = profile.get("lineRefs") or {}
     lines = []
     for raw in (text or "").splitlines():
-        known, spans = locate(raw)
-        if not known:
-            continue
-        rest = raw
-        for a_, b_ in sorted(set(spans), reverse=True):
-            rest = rest[:a_] + " " * (b_ - a_) + rest[b_:]  # giữ nguyên độ dài để các đoạn khác không lệch
-        rest = _normalize_ocr_numbers(rest)
-        rest = re.sub(r"\d{10,}", " ", rest)  # mã hàng / mã vạch, không phải số lượng
-        nums = [parse_vn_number(x) for x in re.findall(r"\d[\d.,]*\d|\d", rest)]
-        nums = [n for n in nums if n]
-        if isinstance(known, list):
-            # nhiều mặt hàng cùng quy cách (VD 250g / 280g): chọn mặt hàng có giá đã học gần giá trên PO nhất
-            cand = []
-            for it in known:
-                q, p, conf = _qty_price_from_numbers(nums, it.get("price") or 0)
-                if q and p:
-                    cand.append((-conf, abs(p - (it.get("price") or 0)) / max(p, 1), it, q, p))
-            if not cand:
-                continue
-            _, _, known, qty, price = min(cand, key=lambda c: c[:2])
+        # Mã tham chiếu trên dòng PO (Inquiry No, Customs No, mã vật liệu): ghi lại rồi loại khỏi phần số
+        refs, ref_spans = {}, []
+        for ref_key, ref_pat in ref_pats.items():
+            m = re.search(ref_pat, raw)
+            if m:
+                refs[ref_key] = re.sub(r"\s+", "", m.group(0))
+                if ref_key == "customsNo":
+                    refs[ref_key] = re.sub(r"^P[a-z]+ing", "Packing", refs[ref_key])
+                ref_spans.append(m.span())
+        loose = _loose_po_line(raw, catalog_items, ref_spans) if profile.get("ocrLoose") else None
+        if loose:
+            known, qty, price = loose
         else:
-            qty, price, _ = _qty_price_from_numbers(nums, known.get("price") or 0)
+            known, spans = locate(raw)
+            if not known:
+                continue
+            spans = list(spans) + ref_spans
+            rest = raw
+            for a_, b_ in sorted(set(spans), reverse=True):
+                rest = rest[:a_] + " " * (b_ - a_) + rest[b_:]  # giữ nguyên độ dài để các đoạn khác không lệch
+            rest = _normalize_ocr_numbers(rest)
+            rest = re.sub(r"\d{10,}", " ", rest)  # mã hàng / mã vạch, không phải số lượng
+            nums = [parse_vn_number(x) for x in re.findall(r"\d[\d.,]*\d|\d", rest)]
+            nums = [n for n in nums if n]
+            if isinstance(known, list):
+                # nhiều mặt hàng cùng quy cách (VD 250g / 280g): chọn mặt hàng có giá đã học gần giá trên PO nhất
+                cand = []
+                for it in known:
+                    q, p, conf = _qty_price_from_numbers(nums, it.get("price") or 0)
+                    if q and p:
+                        cand.append((-conf, abs(p - (it.get("price") or 0)) / max(p, 1), it, q, p))
+                if not cand:
+                    continue
+                _, _, known, qty, price = min(cand, key=lambda c: c[:2])
+            else:
+                qty, price, _ = _qty_price_from_numbers(nums, known.get("price") or 0)
         if qty <= 0:
             continue
         qty = int(qty) if float(qty).is_integer() else qty
         mem = data_store.get_item_norm(known["name"]) if data_store else None
-        div = (mem or {}).get("div") or known.get("div") or 0
+        div = (mem or {}).get("div") or known.get("div") or profile.get("defaultDiv") or 0
         kg = (mem or {}).get("kg") or known.get("kg") or 0
         kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
         net = round(qty * kg, 2) if kg > 0 else 0.0
         gross = round(net + tare_val, 2) if net > 0 else 0.0
+        # Mã vật liệu / Inquiry / Customs No: ưu tiên giá trị đã nhớ (người dùng đã sửa ở Bước 1) hơn chữ OCR
+        code = known.get("code") or refs.get("itemCode", "")
+        extra = {k: known.get(k) or refs.get(k) for k in ("inquiry", "customsNo") if known.get(k) or refs.get(k)}
+        if profile.get("dept"):
+            extra["dept"] = profile["dept"]
         lines.append({
+            **extra,
             "stt": len(lines) + 1,
             "po": po_no,
-            "hs": (mem or {}).get("hs") or known.get("hs", ""),
-            "ma_sp": known.get("code", ""),
+            "hs": (mem or {}).get("hs") or known.get("hs", "") or (profile.get("customs") or {}).get("hs", ""),
+            "ma_sp": code,
             "ten_sp": known["name"],
             "ten_hq": known.get("ten_hq") or known["name"],
             "unit": known.get("unit") or profile.get("unit", "cái"),
@@ -2512,6 +3257,9 @@ class HongThienCustomsDesktopApp:
         self.cur_driver = tk.StringVar(value="Hồ Quang Hoàng")
         self.cur_ldd = tk.StringVar(value="03")
         self.cur_tare = tk.StringVar(value="1.0")
+        self.cur_pay_days = tk.StringVar(value="30")
+        self.cur_delivery = tk.StringVar(value="")
+        self.cur_po_dates = {}
         self.kodi_skiph_var = tk.BooleanVar(value=False)
         self.tesa_batch_var = tk.StringVar(value="3010 (8 dòng)")
         self.shirai_sched_var = tk.StringVar(value="")
@@ -2710,6 +3458,17 @@ class HongThienCustomsDesktopApp:
             tk.Label(row2, text=lbl, font=("Segoe UI", 8, "bold"), bg="#FFFFFF").pack(side="left", padx=(3, 1))
             tk.Entry(row2, textvariable=var, width=w, font=("Segoe UI", 9)).pack(side="left", padx=(0, 4))
 
+        row3 = tk.Frame(top, bg="#FFFFFF")
+        row3.pack(fill="x", pady=(2, 2))
+        tk.Label(row3, text="Khách gom nhiều PO / mẫu Best:", font=("Segoe UI", 8, "bold"), bg="#FFFFFF", fg="#1B365D").pack(side="left", padx=(3, 6))
+        tk.Button(
+            row3, text="➕ Quét Thêm PO Vào Lô Này", font=("Segoe UI", 8, "bold"), bg="#EDF2F7", fg="#1B365D",
+            command=lambda: self.scan_po_file_offline(append=True),
+        ).pack(side="left", padx=3)
+        for lbl, var, w in (("Hạn thanh toán (ngày):", self.cur_pay_days, 5), ("Ngày giao PGH (yyyy-mm-dd, trống = ngày CT + 1):", self.cur_delivery, 11)):
+            tk.Label(row3, text=lbl, font=("Segoe UI", 8, "bold"), bg="#FFFFFF").pack(side="left", padx=(8, 1))
+            tk.Entry(row3, textvariable=var, width=w, font=("Segoe UI", 9)).pack(side="left", padx=(0, 4))
+
         tk.Checkbutton(
             row2,
             text="Invoice Kodi: không lấy cột Thành Tiền",
@@ -2785,6 +3544,8 @@ class HongThienCustomsDesktopApp:
             ("📝 4. Xuất ĐNTT (.xlsx)", "#1F4E79", lambda: self.export_step1_excel("DNTT")),
             ("🌏 5. Xuất Phụ Lục X (.xlsx)", "#2B6CB0", lambda: self.export_step1_excel("PLX")),
             ("📦 6. Xuất Trọn Bộ (SO+INV+VAT+PXK+B11+PLX+DNTT)", "#28A745", lambda: self.export_step1_excel("ALL")),
+            ("🧾 7. Mẫu Best: Đóng gói + PGH + ĐCCN + ĐNTT", "#8B5E00", lambda: self.export_step1_excel("BEST")),
+            ("📑 8. DS Hàng ECUS (dsh)", "#4A5568", lambda: self.export_step1_excel("DSH")),
         ]
         for text, bg_col, cmd in export_btns:
             tk.Button(bot, text=text, bg=bg_col, fg="#FFFFFF", font=("Segoe UI", 8, "bold"), padx=8, pady=5, command=cmd).pack(side="left", padx=3)
@@ -3015,6 +3776,8 @@ class HongThienCustomsDesktopApp:
             self.cur_tare.set("0.0" if cust_key == "tesa" else ("0.02" if cust_key == "shirai" else "1.0"))
         else:
             self.cur_tare.set(str(prof.get("tare", 0.0)))
+        self.cur_pay_days.set(str(prof.get("payDays", 30)))
+        self.cur_delivery.set("")
         self.load_sample_batch(cust_key)
 
     def load_tesa_batch_choice(self):
@@ -3091,9 +3854,11 @@ class HongThienCustomsDesktopApp:
             tare_v = float(self.cur_tare.get() or 0)
         except Exception:
             tare_v = 1.0
+        default_div = float(PROFILES.get(self.cur_customer.get(), {}).get("defaultDiv") or 0)
         for it in self.cur_items:
             qty = float(it.get("qty", 0))
-            div = float(it.get("div", 0))
+            div = float(it.get("div", 0)) or default_div
+            it["div"] = div
             kg = float(it.get("kg", 0))
             if div > 0:
                 it["kien"] = math.ceil(round(qty / div * 1e6) / 1e6)
@@ -3115,12 +3880,17 @@ class HongThienCustomsDesktopApp:
             self.cur_xe.set(rec.get("xeNo", PROFILES[cust_key]["xe"]))
             self.cur_driver.set(rec.get("driver", PROFILES[cust_key]["driver"]))
             self.cur_ldd.set(rec.get("lddSeq", PROFILES[cust_key]["lenhSeq"]))
+            self.cur_po_dates = dict(rec.get("poDates") or {})
+            if rec.get("payDays"):
+                self.cur_pay_days.set(str(rec["payDays"]))
+            self.cur_delivery.set(rec.get("deliveryDate", ""))
             self.cur_items = [dict(x) for x in rec.get("items", [])]
             self.refresh_step1_tree()
         elif cust_key not in BUILTIN_CUSTOMERS:
             # khách mới chưa có hồ sơ: để trống, chờ quét PO
             for v in (self.cur_po, self.cur_po_date, self.cur_pxk, self.cur_hd, self.cur_tk):
                 v.set("")
+            self.cur_po_dates = {}
             self.cur_items = []
             self.refresh_step1_tree()
 
@@ -3162,7 +3932,10 @@ class HongThienCustomsDesktopApp:
             text=f"Tổng: {len(self.cur_items)} dòng | SL: {tot_qty:,.0f} | Thành tiền: {tot_amt:,.0f} VNĐ | KL Gross/Net: {tot_gross:,.2f} / {tot_net:,.2f} kg"
         )
 
-    def scan_po_file_offline(self):
+    def scan_po_file_offline(self, append=False):
+        if append and self.cur_customer.get() in BUILTIN_CUSTOMERS:
+            messagebox.showwarning("Quét thêm PO", "Gộp nhiều PO vào một lô dùng cho khách đã học (VD Best). Shirai/Kodi/Tesa giữ cách quét cũ.")
+            return
         fpath = filedialog.askopenfilename(
             title="Chọn File PO Để Quét Offline Trên Máy",
             filetypes=[("Tất cả file PO", "*.pdf *.xlsx *.xls *.png *.jpg *.jpeg *.txt"), ("PDF PO", "*.pdf"), ("Excel PO", "*.xlsx *.xls")],
@@ -3172,7 +3945,7 @@ class HongThienCustomsDesktopApp:
         ext = os.path.splitext(fpath)[1].lower()
         cust = self.cur_customer.get()
         if cust not in BUILTIN_CUSTOMERS:
-            self.scan_custom_po_text(read_document_text(fpath))
+            self.scan_custom_po_text(read_document_text(fpath), append=append)
             return
         if ext in (".xlsx", ".xls"):
             po_no, schedules = parse_shirai_po_excel(fpath, self.store)
@@ -3263,7 +4036,7 @@ class HongThienCustomsDesktopApp:
 
         dlg = self.new_dialog()
         dlg.title("Thêm Khách Hàng Mới Từ Chứng Từ Mẫu (Học Offline - Bạn Xác Nhận Trước Khi Lưu)")
-        dlg.geometry("980x720")
+        dlg.geometry("980x820")
         tk.Label(
             dlg,
             text=f"Đã đọc {len(paths)} file: {', '.join(os.path.basename(p) for p in paths)}\n"
@@ -3285,13 +4058,23 @@ class HongThienCustomsDesktopApp:
             ("tare", "Bì / dòng hàng (kg):", str(draft.get("tare") or "0.0")), ("sample_po", "Số PO trong file mẫu:", draft.get("sample_po", "")),
             ("po_pattern", "Mẫu nhận dạng số PO:", infer_po_pattern(draft.get("sample_po", ""))),
         ]
+        # Bộ mẫu 'best': khách gom nhiều PO, cần Đóng gói / Phiếu giao hàng / ĐCCN / ĐNTT song ngữ
+        doc_set = "best" if "BEST PACIFIC" in strip_accents_upper(prof.get("name", "")) else "chuan"
+        fields += [
+            ("docSet", "Bộ mẫu chứng từ (chuan / best):", doc_set), ("payDays", "Hạn thanh toán (ngày):", 60 if doc_set == "best" else 30),
+            ("nameCn", "Tên khách tiếng Trung (ĐCCN/ĐNTT):", ""), ("deliveryPlace", "Điểm giao hàng (Đóng gói):", short_place(prof.get("addr", ""))),
+            ("buyerContact", "Người liên hệ bên mua:", ""), ("sellerContact", "Người liên hệ bên bán:", ""),
+        ]
         vars_map = {}
         for i, (k, lbl, val) in enumerate(fields):
             r, c = divmod(i, 2)
             tk.Label(form, text=lbl, font=("Segoe UI", 9, "bold")).grid(row=r, column=c * 2, sticky="w", padx=4, pady=3)
             v = tk.StringVar(value=str(val or ""))
             vars_map[k] = v
-            tk.Entry(form, textvariable=v, width=44, font=("Segoe UI", 9)).grid(row=r, column=c * 2 + 1, sticky="w", padx=4, pady=3)
+            if k == "docSet":
+                ttk.Combobox(form, textvariable=v, values=["chuan", "best"], width=41, state="readonly").grid(row=r, column=c * 2 + 1, sticky="w", padx=4, pady=3)
+            else:
+                tk.Entry(form, textvariable=v, width=44, font=("Segoe UI", 9)).grid(row=r, column=c * 2 + 1, sticky="w", padx=4, pady=3)
         vars_map["sample_po"].trace_add("write", lambda *_: vars_map["po_pattern"].set(infer_po_pattern(vars_map["sample_po"].get())))
 
         tk.Label(dlg, text=f"Mã hàng / định mức học được ({len(draft['items'])} dòng) - chọn dòng sai rồi bấm Xóa:", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=12, pady=(6, 2))
@@ -3320,6 +4103,12 @@ class HongThienCustomsDesktopApp:
                 out["tare"] = float(out.get("tare") or 0.0)
             except ValueError:
                 out["tare"] = 0.0
+            try:
+                out["payDays"] = int(float(out.get("payDays") or 0)) or ""
+            except ValueError:
+                out["payDays"] = ""
+            if out.get("docSet") == "best" and not out["tare"]:
+                out["tare"] = BEST_DOCSET_DEFAULTS["tare"]
             return out
 
         def try_po():
@@ -3358,8 +4147,9 @@ class HongThienCustomsDesktopApp:
         self.learn_wizard = {"dlg": dlg, "vars": vars_map, "draft": draft, "tree": tree, "save": save, "try_po": try_po, "delete_rows": delete_rows}
         return self.learn_wizard
 
-    def scan_custom_po_text(self, text):
-        """Đọc PO của khách hàng đã học bằng mẫu số PO + danh mục mã/tên hàng đã học."""
+    def scan_custom_po_text(self, text, append=False):
+        """Đọc PO của khách hàng đã học bằng mẫu số PO + danh mục mã/tên hàng đã học.
+        append=True: gộp PO này vào lô đang làm (khách gom nhiều PO trong một lần giao)."""
         cust = self.cur_customer.get()
         prof = PROFILES[cust]
         try:
@@ -3373,13 +4163,28 @@ class HongThienCustomsDesktopApp:
                 "Không tìm thấy dòng hàng nào khớp mã/tên hàng đã học. Hãy thêm dòng trực tiếp, hoặc nạp thêm chứng từ mẫu cho khách này.",
             )
             return False
+        if append and self.cur_items:
+            have = {str(x.get("po") or "") for x in self.cur_items}
+            if po_no and po_no in have:
+                messagebox.showwarning(f"Quét PO {prof['label']}", f"PO {po_no} đã có trong lô này, không gộp lần nữa.")
+                return False
+            self.cur_items = self.cur_items + lines
+        else:
+            self.cur_items = lines
+            self.cur_po_dates = {}
+            if po_date:
+                self.cur_po_date.set(po_date)
         if po_no:
-            self.cur_po.set(po_no)
-        if po_date:
-            self.cur_po_date.set(po_date)
-        self.cur_items = lines
+            self.cur_po_dates[po_no] = po_date or self.cur_po_dates.get(po_no, "")
+        pos = []
+        for x in self.cur_items:
+            p = str(x.get("po") or "")
+            if p and p not in pos:
+                pos.append(p)
+        self.cur_po.set(" + ".join(pos) if pos else po_no)
         self.refresh_step1_tree()
-        messagebox.showinfo(f"Quét PO {prof['label']}", f"Đã đọc PO {po_no or '(chưa rõ số)'} gồm {len(lines)} dòng hàng. Vui lòng kiểm tra lại trước khi xuất.")
+        what = f"Đã gộp PO {po_no} ({len(lines)} dòng) vào lô: {len(pos)} PO, {len(self.cur_items)} dòng." if append else f"Đã đọc PO {po_no or '(chưa rõ số)'} gồm {len(lines)} dòng hàng."
+        messagebox.showinfo(f"Quét PO {prof['label']}", what + " Vui lòng kiểm tra lại trước khi xuất.")
         return True
 
     def paste_po_text_dialog(self):
@@ -3444,19 +4249,24 @@ class HongThienCustomsDesktopApp:
     def open_item_editor_modal(self, edit_idx=None):
         dlg = self.new_dialog()
         dlg.title("Thêm / Sửa Dòng Hàng PO (Tự Động Nhớ SL/Kiện & kg/Chiếc Cho Lần Sau)")
-        dlg.geometry("560x450")
+        prof_cur = PROFILES[self.cur_customer.get()]
+        best = is_best_docset(prof_cur)
+        dlg.geometry("560x540" if best else "560x450")
         cur = self.cur_items[edit_idx] if edit_idx is not None else {
-            "po": self.cur_po.get(), "hs": "48229090", "ma_sp": "", "ten_sp": "",
-            "unit": PROFILES[self.cur_customer.get()]["unit"], "qty": 1000, "price": 31500,
-            "div": 5, "kg": 1.96, "tare": float(self.cur_tare.get() or 1.0)
+            "po": self.cur_po.get().split(" + ")[-1], "hs": "48229090", "ma_sp": "", "ten_sp": "",
+            "unit": prof_cur["unit"], "qty": 1000, "price": 31500,
+            "div": prof_cur.get("defaultDiv") or 5, "kg": 1.96, "tare": float(self.cur_tare.get() or 1.0)
         }
         vars_map = {}
-        for r_i, (k, lbl) in enumerate([
+        field_list = [
             ("po", "Số PO dòng:"), ("hs", "Mã HS:"), ("ma_sp", "Mã SP / TM (gõ mã Tesa tự điền tên):"),
             ("ten_sp", "Tên hàng hóa:"), ("unit", "Đơn vị tính:"), ("qty", "Số lượng:"),
             ("price", "Đơn giá (VNĐ):"), ("div", "SL / kiện (nhập 1 lần app tự nhớ):"),
             ("kg", "Trọng lượng kg/chiếc (app tự nhớ):"),
-        ]):
+        ]
+        if best:
+            field_list += [("inquiry", "Inquiry No (Số đơn đặt hàng PGH):"), ("customsNo", "Customs No (Ghi chú PGH):")]
+        for r_i, (k, lbl) in enumerate(field_list):
             tk.Label(dlg, text=lbl, font=("Segoe UI", 9, "bold")).grid(row=r_i, column=0, sticky="w", padx=14, pady=6)
             v = tk.StringVar(value=str(cur.get(k, "")))
             vars_map[k] = v
@@ -3489,8 +4299,17 @@ class HongThienCustomsDesktopApp:
             net = round(qty * kg, 2) if kg > 0 else 0.0
             gross = round(net + tare_v, 2) if net > 0 else 0.0
             self.store.remember_item_norm(name, div, kg, hs)
+            if self.cur_customer.get() not in BUILTIN_CUSTOMERS:
+                self.store.remember_item_refs(self.cur_customer.get(), name, {
+                    "code": vars_map["ma_sp"].get().strip(),
+                    **{k: vars_map[k].get().strip() for k in ("inquiry", "customsNo") if k in vars_map},
+                })
             hit = next((x for x in self.store.tesa_items if x["name"] == name or x["code"] == vars_map["ma_sp"].get().strip()), None)
-            item = {
+            item = dict(cur) if edit_idx is not None else {}
+            item.update({k: vars_map[k].get().strip() for k in ("inquiry", "customsNo") if k in vars_map})
+            if best and not item.get("dept"):
+                item["dept"] = prof_cur.get("dept", "")
+            item.update({
                 "po": vars_map["po"].get().strip(),
                 "hs": hs,
                 "ma_sp": vars_map["ma_sp"].get().strip(),
@@ -3506,7 +4325,7 @@ class HongThienCustomsDesktopApp:
                 "net": net,
                 "gross": gross,
                 "tare": tare_v,
-            }
+            })
             if edit_idx is not None:
                 self.cur_items[edit_idx] = item
             else:
@@ -3514,7 +4333,7 @@ class HongThienCustomsDesktopApp:
             self.refresh_step1_tree()
             dlg.destroy()
 
-        tk.Button(dlg, text="💾 Lưu Dòng Hàng & Nhớ Định Mức", bg="#1B365D", fg="#FFFFFF", font=("Segoe UI", 9, "bold"), padx=16, pady=6, command=save_line).grid(row=10, column=0, columnspan=2, pady=14)
+        tk.Button(dlg, text="💾 Lưu Dòng Hàng & Nhớ Định Mức", bg="#1B365D", fg="#FFFFFF", font=("Segoe UI", 9, "bold"), padx=16, pady=6, command=save_line).grid(row=len(field_list) + 1, column=0, columnspan=2, pady=14)
 
     def build_current_step1_record(self):
         cust = self.cur_customer.get()
@@ -3525,7 +4344,7 @@ class HongThienCustomsDesktopApp:
         tot_gross = sum(float(x.get("gross", 0)) for x in self.cur_items)
         tot_kien = sum(float(x.get("kien", 0)) for x in self.cur_items)
         s_key = self.shirai_sched_var.get() if (cust == "shirai" and self.shirai_sched_var.get()) else (dt[8:10] + "." + dt[5:7] if len(dt) == 10 else "30.10")
-        return {
+        rec = {
             "id": f"HS-{dt.replace('-', '')}-{cust.upper()}-{len(self.store.records)+1:02d}",
             "zone": "WORKING",
             "customer": cust,
@@ -3540,6 +4359,9 @@ class HongThienCustomsDesktopApp:
             "xeNo": self.cur_xe.get().strip(),
             "driver": self.cur_driver.get().strip(),
             "lddSeq": self.cur_ldd.get().strip(),
+            "poDates": dict(self.cur_po_dates),
+            "payDays": self.cur_pay_days.get().strip(),
+            "deliveryDate": self.cur_delivery.get().strip(),
             "totalQty": tot_qty,
             "totalAmount": tot_amt,
             "totalNet": round(tot_net, 2),
@@ -3549,6 +4371,9 @@ class HongThienCustomsDesktopApp:
             "items": [dict(x) for x in self.cur_items],
             "files": {"po": None, "pxk": None, "vat": None, "pkl": None, "tk": None, "scan": None},
         }
+        if is_best_docset(PROFILES.get(cust, {})):
+            rec["totalKien"] = lot_totals(rec)["kien"]
+        return rec
 
     def export_step1_excel(self, mode="ALL"):
         if not self.cur_items:
@@ -3579,20 +4404,38 @@ class HongThienCustomsDesktopApp:
         elif mode == "PLX":
             build_plx_sheet(wb, rec, f"PLX_{s_key}")
             fname = f"PLX_{rec['customer']}_{s_key}.xlsx"
-        else:
-            if rec["customer"] == "shirai":
-                build_so_shirai_sheet(wb, rec, f"SO_{clean_po}_{s_key}")
-            build_invoice_pkl_sheet(wb, rec, f"Invoice_{s_key}", skip_h=skip_h)
-            build_vat_bkav_sheet(wb, rec, f"VAT_BKAV_{s_key}")
-            build_pxk_bkav_sheet(wb, rec, f"PXK_{s_key}")
-            if rec["customer"] == "tesa":
-                build_customs_b11_sheet(wb, rec, f"ToKhai_B11_{s_key}")
-                build_plx_sheet(wb, rec, f"PLX_{s_key}")
+        elif mode == "BEST":
+            if not is_best_docset(rec):
+                messagebox.showwarning("Mẫu Best", "Khách này chưa đặt bộ mẫu 'best'. Thêm khách bằng nút 'Thêm Khách Mới' và chọn bộ mẫu best.")
+                return
+            build_packing_best_sheet(wb, rec, f"DongGoi_{s_key}")
+            build_pgh_best_sheet(wb, rec, f"PGH_{s_key}")
+            build_dccn_best_sheet(wb, rec, f"DCCN_{s_key}")
             build_dntt_sheet(wb, rec, "DNTT")
+            fname = f"Mau_Best_{rec['customer']}_{clean_po}_{s_key}.xlsx"
+        elif mode == "DSH":
+            build_ecus_dsh_sheet(wb, rec)
+            fname = f"dsh_{rec['pxkNo'] or rec['customer']}.xlsx"
+        else:
+            build_full_bundle(wb, rec, s_key, skip_h=skip_h)
+            problems = check_lot(rec)
+            build_check_sheet(wb, rec, problems, f"KiemTra_{s_key}")
             fname = f"Bo_Ho_So_Xuat_Hang_{PROFILES[rec['customer']]['label']}_{clean_po}_{s_key}.xlsx"
 
         out_path = os.path.join(work_dir, fname)
         wb.save(out_path)
+        extra_note = ""
+        if mode == "ALL" and rec["customer"] not in BUILTIN_CUSTOMERS:
+            # Danh sách hàng để import ECUS đi kèm trọn bộ của khách mới
+            wb_dsh = openpyxl.Workbook()
+            wb_dsh.remove(wb_dsh.active)
+            build_ecus_dsh_sheet(wb_dsh, rec)
+            wb_dsh.save(os.path.join(work_dir, f"dsh_{rec['pxkNo'] or rec['customer']}.xlsx"))
+            extra_note += f"\nKèm file danh sách hàng ECUS: dsh_{rec['pxkNo'] or rec['customer']}.xlsx"
+        if mode == "ALL":
+            extra_note += ("\n\nKiểm tra chéo: ĐẠT, các chứng từ khớp nhau." if not problems else
+                           f"\n\n⚠ Kiểm tra chéo có {len(problems)} điểm cần xem (sheet KiemTra):\n- " + "\n- ".join(problems[:6])
+                           + ("\n..." if len(problems) > 6 else ""))
         now_str = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
         if mode in ("VAT", "ALL"):
             self.step1_exported_paths["vat"] = {"name": fname, "path": out_path, "time": now_str}
@@ -3600,12 +4443,12 @@ class HongThienCustomsDesktopApp:
             self.step1_exported_paths["pxk"] = {"name": fname, "path": out_path, "time": now_str}
         if mode in ("PKL", "ALL"):
             self.step1_exported_paths["pkl"] = {"name": fname, "path": out_path, "time": now_str}
-        if mode in ("PLX", "ALL") and rec["customer"] == "tesa":
+        if mode in ("PLX", "ALL") and (rec["customer"] == "tesa" or PROFILES[rec["customer"]].get("customs")):
             self.step1_exported_paths["tk"] = {"name": fname, "path": out_path, "time": now_str}
 
         messagebox.showinfo(
             "Đã Xuất File Excel Vào Tập Dữ Liệu Riêng",
-            f"Đã tạo file chuẩn định dạng thành công:\n{out_path}\n\n(File đã được tự động ghi nhận sẵn cho Bước 2 Lưu trữ!)",
+            f"Đã tạo file chuẩn định dạng thành công:\n{out_path}\n\n(File đã được tự động ghi nhận sẵn cho Bước 2 Lưu trữ!){extra_note}",
         )
 
     def transfer_step1_to_step2(self):
