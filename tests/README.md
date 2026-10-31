@@ -17,6 +17,8 @@ Mọi test chạy trên thư mục dữ liệu tạm, không đụng `DATA_LUU_T
 | `test_po_parsers.py` | Parser PO Kodi (suy ngược số lượng), Tesa (nhiều trang, bầu chọn), Shirai Excel (tách đợt giao, khớp ERP, xếp PNN) |
 | `test_excel_exports.py` | 8 loại sheet; snapshot trọn bộ cho 3 khách (`tests/snapshots/`) |
 | `test_customer_rules.py` | Hồ sơ từng khách, toàn vẹn catalog (206 / 1.833), quy tắc Kodi/Tesa/Shirai |
+| `test_learn_customer.py` | Học khách mới: XML hóa đơn/PXK TT78, Invoice Excel nhiều sheet (sheet mới nhất thắng, bảng SL/túi, số PO, bì, tên/MST khách), mẫu số PO, đọc PO khách mới (khớp theo mã, tên, quy cách 38*5*467 + định lượng, số OCR bị tách), lưu/nạp lại, xuất trọn bộ |
+| `test_ocr.py` | OCR PDF scan: PO Kodi/Tesa dựng thành ảnh rồi đọc lại (Tesa trang chẵn + dải tiêu đề), file ảnh, `--ocr-self-test`, PO khách mới scan bị xoay ngang. Tự bỏ qua nếu máy chưa có Tesseract (`apt install tesseract-ocr tesseract-ocr-vie`) |
 | `test_self_test.py` | `run_self_test()` và import được khi không có Tkinter |
 | `test_gui_smoke.py` | Mở app, xuất trọn bộ, chuyển sang Bước 2 (đánh dấu `gui`) |
 

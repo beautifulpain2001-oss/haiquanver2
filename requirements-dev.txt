@@ -1,2 +1,6 @@
 -r requirements.txt
 pytest>=8.0
+# OCR PDF scan (tests/test_ocr.py; cần thêm chương trình Tesseract + dữ liệu tiếng Việt)
+pillow>=10.0
+pytesseract>=0.3.10
+pypdfium2>=4.0
