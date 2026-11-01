@@ -24,7 +24,7 @@ BẢN ĐẦY ĐỦ 100% TÍNH NĂNG (FULL PARITY VỚI BẢN GỐC + LƯU TRỮ 
    - Tesa: Nạp nhanh Lô 30/10 (8 dòng) & Lô 20/10 (10 dòng), quét PDF chỉ lấy trang chẵn (2, 4, 6...), cắt dải tiêu đề phóng to 2x để phân biệt số 5 và 8 trong mã PO 86002xxxxx, lấy đa số phiếu bầu Net Value.
 3. Tích hợp Tập Lưu Trữ Dữ Liệu Riêng (`DATA_LUU_TRU_HONG_THIEN/`):
    - Chạy 100% Offline trên Desktop, không truyền file ra ngoài.
-   - Bước 2 (Tab 2): Nạp 6 hạng mục chứng từ sau phát hành và lưu trữ tập trung về đúng thư mục Máy chủ Host (`01_WORKING_LAM_CHUNG_TU` & `02_ARCHIVE_SAU_PHAT_HANH`).
+   - Bước 2 (Tab 2): Nạp 6 hạng mục chứng từ sau phát hành và lưu trữ tập trung về đúng thư mục Máy chủ Host (thư mục `HAI_QUAN`).
 ================================================================================
 """
 
@@ -96,6 +96,9 @@ if pytesseract is not None and os.name == "nt":
                 pytesseract.pytesseract.tesseract_cmd = _tess
                 break
 
+
+# Thư mục gốc chứa toàn bộ hồ sơ hải quan trong kho dữ liệu: HAI_QUAN/<Khách>/<Năm>_Thang_<mm>/<Ngày>/
+CUSTOMS_ROOT = "HAI_QUAN"
 
 _OCR_OK = None
 
@@ -449,12 +452,7 @@ class DedicatedDataStore:
 
     def ensure_directories(self):
         os.makedirs(self.base_dir, exist_ok=True)
-        for sub in [
-            "00_TEMPLATES_MAU_CHUNG_TU",
-            "01_WORKING_LAM_CHUNG_TU",
-            "02_ARCHIVE_SAU_PHAT_HANH",
-        ]:
-            os.makedirs(os.path.join(self.base_dir, sub), exist_ok=True)
+        os.makedirs(os.path.join(self.base_dir, CUSTOMS_ROOT), exist_ok=True)  # chỉ một thư mục gốc cho toàn bộ hồ sơ hải quan
         self.catalog_file = os.path.join(self.base_dir, "master_catalog.json")
         self.records_file = os.path.join(self.base_dir, "hongthien_records.json")
         self.sqlite_file = os.path.join(self.base_dir, "hongthien_haiquan.db")
@@ -712,9 +710,40 @@ class DedicatedDataStore:
             pass
 
     def get_record_folder_path(self, rec):
+        """Thư mục của một hồ sơ: HAI_QUAN / <Khách> / <Năm>_Thang_<mm> / <Ngày làm tờ khai>.
+
+        Thư mục khách và tháng chỉ tạo khi chưa có. Hồ sơ đã lưu giữ nguyên thư mục của nó (kể cả khi sau này đổi
+        tên gọi khách); hồ sơ làm từ bản cũ vẫn dùng thư mục kiểu cũ nếu thư mục đó đang có trên máy."""
+        rel = rec.get("folder")
+        if not rel:
+            saved = next((r for r in self.records if r.get("customer") == rec.get("customer") and r.get("poNumber") == rec.get("poNumber")), None)
+            if saved and saved.get("folder"):
+                rel = saved["folder"]
+            elif saved and os.path.isdir(self.legacy_folder_path(saved)):
+                return self.legacy_folder_path(saved)
+            else:
+                rel = self.new_record_folder(rec)
+        return os.path.join(self.base_dir, rel)
+
+    def new_record_folder(self, rec):
+        """Đường dẫn (tương đối) cho hồ sơ mới. Cùng khách, cùng ngày, khác PO thì thêm _2, _3… để không lẫn file."""
+        dt = str(rec.get("docDate") or "")
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", dt):
+            dt = datetime.date.today().strftime("%Y-%m-%d")
+        cust = rec.get("customer") or "KHACH"
+        name = re.sub(r'[\\/:*?"<>|]+', "_", str(PROFILES.get(cust, {}).get("label") or cust)).strip(" .") or "KHACH"
+        base = os.path.join(CUSTOMS_ROOT, name, f"{dt[:4]}_Thang_{dt[5:7]}", dt)
+        used = {r.get("folder") for r in self.records if r.get("customer") == cust and r.get("folder")}
+        rel, n = base, 2
+        while rel in used:
+            rel = f"{base}_{n}"
+            n += 1
+        return rel
+
+    def legacy_folder_path(self, rec):
+        """Cách đặt thư mục của các bản trước (01_WORKING… / 02_ARCHIVE…), chỉ để tìm lại hồ sơ cũ."""
         dt = (rec.get("docDate") or "2026-10-30").replace("-", "")
-        yr = dt[:4]
-        mm = dt[4:6]
+        yr, mm = dt[:4], dt[4:6]
         cust_up = (rec.get("customer") or "SHIRAI").upper()
         clean_po = re.sub(r"[^a-zA-Z0-9_-]", "", str(rec.get("poNumber") or "PO"))[:28]
         if rec.get("zone") == "WORKING":
@@ -3584,12 +3613,18 @@ def lot_save_new(store, rec, exported_files):
     """Lưu hồ sơ vừa làm ở Bước 1: gắn các file đã xuất, ghi đè hồ sơ cùng khách + cùng số PO."""
     for k, v in exported_files.items():
         rec["files"][k] = v
+    if not rec.get("folder"):  # nhớ thư mục để mở lại đúng chỗ dù sau này đổi tên gọi khách
+        folder = store.get_record_folder_path(rec)
+        if os.path.relpath(folder, store.base_dir).startswith(CUSTOMS_ROOT + os.sep):
+            rec["folder"] = os.path.relpath(folder, store.base_dir)
     idx = next((i for i, r in enumerate(store.records) if r.get("customer") == rec["customer"] and r.get("poNumber") == rec["poNumber"]), -1)
     if idx >= 0:
         for k, v in store.records[idx].get("files", {}).items():
             if v and not rec["files"].get(k):
                 rec["files"][k] = v
         rec["id"] = store.records[idx]["id"]
+        if store.records[idx].get("folder"):
+            rec["folder"] = store.records[idx]["folder"]
         store.records[idx] = rec
     else:
         store.records.insert(0, rec)
@@ -4156,7 +4191,7 @@ class HongThienCustomsDesktopApp:
 
         tk.Button(
             action_row,
-            text="🏛️ KHÓA SỔ & LƯU VÀO 02_ARCHIVE (HOST)",
+            text="🏛️ KHÓA SỔ & LƯU HỒ SƠ (HAI_QUAN)",
             font=("Segoe UI", 9, "bold"),
             bg="#28A745",
             fg="#FFFFFF",
@@ -4166,7 +4201,7 @@ class HongThienCustomsDesktopApp:
         ).pack(side="right", padx=4)
         tk.Button(
             action_row,
-            text="💾 Lưu Tạm Vào 01_WORKING (Host)",
+            text="💾 Lưu Tạm Hồ Sơ (HAI_QUAN)",
             font=("Segoe UI", 9, "bold"),
             bg="#D69E2E",
             fg="#FFFFFF",
@@ -4986,7 +5021,7 @@ class HongThienCustomsDesktopApp:
                 iid=r["id"],
                 values=(
                     idx,
-                    "02_ARCHIVE" if r.get("zone") == "ARCHIVE" else "01_WORKING",
+                    "Đã khóa sổ" if r.get("zone") == "ARCHIVE" else "Đang làm",
                     PROFILES.get(r.get("customer", "shirai"), PROFILES["shirai"])["label"],
                     r.get("docDate", ""),
                     r.get("poNumber", ""),
@@ -5102,7 +5137,9 @@ def run_self_test():
             build_customs_b11_sheet(wb, rec, "ToKhai_B11")
             build_plx_sheet(wb, rec, "PLX")
         build_dntt_sheet(wb, rec, "DNTT")
-        out_f = os.path.join(store.base_dir, "01_WORKING_LAM_CHUNG_TU", f"Test_Full_{rec['customer'].upper()}.xlsx")
+        out_dir = os.path.join(store.base_dir, CUSTOMS_ROOT, "_KIEM_TRA")
+        os.makedirs(out_dir, exist_ok=True)
+        out_f = os.path.join(out_dir, f"Test_Full_{rec['customer'].upper()}.xlsx")
         wb.save(out_f)
         print("Verified full workbook for:", rec["customer"], "->", out_f)
 

@@ -22,7 +22,7 @@ def run_self_test():
         shutil.copy(os.path.join(ROOT, "hongthien_desktop_app.py"), tmp)
         print("== --self-test (thư mục tạm) ==")
         res = subprocess.run([sys.executable, "hongthien_desktop_app.py", "--self-test"], cwd=tmp)
-        out = os.path.join(tmp, "DATA_LUU_TRU_HONG_THIEN", "01_WORKING_LAM_CHUNG_TU")
+        out = os.path.join(tmp, "DATA_LUU_TRU_HONG_THIEN", "HAI_QUAN", "_KIEM_TRA")
         made = sorted(f for f in os.listdir(out) if f.startswith("Test_Full_")) if os.path.isdir(out) else []
         if res.returncode or len(made) != 3:
             print(f"self-test THẤT BẠI (exit {res.returncode}, file sinh ra: {made})")

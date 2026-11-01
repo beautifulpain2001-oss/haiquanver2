@@ -13,10 +13,10 @@ from conftest import APP_DIR
 def test_run_self_test_writes_one_workbook_per_customer(monkeypatch, data_dir):
     monkeypatch.setattr(app, "DedicatedDataStore", functools.partial(app.DedicatedDataStore, base_dir=str(data_dir)))
     app.run_self_test()
-    out = sorted(p.name for p in (data_dir / "01_WORKING_LAM_CHUNG_TU").glob("Test_Full_*.xlsx"))
+    out = sorted(p.name for p in (data_dir / "HAI_QUAN" / "_KIEM_TRA").glob("Test_Full_*.xlsx"))
     assert out == ["Test_Full_KODI.xlsx", "Test_Full_SHIRAI.xlsx", "Test_Full_TESA.xlsx"]
     for name in out:
-        openpyxl.load_workbook(data_dir / "01_WORKING_LAM_CHUNG_TU" / name)
+        openpyxl.load_workbook(data_dir / "HAI_QUAN" / "_KIEM_TRA" / name)
 
 
 def test_module_imports_without_tkinter(tmp_path):

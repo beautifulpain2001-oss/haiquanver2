@@ -110,7 +110,7 @@ def self_test(with_ocr=True):
         print("== self-test bản đóng gói:", exe)
         # cwd khác thư mục chứa .exe để chắc chắn app không phụ thuộc thư mục đang đứng
         res = subprocess.run([exe, "--self-test"], cwd=ROOT, timeout=600)
-        out = os.path.join(tmp, "DATA_LUU_TRU_HONG_THIEN", "01_WORKING_LAM_CHUNG_TU")
+        out = os.path.join(tmp, "DATA_LUU_TRU_HONG_THIEN", "HAI_QUAN", "_KIEM_TRA")
         made = sorted(f for f in os.listdir(out) if f.startswith("Test_Full_")) if os.path.isdir(out) else []
         if res.returncode or len(made) != 3:
             log = os.path.join(tmp, "SELF_TEST_LOI.txt")

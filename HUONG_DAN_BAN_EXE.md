@@ -37,7 +37,7 @@ PHẦN MỀM HỒ SƠ HẢI QUAN HỒNG THIÊN - BẢN .EXE (KHÔNG CẦN CÀI P
    - Mở Command Prompt tại thư mục phần mềm, gõ:
        HongThien_HaiQuan_Desktop.exe --self-test
      Nếu chạy đúng, 3 file Test_Full_*.xlsx sẽ xuất hiện trong
-     DATA_LUU_TRU_HONG_THIEN\01_WORKING_LAM_CHUNG_TU\
+     DATA_LUU_TRU_HONG_THIEN\HAI_QUAN\<Khách>\<Năm>_Thang_<mm>\<Ngày>\
    - Kiểm tra bộ OCR: HongThien_HaiQuan_Desktop.exe --ocr-self-test
      (không báo lỗi và không sinh file SELF_TEST_LOI.txt là OCR hoạt động).
 

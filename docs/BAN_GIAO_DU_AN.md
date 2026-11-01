@@ -111,13 +111,11 @@ DATA_LUU_TRU_HONG_THIEN/
 │                                #   item_mem, custom_profiles, custom_items
 ├── hongthien_records.json       # danh sách hồ sơ (record) đã làm
 ├── hongthien_haiquan.db         # SQLite (bản sao để tra cứu)
-├── 00_TEMPLATES_MAU_CHUNG_TU/
-├── 01_WORKING_LAM_CHUNG_TU/     # Excel xuất ra ở Bước 1; hồ sơ đang làm:
-│                                #   Nam_yyyy/Thang_mm/<KHACH>_PO-<so PO>_<yyyymmdd>/
-└── 02_ARCHIVE_SAU_PHAT_HANH/    # hồ sơ đã phát hành:
-                                 #   Nam_yyyy/KhachHang_<KHACH>/Thang_mm/<yyyymmdd>_<KHACH>_PO-.._PXK-.._HD-.._TK-../
-                                 #   bên trong: 01_PO, 02_PXKKVCNB, 03_HDGTGT, 04_INVOICE_PKL, 05_TOKHAI, 06_SCAN_HOANTHIEN
-                                 #   (đường dẫn sinh bởi get_record_folder_path)
+└── HAI_QUAN/                    # MỘT thư mục gốc cho mọi hồ sơ hải quan
+    └── <Tên gọi khách>/         #   vd Tesa, Kodi (lấy từ mục Khách hàng)
+        └── <Năm>_Thang_<mm>/    #   vd 2026_Thang_11 (có rồi thì không tạo lại)
+            └── <yyyy-mm-dd>/    #   ngày làm tờ khai; chứng từ xuất ra nằm trong đây
+                                 #   cùng khách + cùng ngày + khác PO: thêm _2, _3…
 ```
 `config_desktop.json` (cạnh .exe) lưu đường dẫn thư mục dữ liệu nếu người dùng đã chọn thư mục Host/LAN.
 
@@ -198,7 +196,7 @@ python run_tests.py --update-snapshots   # CHỈ khi cố ý đổi định dạ
 | 7 | `BEST` | Chỉ 4 mẫu riêng Best: Đóng gói, PGH, ĐCCN, ĐNTT |
 | 8 | `DSH` | File `dsh_<PXK>.xlsx` để import ECUS |
 
-File ra nằm ở `01_WORKING_LAM_CHUNG_TU/`.
+File ra nằm ở `HAI_QUAN/<Khách>/<Năm>_Thang_<mm>/<Ngày>/` (hàm `DedicatedDataStore.get_record_folder_path`; hồ sơ lưu rồi giữ nguyên thư mục qua trường `folder`; hồ sơ từ bản cũ vẫn dùng thư mục kiểu cũ nếu còn trên máy).
 
 ### Bước 2 – Lưu trữ
 Chuyển hồ sơ sang Bước 2 (`transfer_step1_to_step2`), gắn file vào 6 ô (`DOC_SLOTS`: PO, PXK, VAT, Invoice/PKL, Tờ khai+PLX, Bản scan có dấu), lưu vào `WORKING` hoặc `ARCHIVE`. App chép file vào cây thư mục `02_ARCHIVE_SAU_PHAT_HANH/...`. Có bảng tra cứu hồ sơ, nạp lại hồ sơ cũ về Bước 1, xuất sổ tổng hợp Excel.

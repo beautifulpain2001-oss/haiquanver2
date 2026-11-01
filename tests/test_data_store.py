@@ -5,9 +5,10 @@ import sqlite3
 import hongthien_desktop_app as app
 
 
-def test_fresh_store_creates_folder_tree_and_seed_data(store, data_dir):
-    for sub in ("00_TEMPLATES_MAU_CHUNG_TU", "01_WORKING_LAM_CHUNG_TU", "02_ARCHIVE_SAU_PHAT_HANH"):
-        assert (data_dir / sub).is_dir()
+def test_fresh_store_creates_only_one_customs_folder_and_seed_data(store, data_dir):
+    assert (data_dir / "HAI_QUAN").is_dir()
+    for old in ("00_TEMPLATES_MAU_CHUNG_TU", "01_WORKING_LAM_CHUNG_TU", "02_ARCHIVE_SAU_PHAT_HANH"):
+        assert not (data_dir / old).exists()  # chỉ cần một thư mục hải quan
     assert (data_dir / "master_catalog.json").is_file()
     assert (data_dir / "hongthien_records.json").is_file()
     assert (data_dir / "hongthien_haiquan.db").is_file()
@@ -59,22 +60,67 @@ def test_remember_item_norm_updates_catalog_and_persists(store, data_dir):
     assert reloaded.get_item_norm(name)["div"] == 10
 
 
-def test_record_folder_paths(store, seed, data_dir):
-    working = store.get_record_folder_path(seed["shirai"])
-    assert working == os.path.join(str(data_dir), "01_WORKING_LAM_CHUNG_TU", "Nam_2026", "Thang_10", "SHIRAI_PO-202637HT_20261030")
+def test_record_folder_is_customs_customer_month_day(store, seed, data_dir):
+    rec = dict(seed["tesa"], docDate="2026-11-01", poNumber="PO-MOI-1", folder=None)
+    assert store.get_record_folder_path(rec) == os.path.join(str(data_dir), "HAI_QUAN", "Tesa", "2026_Thang_11", "2026-11-01")
 
-    archive = store.get_record_folder_path(seed["kodi"])
-    assert archive == os.path.join(
-        str(data_dir), "02_ARCHIVE_SAU_PHAT_HANH", "Nam_2026", "KhachHang_KODI", "Thang_10",
-        "20261028_KODI_PO-03102026-01KDHT_PXK-00000303_HD-0000398_TK-306889012340",
-    )
+
+def test_old_style_records_use_old_folder_only_if_it_exists(store, seed, data_dir):
+    rec = seed["kodi"]  # hồ sơ mẫu kiểu cũ, chưa có thư mục cũ trên máy
+    assert store.get_record_folder_path(rec) == os.path.join(str(data_dir), "HAI_QUAN", "Kodi", "2026_Thang_10", "2026-10-28")
+    legacy = store.legacy_folder_path(rec)
+    os.makedirs(legacy)  # thư mục kiểu cũ có sẵn: vẫn tìm đúng chỗ cũ
+    assert store.get_record_folder_path(rec) == legacy
+
+
+def test_month_and_customer_folders_are_reused_not_duplicated(store, seed, data_dir):
+    def make(day, po):
+        rec = dict(seed["kodi"], docDate=day, poNumber=po, folder=None)
+        os.makedirs(store.get_record_folder_path(rec), exist_ok=True)
+        rec["folder"] = os.path.relpath(store.get_record_folder_path(rec), store.base_dir)
+        store.records.append(rec)
+    make("2026-11-01", "A")
+    make("2026-11-05", "B")
+    make("2026-12-02", "C")
+    kodi = data_dir / "HAI_QUAN" / "Kodi"
+    assert sorted(p.name for p in kodi.iterdir()) == ["2026_Thang_11", "2026_Thang_12"]  # tháng 11 chỉ có một thư mục
+    assert sorted(p.name for p in (kodi / "2026_Thang_11").iterdir()) == ["2026-11-01", "2026-11-05"]
+
+
+def test_same_customer_same_day_different_po_gets_separate_folder(store, seed):
+    first = dict(seed["tesa"], docDate="2026-11-03", poNumber="PO-1", folder=None)
+    first["folder"] = store.new_record_folder(first)
+    store.records.append(first)
+    second = dict(seed["tesa"], docDate="2026-11-03", poNumber="PO-2", folder=None)
+    assert store.get_record_folder_path(second).endswith(os.path.join("2026_Thang_11", "2026-11-03_2"))
+    assert store.get_record_folder_path(first).endswith(os.path.join("2026_Thang_11", "2026-11-03"))
+    # cùng khách + cùng PO thì mở lại đúng thư mục cũ
+    again = dict(first, folder=None)
+    assert store.get_record_folder_path(again) == store.get_record_folder_path(first)
+
+
+def test_saved_record_keeps_folder_after_customer_label_renamed(store, seed):
+    rec = app.lot_build_record(store, {"customer": "tesa", "po": "PO-DOI-TEN", "doc_date": "2026-11-04"}, seed["tesa"]["items"])
+    app.lot_save_new(store, rec, {})
+    saved_folder = store.get_record_folder_path(rec)
+    assert os.path.join("HAI_QUAN", "Tesa") in saved_folder
+    store.update_customer("tesa", {"label": "Tesa Moi"})
+    again = app.lot_build_record(store, {"customer": "tesa", "po": "PO-DOI-TEN", "doc_date": "2026-11-04"}, seed["tesa"]["items"])
+    assert store.get_record_folder_path(again) == saved_folder  # không bị chuyển sang thư mục tên mới
+
+
+def test_customer_folder_name_is_safe_for_windows(store, seed):
+    store.update_customer("tesa", {"label": 'Tê*sa: "A/B"'})
+    rec = dict(seed["tesa"], docDate="2026-11-01", poNumber="PO-AN-TOAN", folder=None)
+    name = store.get_record_folder_path(rec).split(os.sep)
+    assert not any(ch in "".join(name[-4:-3]) for ch in '*:"/\\?<>|')
 
 
 def test_change_base_dir_moves_store_and_writes_config(store, tmp_path):
     new_dir = tmp_path / "LAN_Z"
     store.change_base_dir(str(new_dir))
     assert store.base_dir == str(new_dir)
-    assert (new_dir / "02_ARCHIVE_SAU_PHAT_HANH").is_dir()
+    assert (new_dir / "HAI_QUAN").is_dir()
     with open(store.config_file, encoding="utf-8") as f:
         assert json.load(f)["data_dir"] == str(new_dir)
 

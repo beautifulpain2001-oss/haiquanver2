@@ -5,8 +5,7 @@
 - **Tập lưu trữ dữ liệu riêng (`DATA_LUU_TRU_HONG_THIEN/`):**
   - `hongthien_haiquan.db`: Cơ sở dữ liệu SQLite riêng chứa toàn bộ danh mục 206 mã cân nặng, 1.833 mã thương mại ERP đầu `TM`, định mức đóng gói Kodi/Tesa và toàn bộ lịch sử hồ sơ hải quan.
   - `master_catalog.json` & `hongthien_records.json`: Tập dữ liệu đồng bộ nhanh qua ổ mạng LAN (chống lỗi khóa file SMB khi nhiều máy cùng mở trên LAN).
-  - `01_WORKING_LAM_CHUNG_TU/`: Tự động lưu các file Excel xuất ra ở Bước 1.
-  - `02_ARCHIVE_SAU_PHAT_HANH/`: Tự động lưu trữ theo cây thư mục chuẩn các chứng từ gốc đã nạp ở Bước 2.
+  - `HAI_QUAN/`: thư mục duy nhất chứa mọi hồ sơ hải quan, chia `HAI_QUAN/<Khách hàng>/<Năm>_Thang_<mm>/<Ngày làm tờ khai>/`. Các file chứng từ xuất ra và các chứng từ nạp thêm ở Bước 2 nằm trong thư mục ngày. Thư mục khách và tháng chỉ tạo khi chưa có.
 
 ## 2. Cách Chạy & Chia Sẻ Tập Lưu Trữ Qua Mạng LAN Về Máy Chủ Host
 1. Đặt thư mục phần mềm này trên **Máy chủ Host** (hoặc ổ mạng LAN dùng chung `Z:\`).

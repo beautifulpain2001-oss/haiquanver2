@@ -379,3 +379,21 @@ def test_catalog_and_customer_pages_list_data(win):
     assert win.catalog.weights.rowCount() > 100 and win.catalog.erp.rowCount() > 1000
     win.nav.setCurrentRow(3)
     assert {"Shirai", "Kodi", "Tesa"} <= {win.customers.table.item(r, 0).text() for r in range(win.customers.table.rowCount())}
+
+
+def test_export_files_land_in_customs_customer_month_day_folder(win, tmp_path, store):
+    load_kodi_po(win, tmp_path)
+    win.lot.lot.form["doc_date"] = "2026-11-01"
+    win.lot.go(4)
+    win.lot.step5.do_export("ALL")
+    day = os.path.join(store.base_dir, "HAI_QUAN", "Kodi", "2026_Thang_11", "2026-11-01")
+    files = [f for f in win.lot.lot.files]
+    assert len(files) == 5 and all(os.path.dirname(f["path"]) == day for f in files)  # mọi chứng từ nằm chung thư mục ngày
+    assert sorted(os.listdir(day)) == sorted(os.path.basename(f["path"]) for f in files)
+    assert os.listdir(os.path.join(store.base_dir, "HAI_QUAN", "Kodi")) == ["2026_Thang_11"]
+    win.lot.step5.do_save()
+    win.lot.go(4)
+    win.lot.step5.do_export("VAT")  # xuất lại cùng lô: vẫn cùng thư mục, không tạo thêm
+    assert os.listdir(os.path.join(store.base_dir, "HAI_QUAN", "Kodi", "2026_Thang_11")) == ["2026-11-01"]
+    rec = next(r for r in store.records if r["customer"] == "kodi" and r["poNumber"] == "03102026-01KDHT")
+    assert rec["folder"] == os.path.join("HAI_QUAN", "Kodi", "2026_Thang_11", "2026-11-01")  # hồ sơ nhớ thư mục của nó
