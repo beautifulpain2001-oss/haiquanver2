@@ -132,6 +132,50 @@ def test_best_po_ocr_lines(store, best_customer):
     assert [(x["qty"], x["price"]) for x in lines2] == [(300, 9000)]
 
 
+def make_text_pdf(path, rows_a, rows_b):
+    """PDF có lớp chữ (in từ ERP, không phải scan). Nhóm rows_b (tên + quy cách) vẽ sau nhóm rows_a, như PO thật:
+    đọc chữ kiểu thường sẽ dồn tên/quy cách xuống cuối trang, tách khỏi dòng hàng."""
+    def bt(rows):
+        return "".join(f"BT /F1 7 Tf {x} {y} Td ({t}) Tj ET\n" for x, y, t in rows)
+    content = (bt(rows_a) + bt(rows_b)).encode("latin-1")
+    objs = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+            b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream",
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"]
+    out, offs = bytearray(b"%PDF-1.4\n"), []
+    for i, o in enumerate(objs, 1):
+        offs.append(len(out))
+        out += b"%d 0 obj\n" % i + o + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1) + b"".join(b"%010d 00000 n \n" % o for o in offs)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, xref)
+    with open(path, "wb") as f:
+        f.write(out)
+
+
+def test_best_text_pdf_po_keeps_spec_on_row(tmp_path, store, best_customer):
+    """PO Best dạng PDF có chữ (không scan), mã hàng chưa học: phải đọc theo bố cục để quy cách nằm cùng dòng SL/giá."""
+    head = [(40, 500, "PO No: POS269990003"), (40, 490, "PO Date 2026/10/08")]
+    names = []
+    rows = [("VN0000002", "KT:40*4*1650MM", "400.00", "11,000.00", "4,400,000.00"),
+            ("VN0000003", "KT:40*4*1350MM", "300.00", "9,000.00", "2,700,000.00")]
+    for i, (code, spec, q, p, amt) in enumerate(rows):
+        y = 400 - i * 20
+        head += [(20, y, str(i + 1)), (40, y, code), (330, y, q), (380, y, "PCS"), (420, y, p), (480, y, amt),
+                 (560, y, "QS2600000001"), (640, y, "PackingF001")]
+        names += [(100, y, "Ong giay chong bui"), (200, y, spec)]
+    pdf = tmp_path / "po_text.pdf"
+    make_text_pdf(str(pdf), head, names)
+    text = app.read_document_text(str(pdf))
+    prof = app.PROFILES[best_customer]
+    po, d, lines = app.parse_generic_po_text(text, prof, store.items_for_customer(best_customer), data_store=store, tare_val=1.0)
+    assert (po, d) == ("POS269990003", "08/10/2026")
+    assert [(x["ten_sp"], x["qty"], x["price"], x["inquiry"]) for x in lines] == [
+        ("Ống giấy chống bụi 40 x 4 x 1650mm", 400, 11000, "QS2600000001"),
+        ("Ống giấy chống bụi 40 x 4 x 1350mm", 300, 9000, "QS2600000001"),
+    ]
+
+
 def test_remembered_refs_win_over_ocr(store, best_customer):
     name = "Ống giấy chống bụi 40 x 4 x 1350mm"
     store.remember_item_refs(best_customer, name, {"code": "VN0000003", "inquiry": "QS2600000003"})

@@ -735,7 +735,15 @@ def extract_text_from_pdf_or_image_offline(file_path, is_tesa=False, table_mode=
                 else list(range(min(total, 10)))
             )
             for idx in page_indices:
-                embedded = (reader.pages[idx].extract_text() or "").strip()
+                embedded = ""
+                if table_mode:
+                    # PDF in từ ERP (VD Best): cột tên/quy cách được vẽ riêng nên đọc thường bị tách khỏi dòng hàng.
+                    # Đọc theo bố cục trang để mỗi dòng của bảng giữ đủ mã, quy cách, SL, giá trên cùng một dòng.
+                    try:
+                        embedded = (reader.pages[idx].extract_text(extraction_mode="layout") or "").strip()
+                    except Exception:
+                        embedded = ""
+                embedded = embedded or (reader.pages[idx].extract_text() or "").strip()
                 if len(re.sub(r"\s+", "", embedded)) > 80:
                     pages_out.append(embedded)
                 elif pdfium is not None and pytesseract is not None:
