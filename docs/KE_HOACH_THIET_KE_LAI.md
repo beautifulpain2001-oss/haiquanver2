@@ -59,7 +59,7 @@ Tóm từ khảo sát `hongthien_desktop_app.py` (~4.800 dòng, giao diện dòn
 
 ```
 hongthien_desktop_app.py      # giữ nguyên tên và API cũ (test, PyInstaller dùng)
-lot_service.py                # MỚI, lớp mỏng: các thao tác giao diện cần gọi
+# (các hàm lot_* nằm CÙNG FILE hongthien_desktop_app.py, xem ghi chú dưới bảng)
 ui_qt/                        # MỚI: giao diện PySide6
     main_window.py            #   khung, thanh điều hướng, thanh tiến trình
     page_po.py                #   ① chọn khách + nạp PO
@@ -83,6 +83,12 @@ ui_qt/                        # MỚI: giao diện PySide6
 | `export(lot, mode)` | `export_step1_excel` | Xuất Excel, trả danh sách file |
 | `save_record(lot, zone)` | `save_workbench_record` | Lưu hồ sơ vào WORKING/ARCHIVE |
 | `load_record(id)` | `load_selected_archive_to_step1` | Nạp lại hồ sơ cũ |
+
+> **Điều chỉnh khi làm PR A (01/11/2026):** các hàm `lot_*` đặt trong chính `hongthien_desktop_app.py`
+> (trước lớp giao diện) thay vì file `lot_service.py` riêng. Lý do: khi chạy trực tiếp, file này chạy dưới tên
+> `__main__`; một file riêng phải `import hongthien_desktop_app` sẽ nạp bản sao thứ hai với `PROFILES` riêng,
+> làm khách đã học đăng ký lệch. Tên thực tế: `lot_recalc`, `lot_build_record`, `lot_export`, `lot_save_new`,
+> `lot_save_workbench`. Việc nạp PO và nạp lại hồ sơ cũ vẫn nằm trong giao diện, sẽ chuyển khi làm PR C.
 
 Giao diện Tkinter cũ chuyển sang gọi qua các hàm này luôn, nên bản cũ và bản mới dùng chung một đường xử lý và không lệch nhau.
 
