@@ -3928,6 +3928,8 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
         fname = f"Bo_Ho_So_Xuat_Hang_{PROFILES[rec['customer']]['label']}_{clean_po}_{s_key}.xlsx"
 
     out_path = os.path.join(work_dir, fname)
+    if mau_chung_tu:
+        mau_chung_tu.autofit_workbook(wb)  # chữ dài tự xuống dòng, dòng tự cao, cột số vừa đủ: mở ra là in được
     wb.save(out_path)
     dsh = None
     if mode == "ALL" and rec["customer"] not in BUILTIN_CUSTOMERS:

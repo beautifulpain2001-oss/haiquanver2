@@ -301,4 +301,91 @@ FILLERS = {"pkl": fill_pkl, "pack": fill_pack, "pgh": fill_pgh, "dccn": fill_dcc
 
 
 def build_from_template(core, doc, wb, rec, prof, path, title):
-    return FILLERS[doc](core, wb, rec, prof, load_template(path), title)
+    ws = FILLERS[doc](core, wb, rec, prof, load_template(path), title)
+    # số dòng hàng thay đổi nên không để mẫu cố định tỷ lệ in: vừa bề ngang một trang, vừa một trang cao nếu ít dòng
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 1 if ws.max_row <= 45 else 0
+    ws.page_setup.scale = None
+    return ws
+
+
+# ------------------------------------------------------------------ vừa chữ khi in/mở file
+def _text_of(v):
+    return v if isinstance(v, str) and not v.startswith("=") else None
+
+
+def _units(text, size, bold):
+    """Độ dài chữ theo đơn vị độ rộng cột Excel (ước lượng, thừa một chút để không bao giờ bị cắt)."""
+    return len(text) * (size / 11.0) * (1.12 if bold else 1.03)
+
+
+def _lines_needed(text, width, size, bold):
+    n = 0
+    for para in text.split("\n"):
+        n += max(1, -(-int(_units(para, size, bold) * 1.08 + 0.999) // max(int(width), 1)))
+    return n
+
+
+def autofit_workbook(wb):
+    for ws in wb.worksheets:
+        try:
+            autofit_sheet(ws)
+        except Exception:  # không để lỗi trình bày chặn xuất chứng từ
+            pass
+
+
+def autofit_sheet(ws):
+    """Mọi ô chữ đều hiện đủ: chữ dài thì tự xuống dòng và nâng chiều cao dòng; số quá rộng thì nới cột."""
+    from openpyxl.styles import Alignment
+    colw = lambda c: (ws.column_dimensions[get_column_letter(c)].width or 8.43)
+    hidden = lambda c: ws.column_dimensions[get_column_letter(c)].hidden
+    # 1) nới cột cho các ô số (không công thức, không gộp)
+    merged_at = {}
+    for mr in ws.merged_cells.ranges:
+        for r in range(mr.min_row, mr.max_row + 1):
+            for c in range(mr.min_col, mr.max_col + 1):
+                merged_at[(r, c)] = mr
+    for row in ws.iter_rows():
+        for cell in row:
+            v = cell.value
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or (cell.row, cell.column) in merged_at:
+                continue
+            fmt = cell.number_format or ""
+            text = f"{v:,.2f}" if "0.00" in fmt else (f"{round(v):,}" if "#,##0" in fmt else str(v))
+            size = (cell.font.size or 11) if cell.font else 11
+            need = _units(text, size, bool(cell.font and cell.font.bold)) + 1.5
+            if need > colw(cell.column) and not hidden(cell.column):
+                ws.column_dimensions[get_column_letter(cell.column)].width = min(round(need, 1), 60)
+    # 2) chữ dài: bật xuống dòng, nâng chiều cao dòng
+    need_h = {}
+    for row in ws.iter_rows():
+        for cell in row:
+            text = _text_of(cell.value)
+            if not text or ws.row_dimensions[cell.row].hidden or hidden(cell.column):
+                continue
+            mr = merged_at.get((cell.row, cell.column))
+            if mr and (mr.min_row, mr.min_col) != (cell.row, cell.column):
+                continue
+            c0, c1, r0, r1 = (mr.min_col, mr.max_col, mr.min_row, mr.max_row) if mr else (cell.column, cell.column, cell.row, cell.row)
+            width = sum(colw(c) for c in range(c0, c1 + 1) if not hidden(c))
+            if not mr and (cell.alignment is None or cell.alignment.horizontal in (None, "general", "left")) and not (cell.alignment and cell.alignment.wrap_text):
+                c = cell.column + 1  # chữ ô không gộp tràn sang các ô trống bên phải
+                while c <= ws.max_column and ws.cell(cell.row, c).value in (None, "") and (cell.row, c) not in merged_at:
+                    width += 0 if hidden(c) else colw(c)
+                    c += 1
+            size = (cell.font.size or 11) if cell.font else 11
+            bold = bool(cell.font and cell.font.bold)
+            al = cell.alignment
+            if _units(max(text.split("\n"), key=len), size, bold) > width * 0.98 and not (al and al.wrap_text):
+                cell.alignment = Alignment(horizontal=al.horizontal, vertical=al.vertical or "center", wrap_text=True,
+                                           indent=al.indent, text_rotation=al.text_rotation)
+                al = cell.alignment
+            if not (al and al.wrap_text) and "\n" not in text:
+                continue
+            h = _lines_needed(text, width, size, bold) * size * 1.33 + 5
+            have = sum((ws.row_dimensions[r].height or 15) for r in range(r0, r1 + 1))
+            if h > have:
+                need_h[r1] = max(need_h.get(r1, 0), (ws.row_dimensions[r1].height or 15) + (h - have))
+    for r, h in need_h.items():
+        ws.row_dimensions[r].height = min(round(h, 1), 409)
