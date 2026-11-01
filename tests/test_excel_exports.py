@@ -105,7 +105,6 @@ def test_customs_b11_cross_checks(seed):
 
 
 @pytest.mark.parametrize("customer", ["kodi", "tesa"])
-@pytest.mark.xfail(strict=True, reason="Lỗi đã biết: build_plx_sheet tính last = hr + n - 1 nên dòng 'Tổng cộng' ghi đè dòng hàng cuối và SUM bỏ sót nó")
 def test_plx_lists_every_item_and_sums_all(customer, seed):
     rec = seed[customer]
     ws = app.build_plx_sheet(new_wb(), rec)

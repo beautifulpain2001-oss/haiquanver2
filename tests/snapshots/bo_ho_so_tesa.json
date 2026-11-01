@@ -926,21 +926,26 @@
     "v": "Ống lõi giấy phi 33.02 x 2.65 x 1750mm_51036 blue red (39817-91750-00), có logo tesa, chữ tesa màu trắng, số 51036 màu trắng, nền màu đỏ, có vạch xanh dương trên lõi"
    },
    "A19": {
-    "b": true,
+    "b": false,
     "fmt": "General",
-    "v": "Tổng cộng"
+    "v": "Ống lõi giấy phi 33.2 x 2.65 x 1750mm_Black (39778-91750-00), có logo tesa, chữ tesa màu trắng, nền màu đỏ, có vạch đen trên lõi"
    },
    "A2": {
     "b": true,
     "fmt": "General",
     "v": "BẢN KHAI BÁO XUẤT XỨ CỦA NHÀ SẢN XUẤT/NHÀ CUNG CẤP NGUYÊN LIỆU TRONG NƯỚC"
    },
-   "A21": {
+   "A20": {
+    "b": true,
+    "fmt": "General",
+    "v": "Tổng cộng"
+   },
+   "A22": {
     "b": false,
     "fmt": "General",
     "v": "      Khai tại văn bản này, được sản xuất tại nhà máy của Công ty chúng tôi tại (2) Lô CN-15.1, KCN Thuận Thành II, Phường Mão Điền, Thành phố Bắc Ninh, Việt Nam có xuất xứ Việt Nam và đáp ứng tiêu chí CTH theo Thông tư số 05 /2018/TT-BCT ngày 03 tháng 4 năm 2018;đáp ứng tiêu chí CTSH+RVC 35% theo AIFTA/TT15/2010/TT-BTC ngày 15/04/2010; EVFTA// 11/2020/TT-BCT ngày 15/06/2020; tiêu chí RVC 40% theo quy định tại Chương Quy tắc xuất xứ hàng hóa trong (4) hiệp định ACFTA điểm a khoản 1 điều 7 thông tư 12/2019/TT-BCT ngày 30/07/2019 của  bộ Công Thương."
    },
-   "A22": {
+   "A23": {
     "b": false,
     "fmt": "General",
     "v": "Công ty cam kết thông tin khai báo trên là đúng và chịu trách nhiệm trước pháp luật về thông tin đã khai"
@@ -1025,12 +1030,12 @@
     "fmt": "General",
     "v": "nợ po"
    },
-   "B23": {
+   "B24": {
     "b": false,
     "fmt": "General",
     "v": "   Bắc Ninh, ngày 30 tháng 10  năm 2026"
    },
-   "B25": {
+   "B26": {
     "b": false,
     "fmt": "General",
     "v": "Người đại diện theo pháp luật của thương nhân"
@@ -1038,12 +1043,12 @@
    "B7": {
     "b": true,
     "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \\-??_);_(@_)",
-    "v": "=D19"
+    "v": "=D20"
    },
    "B8": {
     "b": true,
     "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \\-??_);_(@_)",
-    "v": "=E19"
+    "v": "=E20"
    },
    "C11": {
     "b": true,
@@ -1141,9 +1146,14 @@
     "v": 1200
    },
    "D19": {
+    "b": false,
+    "fmt": "#,##0",
+    "v": 100
+   },
+   "D20": {
     "b": true,
     "fmt": "#,##0",
-    "v": "=SUM(D12:D18)"
+    "v": "=SUM(D12:D19)"
    },
    "E11": {
     "b": true,
@@ -1186,20 +1196,25 @@
     "v": 30870000
    },
    "E19": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \\-??_);_(@_)",
+    "v": 2572500
+   },
+   "E20": {
     "b": true,
     "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \\-??_);_(@_)",
-    "v": "=SUM(E12:E18)"
+    "v": "=SUM(E12:E19)"
    }
   },
   "merged": [
    "A1:E1",
-   "A21:E21",
    "A22:E22",
+   "A23:E23",
    "A2:E2",
    "A3:E3",
    "A9:E9",
-   "B23:E23",
-   "B25:E25"
+   "B24:E24",
+   "B26:E26"
   ],
   "widths": {
    "A": 64.0,
