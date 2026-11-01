@@ -223,3 +223,21 @@ def test_import_learned_adds_customer_with_items(store, data_dir):
     assert app.PROFILES["kh_gia"]["name"] == "CÔNG TY GIẢ"
     again = app.DedicatedDataStore(base_dir=str(data_dir))
     assert "kh_gia" in again.custom_profiles
+
+
+def test_best_vat_and_pxk_follow_customer_sample(store):
+    """Khách docSet 'best': mã chứng từ 'khách dd.mm PO', thông tin người mua chỉ ở dòng đầu, 'Ô tô tải: biển số'."""
+    import openpyxl
+    prof = {"docSet": "best", "name": "CÔNG TY GIẢ", "addr": "Địa chỉ giả", "mst": "0123456789", "buyerPerson": "Nguyễn Giả",
+            "province": "Tỉnh Giả", "emails": "a@b.vn", "label": "Giả"}
+    store.import_learned({"khach_moi": {"key": "bgia", "profile": prof, "items": []}})
+    items = [{"po": "POGIA001", "ten_sp": f"Ống giả {i}", "qty": 10 * i, "price": 100, "amount": 1000 * i, "unit": "ống"} for i in (1, 2)]
+    rec = {"customer": "bgia", "docDate": "2026-11-02", "items": items, "poNumber": "POGIA001", "xeNo": "99H-000.00", "driver": "Lái Giả", "poDates": {}}
+    assert app.get_vat_and_pxk_ids(rec) == ("bgia 02.11 POGIA001", "bgia 02.11 POGIA001")
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    v, p = app.build_vat_bkav_sheet(wb, rec), app.build_pxk_bkav_sheet(wb, rec)
+    assert [v.cell(6, c).value for c in (14, 19, 31)] == ["Nguyễn Giả", "0123456789", "Tỉnh Giả"]
+    assert v.cell(7, 14).value == "Nguyễn Giả" and v.cell(7, 19).value is None and v.cell(7, 13).value is None
+    assert v.cell(6, 10).value is None
+    assert p.cell(3, 21).value == "Ô tô tải: 99H-000.00" and p.cell(4, 21).value is None

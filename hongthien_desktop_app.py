@@ -1443,6 +1443,9 @@ def get_vat_and_pxk_ids(rec):
         suf = " pl" if is_pallet else ""
         return f"tesa{d}.{m}{suf}", f"tesa{d}.{m}{suf}"
     if cust not in BUILTIN_CUSTOMERS:
+        if is_best_docset(rec):  # Best: 'best 02.11 POS261008053' (nhiều PO thì nối liền các số PO)
+            pos = "".join(p for p, _ in rec_po_list(rec))
+            return f"{cust} {dd}.{mm} {pos}".strip(), f"{cust} {dd}.{mm} {pos}".strip()
         return f"{cust}{d}.{m}", f"{cust}{d}.{m}"
     return f"shirai ngày {short_d}", f"Shirai ngày {short_d}"
 
@@ -1519,6 +1522,14 @@ def build_vat_bkav_sheet(wb, rec, sheet_name="VAT_BKAV"):
             23: "Có",
             24: prof.get("emails", "") if idx == 1 else "",
         }
+        if is_best_docset(prof):  # Best: thông tin người mua chỉ ghi ở dòng đầu; mọi dòng ghi họ tên người mua; thuế GTGT để trống
+            vals[10] = None
+            vals[14] = prof.get("buyerPerson", "")
+            if idx > 1:
+                for k in (13, 18, 19, 20, 22, 23):
+                    vals.pop(k, None)
+            else:
+                vals[31] = prof.get("province", "") or short_place(prof.get("addr", "")).split(" - ")[-1]
         for col_idx in range(1, 35):
             c = ws.cell(row=r, column=col_idx, value=vals.get(col_idx, None))
             c.font = Font(name="Calibri" if col_idx in (3, 4, 6, 7, 8) else ("Calibri Light" if col_idx in (5, 20) else "Arial"), size=12 if col_idx in (5, 20) else 11)
@@ -1604,6 +1615,11 @@ def build_pxk_bkav_sheet(wb, rec, sheet_name="PXK_BKAV"):
             22: ADDR_HT,
             23: prof.get("addrKho") or prof["addr"],
         }
+        if is_best_docset(prof):  # Best: ghi 'Ô tô tải: <biển số>' (có cách) và chỉ ghi thông tin chuyến ở dòng đầu
+            vals[21] = f"Ô tô tải: {xe}"
+            if idx > 1:
+                for k in range(10, 24):
+                    vals.pop(k, None)
         for col_idx in range(1, 25):
             c = ws.cell(row=r, column=col_idx, value=vals.get(col_idx, None))
             c.font = Font(name="Calibri Light", size=12)
@@ -2395,6 +2411,8 @@ BEST_DOCSET_DEFAULTS = {
     "buyerContact": "",
     "sellerContact": "",
     "sellerTel": "",
+    "buyerPerson": "",  # họ tên người mua trên hóa đơn VAT
+    "province": "",  # Tỉnh/Thành phố nhận hóa đơn (cột Tinh/ThanhPho)
     "buyerTel": "",
     "deliveryPlace": "",
     "ocrLoose": True,
