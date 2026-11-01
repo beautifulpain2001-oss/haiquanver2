@@ -35,3 +35,12 @@
 - **Tự đóng gói trên máy có Python:** chạy `2_DONG_GOI_RA_FILE_EXE.bat` (dùng `build_exe.py`: build bằng PyInstaller, tự chạy `--self-test` trên bản `.exe`, rồi nén zip vào `dist/`).
 - Dữ liệu `DATA_LUU_TRU_HONG_THIEN/` và `config_desktop.json` nằm **cạnh file `.exe`**, không nằm trong thư mục tạm.
 - Bản .exe mang sẵn bộ OCR Tesseract (tiếng Việt + Anh, thư mục `Tesseract-OCR` cạnh file .exe) nên đọc được PDF scan / ảnh ngay, 100% offline. Chạy bằng Python thì cần cài Tesseract riêng. Chi tiết ở `HUONG_DAN_BAN_EXE.md`.
+
+## Nhiều máy dùng chung một thư mục dữ liệu
+
+Không cần mạng LAN hay máy chủ. Mỗi máy: **Cài đặt → Nơi lưu dữ liệu → Đổi thư mục**, chọn cùng một thư mục dùng chung
+(ổ chung, OneDrive, Google Drive…). Hồ sơ và khách hàng lưu trong thư mục đó; máy nào lưu thì máy khác tự đọc lại (tối đa 15 giây,
+hoặc ngay khi chuyển trang). Danh sách chỉ hiện thông tin cơ bản; muốn xem chi tiết thì bấm **Mở thư mục hồ sơ**.
+
+Lưu cùng lúc từ hai máy không đè mất dữ liệu của nhau (khóa ngắn `.khoa_ghi`, gộp với bản mới nhất, ghi qua file tạm).
+Lưu ý: xóa một mặt hàng/khách ở máy này có thể bị máy khác lưu lại; xóa hồ sơ thì không bị khôi phục.

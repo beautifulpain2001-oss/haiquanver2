@@ -55,6 +55,11 @@ class MainWindow(QMainWindow):
         # Kiểm tra OCR chạy chương trình Tesseract (chậm): làm sẵn ở nền ngay khi mở để trang Cài đặt hiện tức thì
         widgets.run_job(self, core.ocr_available, lambda _ok: None)
 
+        # Nhiều máy dùng chung một thư mục dữ liệu: máy khác vừa lưu thì tự đọc lại và làm mới trang đang xem
+        self.sync_timer = QTimer(self)
+        self.sync_timer.timeout.connect(self.sync_shared)
+        self.sync_timer.start(15000)
+
         root = QWidget()
         lay = QHBoxLayout(root)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -64,12 +69,22 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
         self.nav.setCurrentRow(0)
 
+    def sync_shared(self):
+        try:
+            if self.store.sync():
+                page = self.pages.currentWidget()
+                if page in (self.records, self.catalog, self.customers) and hasattr(page, "refresh"):
+                    page.refresh()
+        except Exception:
+            pass  # thư mục dùng chung tạm thời không đọc được (đang đồng bộ): thử lại lần sau
+
     def closeEvent(self, e):
         widgets.wait_jobs()  # đợi việc nền xong, tránh hủy luồng giữa chừng
         super().closeEvent(e)
 
     def show_page(self, i):
         self.pages.setCurrentIndex(i)
+        self.sync_shared()
         page = self.pages.widget(i)
         if hasattr(page, "refresh"):
             page.refresh()

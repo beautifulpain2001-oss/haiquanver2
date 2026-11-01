@@ -31,12 +31,14 @@ BẢN ĐẦY ĐỦ 100% TÍNH NĂNG (FULL PARITY VỚI BẢN GỐC + LƯU TRỮ 
 import datetime
 import json
 import math
+import contextlib
 import os
 import re
 import shutil
 import sqlite3
 import subprocess
 import sys
+import time
 import tempfile
 
 import base64
@@ -553,6 +555,7 @@ class DedicatedDataStore:
         self.company = {}  # thông tin công ty người dùng đã sửa (Cài đặt); trống = dùng mặc định
         self.profile_overrides = {}  # chỗ người dùng đã sửa trên 3 khách có sẵn (mục Khách hàng)
         self.records = []
+        self._sigs, self._loaded_ids = {}, set()
         self.load_all()
 
     def ensure_directories(self):
@@ -611,6 +614,8 @@ class DedicatedDataStore:
                     self.records = json.load(f)
             except Exception:
                 self.records = []
+        self._loaded_ids = {r.get("id") for r in self.records}
+        self._note_sigs()
         if not self.records:
             self.records = self.default_seed_records()
             self.save_records()
@@ -800,35 +805,129 @@ class DedicatedDataStore:
         apply_company_exporter()
         return key
 
+    # ---- dùng chung một thư mục dữ liệu giữa nhiều máy (không cần mạng LAN, không máy chủ) -------------------------
+    # Mọi máy trỏ vào cùng một thư mục (ổ chung, OneDrive, Google Drive...). Ghi file: khóa ngắn + gộp với bản mới nhất
+    # trên đĩa + ghi qua file tạm, nên hai máy lưu gần nhau không đè mất dữ liệu của nhau.
+    LOCK_WAIT, LOCK_STALE = 8.0, 30.0
+
+    def _sig(self, path):
+        try:
+            st = os.stat(path)
+            return (st.st_mtime_ns, st.st_size)
+        except OSError:
+            return None
+
+    def _note_sigs(self):
+        self._sigs = {p: self._sig(p) for p in (self.catalog_file, self.records_file)}
+
+    def changed_on_disk(self):
+        """True nếu máy khác đã ghi file dữ liệu kể từ lần đọc/ghi gần nhất của máy này."""
+        return any(self._sig(p) != self._sigs.get(p) for p in (self.catalog_file, self.records_file))
+
+    def sync(self):
+        """Đọc lại dữ liệu nếu máy khác vừa thay đổi. Trả True nếu có đọc lại."""
+        if not self.changed_on_disk():
+            return False
+        self.load_all()
+        return True
+
+    @contextlib.contextmanager
+    def _lock(self):
+        path = os.path.join(self.base_dir, ".khoa_ghi")
+        t0, held = time.time(), False
+        while True:
+            try:
+                os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+                held = True
+                break
+            except FileExistsError:
+                try:
+                    if time.time() - os.path.getmtime(path) > self.LOCK_STALE:  # máy trước tắt đột ngột: bỏ khóa cũ
+                        os.remove(path)
+                        continue
+                except OSError:
+                    pass
+                if time.time() - t0 > self.LOCK_WAIT:
+                    break  # chờ quá lâu thì vẫn ghi (khóa chỉ để giảm va chạm, không để chặn người dùng)
+                time.sleep(0.1)
+            except OSError:
+                break
+        try:
+            yield
+        finally:
+            if held:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+    def _write_json(self, path, obj):
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+
+    def _read_json(self, path, default):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return default
+
     def save_catalog(self):
         try:
-            with open(self.catalog_file, "w", encoding="utf-8") as f:
-                json.dump(
-                    {
-                        "company": HT_NAME,
-                        "address": ADDR_HT,
-                        "tax_code": MST_HT,
-                        "company_info": self.company,
-                        "profile_overrides": self.profile_overrides,
-                        "weights_db": self.weights_db,
-                        "erp_catalog": self.erp_catalog,
-                        "kodi_items": self.kodi_items,
-                        "tesa_items": self.tesa_items,
-                        "item_mem": self.item_mem,
-                        "custom_profiles": self.custom_profiles,
-                        "custom_items": self.custom_items,
-                    },
-                    f,
-                    ensure_ascii=False,
-                    indent=2,
-                )
+            with self._lock():
+                disk = self._read_json(self.catalog_file, {}) if self.changed_on_disk() else {}
+                if disk:  # gộp phần máy khác vừa thêm; mục trùng thì bản của máy này thắng
+                    for k in ("item_mem", "custom_profiles", "profile_overrides", "weights_db"):
+                        merged = dict(disk.get(k) or {})
+                        merged.update(getattr(self, k, {}) or {})
+                        setattr(self, k, merged)
+                    items = {k: list(v) for k, v in (disk.get("custom_items") or {}).items()}
+                    for k, lst in self.custom_items.items():
+                        have = items.setdefault(k, [])
+                        for row in lst:
+                            ix = next((n for n, x in enumerate(have) if x.get("name") == row.get("name")), -1)
+                            if ix >= 0:
+                                have[ix] = row
+                            else:
+                                have.append(row)
+                    self.custom_items = items
+                self._write_json(self.catalog_file, {
+                    "company": HT_NAME,
+                    "address": ADDR_HT,
+                    "tax_code": MST_HT,
+                    "company_info": self.company,
+                    "profile_overrides": self.profile_overrides,
+                    "weights_db": self.weights_db,
+                    "erp_catalog": self.erp_catalog,
+                    "kodi_items": self.kodi_items,
+                    "tesa_items": self.tesa_items,
+                    "item_mem": self.item_mem,
+                    "custom_profiles": self.custom_profiles,
+                    "custom_items": self.custom_items,
+                })
+                self._sigs[self.catalog_file] = self._sig(self.catalog_file)
         except Exception as e:
             print("Warning saving catalog:", e)
 
     def save_records(self):
         try:
-            with open(self.records_file, "w", encoding="utf-8") as f:
-                json.dump(self.records, f, ensure_ascii=False, indent=2)
+            with self._lock():
+                if self._sig(self.records_file) != self._sigs.get(self.records_file):
+                    disk = self._read_json(self.records_file, [])
+                    local_ids = {r.get("id") for r in self.records}
+                    for r in disk:  # hồ sơ máy khác vừa thêm/sửa
+                        rid = r.get("id")
+                        if rid in getattr(self, "_loaded_ids", set()):
+                            ix = next((n for n, x in enumerate(self.records) if x.get("id") == rid), -1)
+                            if ix >= 0 and str(r.get("updatedAt") or "") > str(self.records[ix].get("updatedAt") or ""):
+                                self.records[ix] = r  # máy kia sửa mới hơn
+                        elif rid not in local_ids:
+                            self.records.append(r)
+                self._write_json(self.records_file, self.records)
+                self._loaded_ids = {r.get("id") for r in self.records}
+                self._sigs[self.records_file] = self._sig(self.records_file)
         except Exception as e:
             print("Warning saving records JSON:", e)
         try:
@@ -3984,6 +4083,7 @@ def lot_export_each(store, rec, skip_h=False):
 
 def lot_save_new(store, rec, exported_files):
     """Lưu hồ sơ vừa làm ở Bước 1: gắn các file đã xuất, ghi đè hồ sơ cùng khách + cùng số PO."""
+    store.sync()  # máy khác có thể vừa lưu hồ sơ vào thư mục dùng chung
     for k, v in exported_files.items():
         rec["files"][k] = v
     if not rec.get("folder"):  # nhớ thư mục để mở lại đúng chỗ dù sau này đổi tên gọi khách
@@ -4007,6 +4107,7 @@ def lot_save_new(store, rec, exported_files):
 
 def lot_save_workbench(store, rec):
     """Lưu hồ sơ ở Bước 2: ghi file 00_HO_SO_<id>.json vào thư mục hồ sơ và cập nhật danh sách."""
+    store.sync()
     dest_dir = store.get_record_folder_path(rec)
     os.makedirs(dest_dir, exist_ok=True)
     with open(os.path.join(dest_dir, f"00_HO_SO_{rec['id']}.json"), "w", encoding="utf-8") as f:

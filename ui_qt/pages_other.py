@@ -537,8 +537,14 @@ class SettingsPage(_Page):
         self.company_msg.setWordWrap(True)
         lay.addWidget(self.company_msg)
 
-        dbox = QGroupBox("Nơi lưu dữ liệu")
+        dbox = QGroupBox("Nơi lưu dữ liệu (dùng chung nhiều máy)")
         dl = QVBoxLayout(dbox)
+        tip = QLabel("Nhiều máy cùng dùng phần mềm: mỗi máy chọn CÙNG một thư mục này (ổ dùng chung, OneDrive, Google Drive...). "
+                     "Không cần mạng LAN hay máy chủ. Thông tin cơ bản của hồ sơ và khách hàng đọc từ thư mục này; "
+                     "muốn xem chi tiết thì mở thư mục hồ sơ.")
+        tip.setObjectName("hint")
+        tip.setWordWrap(True)
+        dl.addWidget(tip)
         self.path = QLabel()
         self.path.setWordWrap(True)
         self.path.setTextInteractionFlags(Qt.TextSelectableByMouse)
