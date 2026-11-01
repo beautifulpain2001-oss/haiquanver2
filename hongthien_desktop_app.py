@@ -735,7 +735,15 @@ def extract_text_from_pdf_or_image_offline(file_path, is_tesa=False, table_mode=
                 else list(range(min(total, 10)))
             )
             for idx in page_indices:
-                embedded = (reader.pages[idx].extract_text() or "").strip()
+                embedded = ""
+                if table_mode:
+                    # PDF in từ ERP (VD Best): cột tên/quy cách được vẽ riêng nên đọc thường bị tách khỏi dòng hàng.
+                    # Đọc theo bố cục trang để mỗi dòng của bảng giữ đủ mã, quy cách, SL, giá trên cùng một dòng.
+                    try:
+                        embedded = (reader.pages[idx].extract_text(extraction_mode="layout") or "").strip()
+                    except Exception:
+                        embedded = ""
+                embedded = embedded or (reader.pages[idx].extract_text() or "").strip()
                 if len(re.sub(r"\s+", "", embedded)) > 80:
                     pages_out.append(embedded)
                 elif pdfium is not None and pytesseract is not None:
@@ -3234,6 +3242,172 @@ def parse_generic_po_text(text, profile, catalog_items, data_store=None, tare_va
     return po_no, po_date, lines
 
 
+# ======================================================================
+# LÔ HÀNG: các thao tác dùng chung cho mọi giao diện (Tkinter cũ, Qt mới).
+# Không dùng widget; nhận/trả dữ liệu thường để test được không cần cửa sổ.
+# ======================================================================
+def lot_recalc(items, customer, tare_text):
+    """Tính lại số kiện, KL tịnh, KL cả bì cho từng dòng (sửa trực tiếp `items`)."""
+    try:
+        tare_v = float(tare_text or 0)
+    except Exception:
+        tare_v = 1.0
+    default_div = float(PROFILES.get(customer, {}).get("defaultDiv") or 0)
+    for it in items:
+        qty = float(it.get("qty", 0))
+        div = float(it.get("div", 0)) or default_div
+        it["div"] = div
+        kg = float(it.get("kg", 0))
+        if div > 0:
+            it["kien"] = math.ceil(round(qty / div * 1e6) / 1e6)
+        if kg > 0:
+            it["net"] = round(qty * kg, 2)
+            it["gross"] = round(it["net"] + tare_v, 2) if it["net"] > 0 else 0.0
+
+
+def lot_build_record(store, form, items):
+    """Dựng hồ sơ (record) từ các ô nhập `form` và danh sách dòng hàng `items`.
+
+    `form` là dict các khóa: customer, doc_date, po, po_date, schedule, pxk, hd, tk,
+    luong, xe, driver, ldd, po_dates, pay_days, delivery (chuỗi; thiếu thì coi là rỗng).
+    """
+    g = lambda k: str(form.get(k) or "").strip()
+    cust = g("customer")
+    dt = g("doc_date") or datetime.date.today().strftime("%Y-%m-%d")
+    tot_qty = sum(float(x.get("qty", 0)) for x in items)
+    tot_amt = sum(float(x.get("amount", 0)) for x in items)
+    tot_net = sum(float(x.get("net", 0)) for x in items)
+    tot_gross = sum(float(x.get("gross", 0)) for x in items)
+    tot_kien = sum(float(x.get("kien", 0)) for x in items)
+    sched = g("schedule")
+    s_key = sched if (cust == "shirai" and sched) else (dt[8:10] + "." + dt[5:7] if len(dt) == 10 else "30.10")
+    rec = {
+        "id": f"HS-{dt.replace('-', '')}-{cust.upper()}-{len(store.records)+1:02d}",
+        "zone": "WORKING",
+        "customer": cust,
+        "docDate": dt,
+        "poNumber": g("po"),
+        "poDate": g("po_date"),
+        "scheduleKey": s_key,
+        "pxkNo": g("pxk"),
+        "hdNo": g("hd"),
+        "tkNo": g("tk"),
+        "luong": g("luong"),
+        "xeNo": g("xe"),
+        "driver": g("driver"),
+        "lddSeq": g("ldd"),
+        "poDates": dict(form.get("po_dates") or {}),
+        "payDays": g("pay_days"),
+        "deliveryDate": g("delivery"),
+        "totalQty": tot_qty,
+        "totalAmount": tot_amt,
+        "totalNet": round(tot_net, 2),
+        "totalGross": round(tot_gross, 2),
+        "totalKien": tot_kien,
+        "updatedAt": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "items": [dict(x) for x in items],
+        "files": {"po": None, "pxk": None, "vat": None, "pkl": None, "tk": None, "scan": None},
+    }
+    if is_best_docset(PROFILES.get(cust, {})):
+        rec["totalKien"] = lot_totals(rec)["kien"]
+    return rec
+
+
+def lot_export(store, rec, mode="ALL", skip_h=False):
+    """Xuất Excel cho hồ sơ `rec` vào thư mục làm việc của hồ sơ.
+
+    Trả {"path", "fname", "problems", "dsh"}: `problems` là danh sách điểm lệch khi kiểm tra
+    chéo (chỉ mode ALL), `dsh` là tên file danh sách hàng ECUS đi kèm (nếu có).
+    Ném ValueError(thông báo tiếng Việt) khi không xuất được.
+    """
+    if not rec.get("items"):
+        raise ValueError("Chưa có dòng hàng nào để xuất file Excel.")
+    if mode == "BEST" and not is_best_docset(rec):
+        raise ValueError("Khách này chưa đặt bộ mẫu 'best'. Thêm khách bằng nút 'Thêm Khách Mới' và chọn bộ mẫu best.")
+    work_dir = store.get_record_folder_path(rec)
+    os.makedirs(work_dir, exist_ok=True)
+    clean_po = re.sub(r"[^a-zA-Z0-9_-]", "", rec["poNumber"])[:24]
+    s_key = rec.get("scheduleKey", "30.10")
+    problems = []
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    if mode == "VAT":
+        build_vat_bkav_sheet(wb, rec, s_key)
+        fname = f"Hoa_Don_VAT_BKAV_{rec['customer']}_{s_key}.xlsx"
+    elif mode == "PKL":
+        build_invoice_pkl_sheet(wb, rec, s_key, skip_h=skip_h)
+        fname = f"invoice_{rec['customer']}_{rec['pxkNo'] or '0000294'}_{s_key}.xlsx"
+    elif mode == "PXK":
+        build_pxk_bkav_sheet(wb, rec, s_key)
+        fname = f"PXK_KVCNB_BKAV_{rec['customer']}_{s_key}.xlsx"
+    elif mode == "DNTT":
+        build_dntt_sheet(wb, rec, "DNTT")
+        fname = f"DNTT_{rec['customer']}_{s_key}.xlsx"
+    elif mode == "PLX":
+        build_plx_sheet(wb, rec, f"PLX_{s_key}")
+        fname = f"PLX_{rec['customer']}_{s_key}.xlsx"
+    elif mode == "BEST":
+        build_packing_best_sheet(wb, rec, f"DongGoi_{s_key}")
+        build_pgh_best_sheet(wb, rec, f"PGH_{s_key}")
+        build_dccn_best_sheet(wb, rec, f"DCCN_{s_key}")
+        build_dntt_sheet(wb, rec, "DNTT")
+        fname = f"Mau_Best_{rec['customer']}_{clean_po}_{s_key}.xlsx"
+    elif mode == "DSH":
+        build_ecus_dsh_sheet(wb, rec)
+        fname = f"dsh_{rec['pxkNo'] or rec['customer']}.xlsx"
+    else:
+        build_full_bundle(wb, rec, s_key, skip_h=skip_h)
+        problems = check_lot(rec)
+        build_check_sheet(wb, rec, problems, f"KiemTra_{s_key}")
+        fname = f"Bo_Ho_So_Xuat_Hang_{PROFILES[rec['customer']]['label']}_{clean_po}_{s_key}.xlsx"
+
+    out_path = os.path.join(work_dir, fname)
+    wb.save(out_path)
+    dsh = None
+    if mode == "ALL" and rec["customer"] not in BUILTIN_CUSTOMERS:
+        # Danh sách hàng để import ECUS đi kèm trọn bộ của khách mới
+        wb_dsh = openpyxl.Workbook()
+        wb_dsh.remove(wb_dsh.active)
+        build_ecus_dsh_sheet(wb_dsh, rec)
+        dsh = f"dsh_{rec['pxkNo'] or rec['customer']}.xlsx"
+        wb_dsh.save(os.path.join(work_dir, dsh))
+    return {"path": out_path, "fname": fname, "problems": problems, "dsh": dsh}
+
+
+def lot_save_new(store, rec, exported_files):
+    """Lưu hồ sơ vừa làm ở Bước 1: gắn các file đã xuất, ghi đè hồ sơ cùng khách + cùng số PO."""
+    for k, v in exported_files.items():
+        rec["files"][k] = v
+    idx = next((i for i, r in enumerate(store.records) if r.get("customer") == rec["customer"] and r.get("poNumber") == rec["poNumber"]), -1)
+    if idx >= 0:
+        for k, v in store.records[idx].get("files", {}).items():
+            if v and not rec["files"].get(k):
+                rec["files"][k] = v
+        rec["id"] = store.records[idx]["id"]
+        store.records[idx] = rec
+    else:
+        store.records.insert(0, rec)
+    store.save_records()
+    return rec
+
+
+def lot_save_workbench(store, rec):
+    """Lưu hồ sơ ở Bước 2: ghi file 00_HO_SO_<id>.json vào thư mục hồ sơ và cập nhật danh sách."""
+    dest_dir = store.get_record_folder_path(rec)
+    os.makedirs(dest_dir, exist_ok=True)
+    with open(os.path.join(dest_dir, f"00_HO_SO_{rec['id']}.json"), "w", encoding="utf-8") as f:
+        json.dump(rec, f, ensure_ascii=False, indent=2)
+    idx = next((i for i, r in enumerate(store.records) if r["id"] == rec["id"]), -1)
+    if idx >= 0:
+        store.records[idx] = rec
+    else:
+        store.records.insert(0, rec)
+    store.save_records()
+    return dest_dir
+
+
 class HongThienCustomsDesktopApp:
     def __init__(self, root, data_store):
         self.root = root
@@ -3850,21 +4024,7 @@ class HongThienCustomsDesktopApp:
         messagebox.showinfo("Cập Nhật ERP", f"Đã nạp bổ sung {count} mã hàng thương mại đầu TM vào Tập dữ liệu riêng!")
 
     def recalc_all_items(self):
-        try:
-            tare_v = float(self.cur_tare.get() or 0)
-        except Exception:
-            tare_v = 1.0
-        default_div = float(PROFILES.get(self.cur_customer.get(), {}).get("defaultDiv") or 0)
-        for it in self.cur_items:
-            qty = float(it.get("qty", 0))
-            div = float(it.get("div", 0)) or default_div
-            it["div"] = div
-            kg = float(it.get("kg", 0))
-            if div > 0:
-                it["kien"] = math.ceil(round(qty / div * 1e6) / 1e6)
-            if kg > 0:
-                it["net"] = round(qty * kg, 2)
-                it["gross"] = round(it["net"] + tare_v, 2) if it["net"] > 0 else 0.0
+        lot_recalc(self.cur_items, self.cur_customer.get(), self.cur_tare.get())
         self.refresh_step1_tree()
 
     def load_sample_batch(self, cust_key):
@@ -4336,102 +4496,29 @@ class HongThienCustomsDesktopApp:
         tk.Button(dlg, text="💾 Lưu Dòng Hàng & Nhớ Định Mức", bg="#1B365D", fg="#FFFFFF", font=("Segoe UI", 9, "bold"), padx=16, pady=6, command=save_line).grid(row=len(field_list) + 1, column=0, columnspan=2, pady=14)
 
     def build_current_step1_record(self):
-        cust = self.cur_customer.get()
-        dt = self.cur_doc_date.get().strip() or datetime.date.today().strftime("%Y-%m-%d")
-        tot_qty = sum(float(x.get("qty", 0)) for x in self.cur_items)
-        tot_amt = sum(float(x.get("amount", 0)) for x in self.cur_items)
-        tot_net = sum(float(x.get("net", 0)) for x in self.cur_items)
-        tot_gross = sum(float(x.get("gross", 0)) for x in self.cur_items)
-        tot_kien = sum(float(x.get("kien", 0)) for x in self.cur_items)
-        s_key = self.shirai_sched_var.get() if (cust == "shirai" and self.shirai_sched_var.get()) else (dt[8:10] + "." + dt[5:7] if len(dt) == 10 else "30.10")
-        rec = {
-            "id": f"HS-{dt.replace('-', '')}-{cust.upper()}-{len(self.store.records)+1:02d}",
-            "zone": "WORKING",
-            "customer": cust,
-            "docDate": dt,
-            "poNumber": self.cur_po.get().strip(),
-            "poDate": self.cur_po_date.get().strip(),
-            "scheduleKey": s_key,
-            "pxkNo": self.cur_pxk.get().strip(),
-            "hdNo": self.cur_hd.get().strip(),
-            "tkNo": self.cur_tk.get().strip(),
-            "luong": self.cur_luong.get().strip(),
-            "xeNo": self.cur_xe.get().strip(),
-            "driver": self.cur_driver.get().strip(),
-            "lddSeq": self.cur_ldd.get().strip(),
-            "poDates": dict(self.cur_po_dates),
-            "payDays": self.cur_pay_days.get().strip(),
-            "deliveryDate": self.cur_delivery.get().strip(),
-            "totalQty": tot_qty,
-            "totalAmount": tot_amt,
-            "totalNet": round(tot_net, 2),
-            "totalGross": round(tot_gross, 2),
-            "totalKien": tot_kien,
-            "updatedAt": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
-            "items": [dict(x) for x in self.cur_items],
-            "files": {"po": None, "pxk": None, "vat": None, "pkl": None, "tk": None, "scan": None},
+        form = {
+            "customer": self.cur_customer.get(), "doc_date": self.cur_doc_date.get(),
+            "po": self.cur_po.get(), "po_date": self.cur_po_date.get(),
+            "schedule": self.shirai_sched_var.get(), "pxk": self.cur_pxk.get(),
+            "hd": self.cur_hd.get(), "tk": self.cur_tk.get(), "luong": self.cur_luong.get(),
+            "xe": self.cur_xe.get(), "driver": self.cur_driver.get(), "ldd": self.cur_ldd.get(),
+            "po_dates": self.cur_po_dates, "pay_days": self.cur_pay_days.get(),
+            "delivery": self.cur_delivery.get(),
         }
-        if is_best_docset(PROFILES.get(cust, {})):
-            rec["totalKien"] = lot_totals(rec)["kien"]
-        return rec
+        return lot_build_record(self.store, form, self.cur_items)
 
     def export_step1_excel(self, mode="ALL"):
         if not self.cur_items:
             messagebox.showwarning("Xuất chứng từ", "Chưa có dòng hàng nào để xuất file Excel.")
             return
         rec = self.build_current_step1_record()
-        work_dir = self.store.get_record_folder_path(rec)
-        os.makedirs(work_dir, exist_ok=True)
-        clean_po = re.sub(r"[^a-zA-Z0-9_-]", "", rec["poNumber"])[:24]
-        s_key = rec.get("scheduleKey", "30.10")
-        skip_h = bool(self.kodi_skiph_var.get())
-
-        wb = openpyxl.Workbook()
-        wb.remove(wb.active)
-
-        if mode == "VAT":
-            build_vat_bkav_sheet(wb, rec, s_key)
-            fname = f"Hoa_Don_VAT_BKAV_{rec['customer']}_{s_key}.xlsx"
-        elif mode == "PKL":
-            build_invoice_pkl_sheet(wb, rec, s_key, skip_h=skip_h)
-            fname = f"invoice_{rec['customer']}_{rec['pxkNo'] or '0000294'}_{s_key}.xlsx"
-        elif mode == "PXK":
-            build_pxk_bkav_sheet(wb, rec, s_key)
-            fname = f"PXK_KVCNB_BKAV_{rec['customer']}_{s_key}.xlsx"
-        elif mode == "DNTT":
-            build_dntt_sheet(wb, rec, "DNTT")
-            fname = f"DNTT_{rec['customer']}_{s_key}.xlsx"
-        elif mode == "PLX":
-            build_plx_sheet(wb, rec, f"PLX_{s_key}")
-            fname = f"PLX_{rec['customer']}_{s_key}.xlsx"
-        elif mode == "BEST":
-            if not is_best_docset(rec):
-                messagebox.showwarning("Mẫu Best", "Khách này chưa đặt bộ mẫu 'best'. Thêm khách bằng nút 'Thêm Khách Mới' và chọn bộ mẫu best.")
-                return
-            build_packing_best_sheet(wb, rec, f"DongGoi_{s_key}")
-            build_pgh_best_sheet(wb, rec, f"PGH_{s_key}")
-            build_dccn_best_sheet(wb, rec, f"DCCN_{s_key}")
-            build_dntt_sheet(wb, rec, "DNTT")
-            fname = f"Mau_Best_{rec['customer']}_{clean_po}_{s_key}.xlsx"
-        elif mode == "DSH":
-            build_ecus_dsh_sheet(wb, rec)
-            fname = f"dsh_{rec['pxkNo'] or rec['customer']}.xlsx"
-        else:
-            build_full_bundle(wb, rec, s_key, skip_h=skip_h)
-            problems = check_lot(rec)
-            build_check_sheet(wb, rec, problems, f"KiemTra_{s_key}")
-            fname = f"Bo_Ho_So_Xuat_Hang_{PROFILES[rec['customer']]['label']}_{clean_po}_{s_key}.xlsx"
-
-        out_path = os.path.join(work_dir, fname)
-        wb.save(out_path)
-        extra_note = ""
-        if mode == "ALL" and rec["customer"] not in BUILTIN_CUSTOMERS:
-            # Danh sách hàng để import ECUS đi kèm trọn bộ của khách mới
-            wb_dsh = openpyxl.Workbook()
-            wb_dsh.remove(wb_dsh.active)
-            build_ecus_dsh_sheet(wb_dsh, rec)
-            wb_dsh.save(os.path.join(work_dir, f"dsh_{rec['pxkNo'] or rec['customer']}.xlsx"))
-            extra_note += f"\nKèm file danh sách hàng ECUS: dsh_{rec['pxkNo'] or rec['customer']}.xlsx"
+        try:
+            res = lot_export(self.store, rec, mode, skip_h=bool(self.kodi_skiph_var.get()))
+        except ValueError as e:
+            messagebox.showwarning("Xuất chứng từ", str(e))
+            return
+        out_path, fname, problems = res["path"], res["fname"], res["problems"]
+        extra_note = f"\nKèm file danh sách hàng ECUS: {res['dsh']}" if res["dsh"] else ""
         if mode == "ALL":
             extra_note += ("\n\nKiểm tra chéo: ĐẠT, các chứng từ khớp nhau." if not problems else
                            f"\n\n⚠ Kiểm tra chéo có {len(problems)} điểm cần xem (sheet KiemTra):\n- " + "\n- ".join(problems[:6])
@@ -4452,20 +4539,7 @@ class HongThienCustomsDesktopApp:
         )
 
     def transfer_step1_to_step2(self):
-        rec = self.build_current_step1_record()
-        for k, v in self.step1_exported_paths.items():
-            rec["files"][k] = v
-        existing_idx = next((i for i, r in enumerate(self.store.records) if r.get("customer") == rec["customer"] and r.get("poNumber") == rec["poNumber"]), -1)
-        if existing_idx >= 0:
-            old_files = self.store.records[existing_idx].get("files", {})
-            for k, v in old_files.items():
-                if v and not rec["files"].get(k):
-                    rec["files"][k] = v
-            rec["id"] = self.store.records[existing_idx]["id"]
-            self.store.records[existing_idx] = rec
-        else:
-            self.store.records.insert(0, rec)
-        self.store.save_records()
+        rec = lot_save_new(self.store, self.build_current_step1_record(), self.step1_exported_paths)
         self.select_record_into_step2(rec)
         self.refresh_archive_table()
         self.nb.select(self.tab_step2)
@@ -4544,18 +4618,7 @@ class HongThienCustomsDesktopApp:
             return
         self.wb_zone.set(target_zone)
         self.sync_wb_fields_to_rec()
-        dest_dir = self.store.get_record_folder_path(self.wb_rec)
-        os.makedirs(dest_dir, exist_ok=True)
-        meta_path = os.path.join(dest_dir, f"00_HO_SO_{self.wb_rec['id']}.json")
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(self.wb_rec, f, ensure_ascii=False, indent=2)
-
-        idx = next((i for i, r in enumerate(self.store.records) if r["id"] == self.wb_rec["id"]), -1)
-        if idx >= 0:
-            self.store.records[idx] = self.wb_rec
-        else:
-            self.store.records.insert(0, self.wb_rec)
-        self.store.save_records()
+        dest_dir = lot_save_workbench(self.store, self.wb_rec)
         self.update_step2_slot_ui()
         self.refresh_archive_table()
         messagebox.showinfo("Lưu Trữ Tập Trung Máy Chủ Host", f"Đã lưu bộ hồ sơ PO {self.wb_rec['poNumber']} vào phân vùng {target_zone}!\nThư mục: {dest_dir}")
@@ -4773,6 +4836,10 @@ if __name__ == "__main__":
             sys.exit(1)
         sys.exit(0)
     store = DedicatedDataStore()
+    if "--giao-dien-moi" in sys.argv:
+        # Giao diện mới (PySide6); bản Tkinter cũ vẫn là mặc định cho tới khi người dùng xác nhận bản mới
+        from ui_qt.main_window import run as run_qt
+        sys.exit(run_qt(sys.modules[__name__], store, smoke="--gui-smoke" in sys.argv))
     root = tk.Tk()
     app = HongThienCustomsDesktopApp(root, store)
     if "--gui-smoke" in sys.argv:

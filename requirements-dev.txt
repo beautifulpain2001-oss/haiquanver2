@@ -4,3 +4,5 @@ pytest>=8.0
 pillow>=10.0
 pytesseract>=0.3.10
 pypdfium2>=4.0
+# Giao diện mới (ui_qt/)
+PySide6>=6.7

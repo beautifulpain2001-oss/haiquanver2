@@ -28,6 +28,12 @@ EXE = os.path.join(DIST, NAME + (".exe" if os.name == "nt" else ""))
 ZIP = os.path.join(DIST, NAME + "_Windows.zip")
 GUIDE = os.path.join(ROOT, "HUONG_DAN_BAN_EXE.md")
 OCR_DIR = os.path.join(DIST, "Tesseract-OCR")
+QT_EXCLUDES = (
+    "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.QtWebEngineQuick", "PySide6.QtWebChannel",
+    "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtQuickWidgets", "PySide6.Qt3DCore", "PySide6.QtPdf",
+    "PySide6.QtPdfWidgets", "PySide6.QtMultimedia", "PySide6.QtCharts", "PySide6.QtDataVisualization",
+    "PySide6.QtSql", "PySide6.QtNetwork", "PySide6.QtOpenGL", "PySide6.QtSvg", "PySide6.QtDesigner",
+)
 OCR_LANGS = ("eng", "vie", "osd")  # osd: tự xoay trang PO scan bị nằm ngang
 
 
@@ -47,6 +53,9 @@ def build():
         # Không dùng tới, bỏ bớt cho file nhỏ và khởi động nhanh hơn
         "--exclude-module", "pytest",
         "--exclude-module", "numpy",
+        # Giao diện mới chỉ dùng QtCore/QtGui/QtWidgets; bỏ các module Qt nặng không dùng
+        "--hidden-import", "ui_qt.main_window",
+        *[a for m in QT_EXCLUDES for a in ("--exclude-module", m)],
         "hongthien_desktop_app.py",
     ]
     print("==", " ".join(cmd))
@@ -132,6 +141,16 @@ def self_test(with_ocr=True):
                 print(f"Giao diện THẤT BẠI (exit {res.returncode})")
                 return 1
             print("Giao diện OK")
+            print("== mở thử giao diện mới (--giao-dien-moi --gui-smoke)")
+            try:
+                res = subprocess.run([exe, "--giao-dien-moi", "--gui-smoke"], cwd=ROOT, timeout=180)
+            except subprocess.TimeoutExpired:
+                print("Giao diện mới THẤT BẠI: không tự đóng sau 180 giây")
+                return 1
+            if res.returncode:
+                print(f"Giao diện mới THẤT BẠI (exit {res.returncode})")
+                return 1
+            print("Giao diện mới OK")
         return 0
 
 
