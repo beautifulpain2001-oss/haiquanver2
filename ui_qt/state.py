@@ -33,6 +33,13 @@ class Lot:
         self.form.update(xe=d["xe"], driver=d["driver"], ldd=d["ldd"], tare=d["tare"], pay_days=d["pay_days"],
                          delivery=d["delivery"], luong=d["luong"])
 
+    def fill_vehicle_defaults(self):
+        """Biển số, lái xe còn trống thì lấy từ thông tin khách (người dùng vừa lưu ở mục Khách hàng)."""
+        prof = self.core.PROFILES.get(self.customer) or {}
+        for k, pk in (("xe", "xe"), ("driver", "driver")):
+            if not str(self.form.get(k, "")).strip() and prof.get(pk):
+                self.form[k] = prof[pk]
+
     def select_customer(self, customer):
         if customer != self.customer:
             self.reset(customer)

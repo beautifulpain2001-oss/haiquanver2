@@ -132,3 +132,12 @@ def test_recalc_uses_form_tare(kodi_lot):
     kodi_lot.form["tare"] = "2"
     kodi_lot.recalc()
     assert kodi_lot.items[0]["gross"] == kodi_lot.items[0]["net"] + 2
+
+
+def test_vehicle_defaults_follow_customer_saved_after_selecting(lot, store):
+    """Lưu lái xe/biển số ở mục Khách hàng sau khi đã chọn khách: ô Thông tin chuyến vẫn lấy được."""
+    lot.select_customer("kodi")
+    lot.form["xe"] = lot.form["driver"] = ""
+    store.update_customer("kodi", {"driver": "Lái Mới", "xe": "Ô tô tải: 99X-111.11"})
+    lot.fill_vehicle_defaults()
+    assert lot.form["driver"] == "Lái Mới" and lot.form["xe"] == "99X-111.11"

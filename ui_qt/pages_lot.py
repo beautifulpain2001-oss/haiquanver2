@@ -412,6 +412,7 @@ class InfoStep(QWidget):
         self.lot.saved = False
 
     def refresh(self):
+        self.lot.fill_vehicle_defaults()
         for k, e in self.edits.items():
             e.setText(str(self.lot.form.get(k, "")))
         self.groups["pay"].setVisible(self.lot.is_best)

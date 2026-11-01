@@ -769,6 +769,8 @@ class DedicatedDataStore:
             raise ValueError("Không tìm thấy khách hàng này.")
         names = dict(CUSTOMER_FIELDS)
         clean = {k: str(v).strip() for k, v in fields.items() if k in names}
+        if clean.get("xe"):  # chỉ lưu biển số; chữ "Ô tô tải:" do chứng từ tự thêm
+            clean["xe"] = re.sub(r"^\s*[ÔôOo]\s*tô\s*tải\s*:?\s*", "", clean["xe"], flags=re.I).strip()
         if "name" in clean and not clean["name"]:
             raise ValueError("Tên công ty của khách không được để trống.")
         if clean.get("mst") and not re.fullmatch(r"[0-9\-]{10,14}", clean["mst"]):
