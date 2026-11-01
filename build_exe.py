@@ -158,6 +158,8 @@ def package(with_ocr=True):
     with zipfile.ZipFile(ZIP, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(EXE, os.path.basename(EXE))
         z.write(GUIDE, "HUONG_DAN.txt")
+        # Bấm đúp để mở giao diện mới (bấm đúp .exe vẫn mở giao diện cũ). Chỉ dùng ký tự ASCII cho cmd.
+        z.writestr("MO_GIAO_DIEN_MOI.bat", '@echo off\r\ncd /d "%~dp0"\r\nstart "" "' + os.path.basename(EXE) + '" --giao-dien-moi\r\n')
         if with_ocr:
             for root, _, files in os.walk(OCR_DIR):
                 for f in files:

@@ -40,3 +40,9 @@ PHẦN MỀM HỒ SƠ HẢI QUAN HỒNG THIÊN - BẢN .EXE (KHÔNG CẦN CÀI P
      DATA_LUU_TRU_HONG_THIEN\01_WORKING_LAM_CHUNG_TU\
    - Kiểm tra bộ OCR: HongThien_HaiQuan_Desktop.exe --ocr-self-test
      (không báo lỗi và không sinh file SELF_TEST_LOI.txt là OCR hoạt động).
+
+## Giao diện mới (đang thử nghiệm)
+
+- Bấm đúp `HongThien_HaiQuan_Desktop.exe` mở giao diện cũ như trước.
+- Bấm đúp `MO_GIAO_DIEN_MOI.bat` (cùng thư mục) để xem giao diện mới. Bản mới chưa làm được chứng từ thật; vẫn dùng giao diện cũ để làm việc.
+- Hai giao diện dùng chung thư mục `DATA_LUU_TRU_HONG_THIEN`.
