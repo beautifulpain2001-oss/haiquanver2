@@ -118,8 +118,8 @@ class RecordsPage(_Page):
             widgets.open_folder(self.store.get_record_folder_path(rec))
 
 
-REC_COLS = ["Khách", "Ngày chứng từ", "Số tờ khai", "Luồng", "Số PO", "Số PXK", "Số HĐ", "Thành tiền (VNĐ)", "Thư mục trên máy", "Mở"]
-COL_CUST, COL_FOLDER, COL_OPEN = 0, 8, 9
+REC_COLS = ["Khách", "Ngày chứng từ", "Số tờ khai", "Luồng", "Số PO", "Số PXK", "Số HĐ", "Thành tiền (VNĐ)", "Người làm", "Thư mục trên máy", "Mở"]
+COL_CUST, COL_FOLDER, COL_OPEN = 0, 9, 10
 
 
 class RecordTable(QTableWidget):
@@ -157,7 +157,7 @@ class RecordTable(QTableWidget):
             folder = self.folder_of(rec)
             label = self.core.PROFILES.get(rec.get("customer", ""), {}).get("label", rec.get("customer", ""))
             vals = [label, rec.get("docDate", ""), rec.get("tkNo") or "Chưa khai", rec.get("luong", ""), rec.get("poNumber", ""),
-                    rec.get("pxkNo") or "Chờ cấp", rec.get("hdNo") or "Chờ ký", widgets.fmt_num(rec.get("totalAmount")), folder]
+                    rec.get("pxkNo") or "Chờ cấp", rec.get("hdNo") or "Chờ ký", widgets.fmt_num(rec.get("totalAmount")), rec.get("workedBy") or "", folder]
             for c, v in enumerate(vals):
                 cell = QTableWidgetItem(str(v))
                 if c == 7:
@@ -537,6 +537,27 @@ class SettingsPage(_Page):
         self.company_msg.setWordWrap(True)
         lay.addWidget(self.company_msg)
 
+        ubox = QGroupBox("Người dùng máy này")
+        ul = QVBoxLayout(ubox)
+        uh = QLabel("Nhập tên của bạn (đúng như tên ghi ở ô “Nhân viên phụ trách” trong mục Khách hàng). Hồ sơ bạn làm sẽ ghi tên bạn; "
+                    "chọn khách do người khác phụ trách thì phần mềm hỏi lại cho chắc. Tên này chỉ lưu trên máy này.")
+        uh.setObjectName("hint")
+        uh.setWordWrap(True)
+        ul.addWidget(uh)
+        urow = QHBoxLayout()
+        self.user_edit = QLineEdit()
+        self.user_edit.setPlaceholderText("Ví dụ: Nguyễn Văn A")
+        self.user_edit.setText(self.store.user_name())
+        ub = QPushButton("💾  Lưu tên")
+        ub.clicked.connect(self.save_user)
+        urow.addWidget(self.user_edit, 1)
+        urow.addWidget(ub)
+        ul.addLayout(urow)
+        self.user_msg = QLabel("")
+        self.user_msg.setObjectName("hint")
+        ul.addWidget(self.user_msg)
+        lay.addWidget(ubox)
+
         dbox = QGroupBox("Nơi lưu dữ liệu (dùng chung nhiều máy)")
         dl = QVBoxLayout(dbox)
         tip = QLabel("Nhiều máy cùng dùng phần mềm: mỗi máy chọn CÙNG một thư mục này (ổ dùng chung, OneDrive, Google Drive...). "
@@ -647,6 +668,10 @@ class SettingsPage(_Page):
         self.learn_msg.setText(f"✅ {kh} Đã thêm {res['them']} mặt hàng; bỏ qua {res['bo_qua']} mặt hàng đã có định mức.")
         if res.get("khach"):
             self.data_changed.emit()
+
+    def save_user(self):
+        self.store.set_user_name(self.user_edit.text())
+        self.user_msg.setText(f"✅  Đã lưu: máy này là “{self.store.user_name() or '(chưa đặt tên)'}”.")
 
     def change_dir(self):
         d = QFileDialog.getExistingDirectory(self, "Chọn thư mục lưu dữ liệu")

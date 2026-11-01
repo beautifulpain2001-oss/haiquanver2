@@ -262,6 +262,7 @@ CUSTOMER_FIELDS = [
     ("label", "Tên gọi ngắn"), ("name", "Tên công ty"), ("mst", "Mã số thuế"), ("addr", "Địa chỉ"),
     ("addrKho", "Địa chỉ kho nhận hàng"), ("emails", "Email nhận hóa đơn (ngăn cách bằng dấu ;)"),
     ("driver", "Lái xe thường dùng"), ("xe", "Biển số xe thường dùng"),
+    ("owner", "Nhân viên phụ trách khách này (để trống = ai cũng làm được)"),
 ]
 
 
@@ -557,6 +558,34 @@ class DedicatedDataStore:
         self.records = []
         self._sigs, self._loaded_ids = {}, set()
         self.load_all()
+
+    # ---- người dùng của máy này (lưu ở file cấu hình cạnh phần mềm, KHÔNG nằm trong thư mục dùng chung) ----------
+    def user_name(self):
+        try:
+            with open(self.config_file, "r", encoding="utf-8") as f:
+                return str(json.load(f).get("user_name") or "").strip()
+        except Exception:
+            return ""
+
+    def set_user_name(self, name):
+        try:
+            with open(self.config_file, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except Exception:
+            cfg = {}
+        cfg["user_name"] = str(name or "").strip()
+        if "data_dir" not in cfg:
+            cfg["data_dir"] = self.base_dir
+        with open(self.config_file, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+    def customer_owner(self, key):
+        return str((PROFILES.get(key) or {}).get("owner") or "").strip()
+
+    def foreign_owner(self, key):
+        """Tên nhân viên phụ trách khách `key` nếu KHÔNG phải người dùng máy này (cả hai đã nhập tên); ngược lại rỗng."""
+        owner, me = self.customer_owner(key), self.user_name()
+        return owner if owner and me and owner.casefold() != me.casefold() else ""
 
     def ensure_directories(self):
         os.makedirs(self.base_dir, exist_ok=True)
@@ -3945,6 +3974,7 @@ def lot_build_record(store, form, items):
         "totalGross": round(tot_gross, 2),
         "totalKien": tot_kien,
         "updatedAt": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "workedBy": store.user_name(),  # người làm hồ sơ (tên đặt ở Cài đặt của từng máy)
         "items": [dict(x) for x in items],
         "files": {"po": None, "pxk": None, "vat": None, "pkl": None, "tk": None, "scan": None},
     }

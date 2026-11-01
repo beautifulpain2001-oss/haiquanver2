@@ -114,3 +114,15 @@ def test_ocr_check_is_remembered(monkeypatch):
     monkeypatch.setattr(app, "_OCR_OK", None)
     assert app.ocr_available() and app.ocr_available() and len(calls) == 1  # lần sau không chạy lại Tesseract
     assert app.ocr_available(refresh=True) and len(calls) == 2
+
+
+def test_customer_owner_and_machine_user(store):
+    """Mỗi khách có nhân viên phụ trách; tên người dùng lưu theo máy; khách của người khác thì được nhận ra."""
+    store.update_customer("shirai", {"owner": "Nhân viên A"})
+    assert store.customer_owner("shirai") == "Nhân viên A"
+    assert store.foreign_owner("shirai") == ""  # máy chưa đặt tên: không chặn, không hỏi
+    store.set_user_name("Nhân viên B")
+    assert store.user_name() == "Nhân viên B" and store.foreign_owner("shirai") == "Nhân viên A"
+    store.set_user_name("nhân viên a")  # không phân biệt hoa thường
+    assert store.foreign_owner("shirai") == ""
+    assert store.foreign_owner("kodi") == ""  # khách chưa giao cho ai: ai cũng làm được

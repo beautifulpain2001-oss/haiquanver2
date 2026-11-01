@@ -98,7 +98,8 @@ class CustomerStep(QWidget):
             b.deleteLater()
         self.cards = {}
         for i, (key, prof) in enumerate(self.lot.core.PROFILES.items()):
-            b = QPushButton(f"{prof.get('label') or key}\n{KIND.get(key, 'Khách đã học')}")
+            owner = self.lot.store.customer_owner(key)
+            b = QPushButton(f"{prof.get('label') or key}\n{KIND.get(key, 'Khách đã học')}" + (f" · {owner} phụ trách" if owner else ""))
             b.setObjectName("cust")
             b.setCheckable(True)
             b.setMinimumHeight(64)
@@ -123,6 +124,11 @@ class CustomerStep(QWidget):
     def pick(self, key):
         if key != self.lot.customer and self.lot.items and not widgets.ask(
                 self, "Đổi khách hàng", "Đổi khách sẽ bỏ các dòng hàng đang làm. Bạn có chắc không?"):
+            self.refresh()
+            return
+        other = self.lot.store.foreign_owner(key)
+        if other and key != self.lot.customer and not widgets.ask(
+                self, "Khách do người khác phụ trách", f"Khách này do {other} phụ trách. Bạn vẫn muốn làm chứng từ cho khách này?"):
             self.refresh()
             return
         self.lot.select_customer(key)

@@ -354,8 +354,8 @@ def test_customer_view_lists_declared_customs_and_folder_link(win, store, monkey
     assert not any("PO-K1" in cv.table.item(r, 4).text() for r in range(cv.table.rowCount()))  # không lẫn khách khác
     r = [cv.table.item(i, 4).text() for i in range(cv.table.rowCount())].index("PO-T1")
     folder = win.catalog.by_customer.table.folder_of(t1)
-    assert cv.table.item(r, 8).text() == folder  # đường dẫn thư mục trên máy
-    btn = cv.table.cellWidget(r, 9)
+    assert cv.table.item(r, 9).text() == folder  # đường dẫn thư mục trên máy
+    btn = cv.table.cellWidget(r, 10)
     assert btn.isEnabled()
     btn.click()
     assert ("open", folder, "") in win.shown
@@ -370,7 +370,7 @@ def test_folder_button_disabled_when_folder_missing(win, store):
     cv = win.catalog.by_customer
     cv.list.setCurrentRow(cv.keys.index("kodi"))
     r = [cv.table.item(i, 4).text() for i in range(cv.table.rowCount())].index("PO-CHUA-XUAT")
-    assert not cv.table.cellWidget(r, 9).isEnabled()
+    assert not cv.table.cellWidget(r, 10).isEnabled()
 
 
 def test_catalog_and_customer_pages_list_data(win):
