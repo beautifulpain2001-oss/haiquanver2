@@ -34,7 +34,10 @@ def test_settings_page_shows_data_folder(win, store):
 
 def test_step_bar_and_buttons(win):
     lot = win.lot
-    assert lot.bar.current == 0 and not lot.back.isEnabled() and lot.next.isEnabled()
+    assert lot.bar.current == 0 and not lot.back.isEnabled()
+    assert not lot.next.isEnabled()  # chưa chọn khách thì chưa đi tiếp
+    lot.step1.cards["kodi"].click()
+    assert lot.step1.customer == "kodi" and lot.next.isEnabled()
     lot.next.click()
     lot.next.click()
     assert lot.bar.current == 2 and lot.stack.currentIndex() == 2
@@ -45,3 +48,11 @@ def test_step_bar_and_buttons(win):
     assert lot.bar.current == 3
     lot.go(-5)
     assert lot.bar.current == 0 and not lot.back.isEnabled()
+
+
+def test_pick_customer_selects_only_one_card(win):
+    step = win.lot.step1
+    assert set(step.cards) >= {"shirai", "kodi", "tesa"}
+    step.cards["tesa"].click()
+    step.cards["shirai"].click()
+    assert [k for k, b in step.cards.items() if b.isChecked()] == ["shirai"]
