@@ -45,7 +45,7 @@ QPushButton#big:hover {{ background: #276749; }}
 QPushButton#big:disabled {{ background: {LINE}; }}
 QGroupBox {{ border: 1px solid {LINE}; border-radius: 8px; margin-top: 12px; padding: 14px 12px 10px 12px; font-weight: 600; color: {NAVY}; }}
 QGroupBox::title {{ subcontrol-origin: margin; left: 12px; padding: 0 6px; }}
-QLineEdit, QComboBox {{ background: #FFFFFF; border: 1px solid {LINE}; border-radius: 6px; padding: 6px 8px; }}
+QLineEdit, QComboBox {{ background: #FFFFFF; border: 1px solid {LINE}; border-radius: 6px; padding: 6px 10px; min-height: 24px; font-size: 11pt; }}
 QLineEdit:focus, QComboBox:focus {{ border: 1px solid {NAVY}; }}
 QTableWidget {{ font-size: 10pt; background: #FFFFFF; alternate-background-color: #F7FAFC; border: 1px solid {LINE}; border-radius: 6px; gridline-color: #EDF2F7; }}
 QHeaderView::section {{ background: #EDF2F7; color: {NAVY}; font-size: 10pt; font-weight: 600; border: none; border-right: 1px solid {LINE}; padding: 8px 4px; }}

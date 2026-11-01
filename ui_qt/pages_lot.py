@@ -392,6 +392,8 @@ class InfoStep(QWidget):
             box = QGroupBox(title)
             form = QFormLayout(box)
             form.setLabelAlignment(Qt.AlignLeft)
+            form.setVerticalSpacing(10)
+            form.setContentsMargins(14, 18, 14, 12)
             for key, label in fields:
                 e = QLineEdit()
                 e.textEdited.connect(lambda text, k=key: self.on_edit(k, text))
