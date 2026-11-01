@@ -1,2 +1,4 @@
 openpyxl>=3.1
 pypdf>=4.0
+# đọc PO dạng .xls (Shirai); xlsx dùng openpyxl
+xlrd>=2.0.1

@@ -61,7 +61,7 @@ def test_remember_item_norm_updates_catalog_and_persists(store, data_dir):
 
 
 def test_record_folder_is_customs_customer_month_day(store, seed, data_dir):
-    rec = dict(seed["tesa"], docDate="2026-11-01", poNumber="PO-MOI-1", folder=None)
+    rec = dict(seed["tesa"], id="HS-MOI", docDate="2026-11-01", poNumber="PO-MOI-1", folder=None)
     assert store.get_record_folder_path(rec) == os.path.join(str(data_dir), "HAI_QUAN", "Tesa", "2026_Thang_11", "2026-11-01")
 
 
@@ -75,7 +75,7 @@ def test_old_style_records_use_old_folder_only_if_it_exists(store, seed, data_di
 
 def test_month_and_customer_folders_are_reused_not_duplicated(store, seed, data_dir):
     def make(day, po):
-        rec = dict(seed["kodi"], docDate=day, poNumber=po, folder=None)
+        rec = dict(seed["kodi"], id=f"HS-{po}", docDate=day, poNumber=po, folder=None)
         os.makedirs(store.get_record_folder_path(rec), exist_ok=True)
         rec["folder"] = os.path.relpath(store.get_record_folder_path(rec), store.base_dir)
         store.records.append(rec)
@@ -88,10 +88,10 @@ def test_month_and_customer_folders_are_reused_not_duplicated(store, seed, data_
 
 
 def test_same_customer_same_day_different_po_gets_separate_folder(store, seed):
-    first = dict(seed["tesa"], docDate="2026-11-03", poNumber="PO-1", folder=None)
+    first = dict(seed["tesa"], id="HS-T-1", docDate="2026-11-03", poNumber="PO-1", folder=None)
     first["folder"] = store.new_record_folder(first)
     store.records.append(first)
-    second = dict(seed["tesa"], docDate="2026-11-03", poNumber="PO-2", folder=None)
+    second = dict(seed["tesa"], id="HS-T-2", docDate="2026-11-03", poNumber="PO-2", folder=None)
     assert store.get_record_folder_path(second).endswith(os.path.join("2026_Thang_11", "2026-11-03_2"))
     assert store.get_record_folder_path(first).endswith(os.path.join("2026_Thang_11", "2026-11-03"))
     # cùng khách + cùng PO thì mở lại đúng thư mục cũ
@@ -111,7 +111,7 @@ def test_saved_record_keeps_folder_after_customer_label_renamed(store, seed):
 
 def test_customer_folder_name_is_safe_for_windows(store, seed):
     store.update_customer("tesa", {"label": 'Tê*sa: "A/B"'})
-    rec = dict(seed["tesa"], docDate="2026-11-01", poNumber="PO-AN-TOAN", folder=None)
+    rec = dict(seed["tesa"], id="HS-AT", docDate="2026-11-01", poNumber="PO-AN-TOAN", folder=None)
     name = store.get_record_folder_path(rec).split(os.sep)
     assert not any(ch in "".join(name[-4:-3]) for ch in '*:"/\\?<>|')
 

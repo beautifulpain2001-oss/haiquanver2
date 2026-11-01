@@ -1,4 +1,412 @@
 {
+ "30,10": {
+  "cells": {
+   "A1": {
+    "b": true,
+    "fmt": "General",
+    "v": "HÓA ĐƠN THƯƠNG MẠI - BẢNG KÊ CHI TIẾT"
+   },
+   "A10": {
+    "b": false,
+    "fmt": "General",
+    "v": "Diễn giải:"
+   },
+   "A11": {
+    "b": true,
+    "fmt": "General",
+    "v": "STT"
+   },
+   "A12": {
+    "b": true,
+    "fmt": "General",
+    "v": "=ROW()-11"
+   },
+   "A13": {
+    "b": true,
+    "fmt": "General",
+    "v": "=ROW()-11"
+   },
+   "A14": {
+    "b": true,
+    "fmt": "General",
+    "v": "=ROW()-11"
+   },
+   "A2": {
+    "b": false,
+    "fmt": "General",
+    "v": "Người Xuất khẩu: "
+   },
+   "A3": {
+    "b": true,
+    "fmt": "General",
+    "v": "CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN"
+   },
+   "A4": {
+    "b": false,
+    "fmt": "General",
+    "v": "Lô CN-15.1, KCN Thuận Thành II, Phường Mão Điền, Thành phố Bắc Ninh, Việt Nam."
+   },
+   "A5": {
+    "b": false,
+    "fmt": "General",
+    "v": "Người nhận hàng:"
+   },
+   "A6": {
+    "b": true,
+    "fmt": "General",
+    "v": "\t\nCÔNG TY TNHH SHIRAI VIỆT NAM"
+   },
+   "A7": {
+    "b": false,
+    "fmt": "General",
+    "v": "KCN Long Bình (Amata), Phường Long Bình, Thành phố Đồng Nai, Việt Nam."
+   },
+   "A8": {
+    "b": false,
+    "fmt": "General",
+    "v": "Phương tiện vận tải: Xe Ôtô"
+   },
+   "A9": {
+    "b": false,
+    "fmt": "General",
+    "v": "Từ:CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN\nĐến: CÔNG TY TNHH SHIRAI VIỆT NAM"
+   },
+   "B11": {
+    "b": true,
+    "fmt": "General",
+    "v": "Mã hàng"
+   },
+   "C11": {
+    "b": true,
+    "fmt": "General",
+    "v": "Tên Hàng"
+   },
+   "C12": {
+    "b": false,
+    "fmt": "General",
+    "v": "Thùng Carton Box FUL-1080SDNA (W936xD186xH405)"
+   },
+   "C13": {
+    "b": false,
+    "fmt": "General",
+    "v": "Thùng Carton Box PNN-4585GHNA(W927xD129xH387)"
+   },
+   "C14": {
+    "b": false,
+    "fmt": "General",
+    "v": "Tấm lót Pad PNN-4585GH(AF_1:W810xD5xH95)"
+   },
+   "C15": {
+    "b": true,
+    "fmt": "General",
+    "v": "Tổng"
+   },
+   "C16": {
+    "b": true,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": "Tổng:"
+   },
+   "C17": {
+    "b": true,
+    "fmt": "General",
+    "v": "Hàng được sản xuất tại Việt Nam, mới 100 %"
+   },
+   "D11": {
+    "b": true,
+    "fmt": "General",
+    "v": "PO"
+   },
+   "D12": {
+    "b": false,
+    "fmt": "General",
+    "v": "Po.No 202637HT"
+   },
+   "D13": {
+    "b": false,
+    "fmt": "General",
+    "v": "Po.No 202637HT"
+   },
+   "D14": {
+    "b": false,
+    "fmt": "General",
+    "v": "Po.No 202637HT"
+   },
+   "E11": {
+    "b": true,
+    "fmt": "General",
+    "v": "ĐVT"
+   },
+   "E12": {
+    "b": false,
+    "fmt": "General",
+    "v": "cái"
+   },
+   "E13": {
+    "b": false,
+    "fmt": "General",
+    "v": "cái"
+   },
+   "E14": {
+    "b": false,
+    "fmt": "General",
+    "v": "cái"
+   },
+   "E16": {
+    "b": true,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": "=J15"
+   },
+   "E18": {
+    "b": true,
+    "fmt": "General",
+    "v": "CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN"
+   },
+   "F11": {
+    "b": true,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": "Số \nLượng"
+   },
+   "F12": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": 600
+   },
+   "F13": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": 400
+   },
+   "F14": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": 400
+   },
+   "F15": {
+    "b": true,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": "=SUBTOTAL(9,F12:F14)"
+   },
+   "F16": {
+    "b": true,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": "kiện"
+   },
+   "F2": {
+    "b": false,
+    "fmt": "General",
+    "v": "PXKKVCNB : 0000294"
+   },
+   "F3": {
+    "b": false,
+    "fmt": "General",
+    "v": "Phương thức thanh toán: "
+   },
+   "F4": {
+    "b": false,
+    "fmt": "General",
+    "v": "Chuyển khoản"
+   },
+   "F5": {
+    "b": false,
+    "fmt": "General",
+    "v": "Người nhập khẩu"
+   },
+   "F6": {
+    "b": true,
+    "fmt": "General",
+    "v": "=A6"
+   },
+   "F7": {
+    "b": false,
+    "fmt": "General",
+    "v": "=A7"
+   },
+   "F8": {
+    "b": false,
+    "fmt": "General",
+    "v": "Phương thức giao hàng: DAP"
+   },
+   "G11": {
+    "b": true,
+    "fmt": "_(* #,##0.0_);_(* \\(#,##0.0\\);_(* \"-\"??_);_(@_)",
+    "v": "Trọng lượng(kg/1 cái)"
+   },
+   "G12": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": 1.063
+   },
+   "G13": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": 0.8
+   },
+   "G14": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": 0.03
+   },
+   "H11": {
+    "b": true,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": "Trọng lượng\n cả bì(kg)"
+   },
+   "H12": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": 637.82
+   },
+   "H13": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": 320.02
+   },
+   "H14": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": 12.02
+   },
+   "H15": {
+    "b": true,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": "=SUBTOTAL(9,H12:H14)"
+   },
+   "I11": {
+    "b": true,
+    "fmt": "_(* #,##0.000_);_(* \\(#,##0.000\\);_(* \"-\"??_);_(@_)",
+    "v": "Trọng lượng\n tịnh(kg)"
+   },
+   "I12": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": 637.8
+   },
+   "I13": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": 320
+   },
+   "I14": {
+    "b": false,
+    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
+    "v": 12
+   },
+   "I15": {
+    "b": true,
+    "fmt": "_(* #,##0.000_);_(* \\(#,##0.000\\);_(* \"-\"??_);_(@_)",
+    "v": "=SUBTOTAL(9,I12:I14)"
+   },
+   "J11": {
+    "b": true,
+    "fmt": "General",
+    "v": "Số kiện"
+   },
+   "J12": {
+    "b": false,
+    "fmt": "General",
+    "v": 0
+   },
+   "J13": {
+    "b": false,
+    "fmt": "General",
+    "v": 0
+   },
+   "J14": {
+    "b": false,
+    "fmt": "General",
+    "v": 0
+   },
+   "J15": {
+    "b": true,
+    "fmt": "General",
+    "v": "=SUBTOTAL(9,J12:J14)"
+   },
+   "J2": {
+    "b": false,
+    "fmt": "General",
+    "v": "Ngày: 30/10/2026"
+   },
+   "K11": {
+    "b": true,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": "Đơn Giá \nVND"
+   },
+   "K12": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": 25214
+   },
+   "K13": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": 19500
+   },
+   "K14": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": 3200
+   },
+   "L11": {
+    "b": true,
+    "fmt": "General",
+    "v": "Thành Tiền \nVND"
+   },
+   "L12": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": "=K12*F12"
+   },
+   "L13": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": "=K13*F13"
+   },
+   "L14": {
+    "b": false,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": "=K14*F14"
+   },
+   "L15": {
+    "b": true,
+    "fmt": "_(* #,##0_);_(* \\(#,##0\\);_(* \"-\"??_);_(@_)",
+    "v": "=SUBTOTAL(9,L12:L14)"
+   }
+  },
+  "merged": [
+   "A10:C10",
+   "A1:L1",
+   "A2:E2",
+   "A3:E3",
+   "A4:E4",
+   "A5:E5",
+   "A6:E6",
+   "A7:E7",
+   "A8:E8",
+   "A9:L9",
+   "E18:L19",
+   "F2:I2",
+   "F4:L4",
+   "F5:L5",
+   "F6:L6",
+   "F7:L7",
+   "F8:L8",
+   "J2:L2"
+  ],
+  "widths": {
+   "A": 6.625,
+   "B": 13.875,
+   "C": 44.875,
+   "D": 20.0,
+   "E": 9.375,
+   "F": 12.125,
+   "G": 12.125,
+   "H": 17.0,
+   "I": 19.0,
+   "J": 11.0,
+   "K": 16.625,
+   "L": 22.5
+  }
+ },
  "DNTT": {
   "cells": {
    "A1": {
@@ -191,396 +599,6 @@
    "J": 6.12,
    "K": 18.0,
    "L": 1.25
-  }
- },
- "Invoice_30.10": {
-  "cells": {
-   "A1": {
-    "b": true,
-    "fmt": "General",
-    "v": "HÓA ĐƠN THƯƠNG MẠI - BẢNG KÊ CHI TIẾT"
-   },
-   "A10": {
-    "b": false,
-    "fmt": "General",
-    "v": "Từ:CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN\nĐến: CÔNG TY TNHH SHIRAI VIỆT NAM"
-   },
-   "A11": {
-    "b": false,
-    "fmt": "General",
-    "v": "Diễn giải:"
-   },
-   "A12": {
-    "b": true,
-    "fmt": "General",
-    "v": "STT"
-   },
-   "A13": {
-    "b": false,
-    "fmt": "General",
-    "v": "=ROW()-12"
-   },
-   "A14": {
-    "b": false,
-    "fmt": "General",
-    "v": "=ROW()-12"
-   },
-   "A15": {
-    "b": false,
-    "fmt": "General",
-    "v": "=ROW()-12"
-   },
-   "A2": {
-    "b": false,
-    "fmt": "General",
-    "v": "Người Xuất khẩu: "
-   },
-   "A4": {
-    "b": true,
-    "fmt": "General",
-    "v": "CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN"
-   },
-   "A5": {
-    "b": false,
-    "fmt": "General",
-    "v": "Lô CN-15.1, KCN Thuận Thành II, Phường Mão Điền, Thành phố Bắc Ninh, Việt Nam."
-   },
-   "A6": {
-    "b": false,
-    "fmt": "General",
-    "v": "Người nhận hàng:"
-   },
-   "A7": {
-    "b": true,
-    "fmt": "General",
-    "v": "CÔNG TY TNHH SHIRAI VIỆT NAM"
-   },
-   "A8": {
-    "b": false,
-    "fmt": "General",
-    "v": "KCN Long Bình (Amata), Phường Long Bình, Thành phố Đồng Nai, Việt Nam."
-   },
-   "A9": {
-    "b": false,
-    "fmt": "General",
-    "v": "Phương tiện vận tải: Xe Ôtô"
-   },
-   "B12": {
-    "b": true,
-    "fmt": "General",
-    "v": "Tên Hàng"
-   },
-   "B13": {
-    "b": false,
-    "fmt": "General",
-    "v": "Thùng Carton Box FUL-1080SDNA (W936xD186xH405)"
-   },
-   "B14": {
-    "b": false,
-    "fmt": "General",
-    "v": "Thùng Carton Box PNN-4585GHNA(W927xD129xH387)"
-   },
-   "B15": {
-    "b": false,
-    "fmt": "General",
-    "v": "Tấm lót Pad PNN-4585GH(AF_1:W810xD5xH95)"
-   },
-   "B16": {
-    "b": true,
-    "fmt": "General",
-    "v": "Tổng cộng"
-   },
-   "B17": {
-    "b": true,
-    "fmt": "General",
-    "v": "Tổng:"
-   },
-   "B18": {
-    "b": true,
-    "fmt": "General",
-    "v": "Hàng được sản xuất tại Việt Nam, mới 100 %"
-   },
-   "C12": {
-    "b": true,
-    "fmt": "General",
-    "v": "PO"
-   },
-   "C13": {
-    "b": false,
-    "fmt": "General",
-    "v": "No 202637HT"
-   },
-   "C14": {
-    "b": false,
-    "fmt": "General",
-    "v": "No 202637HT"
-   },
-   "C15": {
-    "b": false,
-    "fmt": "General",
-    "v": "No 202637HT"
-   },
-   "D12": {
-    "b": true,
-    "fmt": "General",
-    "v": "ĐVT"
-   },
-   "D13": {
-    "b": false,
-    "fmt": "General",
-    "v": "Cái"
-   },
-   "D14": {
-    "b": false,
-    "fmt": "General",
-    "v": "Cái"
-   },
-   "D15": {
-    "b": false,
-    "fmt": "General",
-    "v": "Cái"
-   },
-   "D17": {
-    "b": true,
-    "fmt": "General",
-    "v": "=I16"
-   },
-   "D19": {
-    "b": true,
-    "fmt": "General",
-    "v": "CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN"
-   },
-   "E12": {
-    "b": true,
-    "fmt": "General",
-    "v": "Số \nLượng"
-   },
-   "E13": {
-    "b": false,
-    "fmt": "#,##0",
-    "v": 600
-   },
-   "E14": {
-    "b": false,
-    "fmt": "#,##0",
-    "v": 400
-   },
-   "E15": {
-    "b": false,
-    "fmt": "#,##0",
-    "v": 400
-   },
-   "E16": {
-    "b": true,
-    "fmt": "#,##0",
-    "v": "=SUBTOTAL(9,E13:E15)"
-   },
-   "E17": {
-    "b": true,
-    "fmt": "General",
-    "v": "kiện"
-   },
-   "E2": {
-    "b": false,
-    "fmt": "General",
-    "v": "PXKKVCNB :0000294"
-   },
-   "E4": {
-    "b": false,
-    "fmt": "General",
-    "v": "Phương thức thanh toán: "
-   },
-   "E5": {
-    "b": false,
-    "fmt": "General",
-    "v": "Chuyển khoản"
-   },
-   "E6": {
-    "b": false,
-    "fmt": "General",
-    "v": "Người nhập khẩu"
-   },
-   "E7": {
-    "b": true,
-    "fmt": "General",
-    "v": "=A7"
-   },
-   "E8": {
-    "b": false,
-    "fmt": "General",
-    "v": "=A8"
-   },
-   "E9": {
-    "b": false,
-    "fmt": "General",
-    "v": "Phương thức giao hàng: DAP"
-   },
-   "F12": {
-    "b": true,
-    "fmt": "General",
-    "v": "Trọng lượng(kg)"
-   },
-   "F13": {
-    "b": false,
-    "fmt": "0.000",
-    "v": 1.063
-   },
-   "F14": {
-    "b": false,
-    "fmt": "0.000",
-    "v": 0.8
-   },
-   "F15": {
-    "b": false,
-    "fmt": "0.000",
-    "v": 0.03
-   },
-   "G12": {
-    "b": true,
-    "fmt": "General",
-    "v": "Trọng lượng\n cả bì(kg)"
-   },
-   "G13": {
-    "b": false,
-    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
-    "v": "=H13"
-   },
-   "G14": {
-    "b": false,
-    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
-    "v": "=H14"
-   },
-   "G15": {
-    "b": false,
-    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
-    "v": "=H15"
-   },
-   "G16": {
-    "b": true,
-    "fmt": "#,##0.00",
-    "v": "=SUBTOTAL(9,G13:G15)"
-   },
-   "H12": {
-    "b": true,
-    "fmt": "General",
-    "v": "Trọng lượng\n tịnh(kg)"
-   },
-   "H13": {
-    "b": false,
-    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
-    "v": "=ROUND(E13*F13,2)"
-   },
-   "H14": {
-    "b": false,
-    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
-    "v": "=ROUND(E14*F14,2)"
-   },
-   "H15": {
-    "b": false,
-    "fmt": "_(* #,##0.00_);_(* \\(#,##0.00\\);_(* \"-\"??_);_(@_)",
-    "v": "=ROUND(E15*F15,2)"
-   },
-   "H16": {
-    "b": true,
-    "fmt": "#,##0.00",
-    "v": "=SUBTOTAL(9,H13:H15)"
-   },
-   "I12": {
-    "b": true,
-    "fmt": "General",
-    "v": "Số kiện"
-   },
-   "I16": {
-    "b": true,
-    "fmt": "0",
-    "v": "=SUBTOTAL(9,I13:I15)"
-   },
-   "I2": {
-    "b": false,
-    "fmt": "General",
-    "v": "Ngày:30/10/2026"
-   },
-   "J12": {
-    "b": true,
-    "fmt": "General",
-    "v": "Đơn Giá \nVND"
-   },
-   "J13": {
-    "b": false,
-    "fmt": "#,##0",
-    "v": 25214
-   },
-   "J14": {
-    "b": false,
-    "fmt": "#,##0",
-    "v": 19500
-   },
-   "J15": {
-    "b": false,
-    "fmt": "#,##0",
-    "v": 3200
-   },
-   "K12": {
-    "b": true,
-    "fmt": "General",
-    "v": "Thành Tiền \nVND"
-   },
-   "K13": {
-    "b": false,
-    "fmt": "#,##0",
-    "v": "=J13*E13"
-   },
-   "K14": {
-    "b": false,
-    "fmt": "#,##0",
-    "v": "=J14*E14"
-   },
-   "K15": {
-    "b": false,
-    "fmt": "#,##0",
-    "v": "=J15*E15"
-   },
-   "K16": {
-    "b": true,
-    "fmt": "#,##0",
-    "v": "=SUBTOTAL(9,K13:K15)"
-   }
-  },
-  "merged": [
-   "A10:K10",
-   "A11:B11",
-   "A1:K1",
-   "A2:D2",
-   "A3:D3",
-   "A4:D4",
-   "A5:D5",
-   "A6:D6",
-   "A7:D7",
-   "A8:D8",
-   "A9:D9",
-   "D19:K20",
-   "E2:H2",
-   "E3:H3",
-   "E4:K4",
-   "E5:K5",
-   "E6:K6",
-   "E7:K7",
-   "E8:K8",
-   "E9:K9",
-   "I2:K2"
-  ],
-  "widths": {
-   "A": 6.57,
-   "B": 56.28,
-   "C": 17.14,
-   "D": 13.85,
-   "E": 16.57,
-   "F": 14.71,
-   "G": 17.28,
-   "H": 17.71,
-   "I": 11.14,
-   "J": 12.85,
-   "K": 23.42
   }
  },
  "PXK_30.10": {

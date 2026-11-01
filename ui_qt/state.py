@@ -17,8 +17,9 @@ class Lot:
         self.customer = customer
         self.items = []
         self.po_dates = {}
-        self.schedules = None
-        self.schedule_key = ""
+        self.schedules = None  # Shirai: các ngày giao của PO {ngày: {dateStr, items}}
+        self.selected_dates = []  # ngày giao được chọn để khai; chọn nhiều ngày = một invoice, một tờ khai
+        self.record_id = None  # mã hồ sơ đang sửa (None = hồ sơ mới)
         self.exported = {}  # ô chứng từ của hồ sơ (vat, pxk, pkl, tk) -> file
         self.files = []  # mọi file đã xuất trong lô này, để hiển thị
         self.saved = False
@@ -66,17 +67,22 @@ class Lot:
         if res["po_date"]:
             self.form["po_date"] = res["po_date"]
         if res["schedules"]:
-            self.schedules, self.schedule_key = res["schedules"], res["schedule_key"]
-            if res["doc_date"]:
-                self.form["doc_date"] = res["doc_date"]
+            self.schedules = res["schedules"]
+            self.selected_dates = list(self.schedules)  # mặc định: cả PO là một invoice
+        else:
+            self.schedules, self.selected_dates = None, []
+        self.record_id = None
         self.saved = False
         return True
 
-    def select_schedule(self, key):
-        if self.schedules and key in self.schedules:
-            self.schedule_key = key
-            self.form["doc_date"] = self.schedules[key].get("dateStr", self.form["doc_date"])
-            self.items = [dict(x) for x in self.schedules[key].get("items", [])]
+    def set_dates(self, keys):
+        """Chọn các ngày giao để khai (invoice và tờ khai chỉ gồm những ngày này). Ném ValueError nếu không chọn ngày nào."""
+        keys = [k for k in (self.schedules or {}) if k in keys]
+        if not keys:
+            raise ValueError("Phải chọn ít nhất một ngày giao để khai.")
+        self.selected_dates = keys
+        self.items = self.core.lot_merge_dates(self.schedules, keys)
+        self.saved = False
 
     # ---- dòng hàng -------------------------------------------------------------
     def new_item_values(self):
@@ -121,7 +127,7 @@ class Lot:
     # ---- hồ sơ, kiểm tra, xuất, lưu -------------------------------------------
     def record(self):
         self.normalize()
-        form = dict(self.form, customer=self.customer, schedule=self.schedule_key, po_dates=self.po_dates)
+        form = dict(self.form, customer=self.customer, schedule="", po_dates=self.po_dates, record_id=self.record_id)
         return self.core.lot_build_record(self.store, form, self.items)
 
     def totals(self):
@@ -167,6 +173,7 @@ class Lot:
 
     def save(self):
         rec = self.core.lot_save_new(self.store, self.record(), self.exported)
+        self.record_id = rec["id"]
         self.saved = True
         return rec
 
@@ -187,4 +194,5 @@ class Lot:
         self.items = [dict(x) for x in rec.get("items", [])]
         self.exported = {k: v for k, v in (rec.get("files") or {}).items() if v}
         self.files = []
+        self.record_id = rec.get("id")
         self.saved = True

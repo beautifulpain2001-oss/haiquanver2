@@ -166,14 +166,14 @@ class PoStep(QWidget):
         lay.addWidget(self.busy)
         self.status = _label("", "hint", wrap=True)
         lay.addWidget(self.status)
-        sched = QHBoxLayout()
-        self.sched_lbl = _label("Đợt giao hàng:")
-        self.sched = QComboBox()
-        self.sched.currentTextChanged.connect(self.on_schedule)
-        sched.addWidget(self.sched_lbl)
-        sched.addWidget(self.sched)
-        sched.addStretch(1)
-        lay.addLayout(sched)
+        self.dates_box = QGroupBox("Chọn ngày giao để làm invoice và khai hải quan")
+        dl = QVBoxLayout(self.dates_box)
+        dl.addWidget(_label("Tích cả các ngày = một invoice, một tờ khai cho cả PO. Chỉ tích một ngày = invoice và tờ khai riêng cho ngày đó; "
+                            "ngày còn lại làm sau bằng cách nạp lại PO và chọn ngày đó.", "hint", wrap=True))
+        self.dates_row = QHBoxLayout()
+        dl.addLayout(self.dates_row)
+        self.date_checks = {}
+        lay.addWidget(self.dates_box)
         lay.addWidget(_label("Không có file PO? Bấm “Tiếp tục” rồi thêm dòng hàng bằng tay ở bước ③.", "hint", wrap=True))
         lay.addStretch(1)
         self.refresh()
@@ -183,15 +183,7 @@ class PoStep(QWidget):
         self.who.setText(f"Khách hàng: {self.lot.profile.get('label') or c} — {self.lot.profile.get('name', '')}" if c else "Chưa chọn khách hàng. Bấm “Quay lại” để chọn.")
         self.drop.setEnabled(bool(c) and not self.busy.isVisible())
         self.add_po.setVisible(self.lot.multi_po)
-        has = bool(self.lot.schedules)
-        self.sched_lbl.setVisible(has)
-        self.sched.setVisible(has)
-        if has:
-            self.sched.blockSignals(True)
-            self.sched.clear()
-            self.sched.addItems(list(self.lot.schedules))
-            self.sched.setCurrentText(self.lot.schedule_key)
-            self.sched.blockSignals(False)
+        self.refresh_dates()
         if not self.status.text() and c:
             n = len(self.lot.items)
             self.set_status(f"Lô đang có {n} dòng hàng." if n else "Chọn file PO để phần mềm tự đọc các dòng hàng.", ok=None)
@@ -234,8 +226,34 @@ class PoStep(QWidget):
         self.status.setStyleSheet(f"color: {color};")
         self.status.setText(text)
 
-    def on_schedule(self, key):
-        self.lot.select_schedule(key)
+    def refresh_dates(self):
+        """Dựng các ô tích ngày giao (chỉ khi PO có nhiều ngày giao)."""
+        sched = self.lot.schedules or {}
+        self.dates_box.setVisible(len(sched) > 1)
+        if list(self.date_checks) == list(sched) and all(self.date_checks[k].isChecked() == (k in self.lot.selected_dates) for k in sched):
+            return
+        for cb in self.date_checks.values():
+            self.dates_row.removeWidget(cb)
+            cb.deleteLater()
+        self.date_checks = {}
+        for k, v in sched.items():
+            cb = QCheckBox(f"{k}  ({len(v['items'])} dòng)")
+            cb.setChecked(k in self.lot.selected_dates)
+            cb.toggled.connect(lambda _on, key=k: self.on_date_toggled())
+            self.date_checks[k] = cb
+            self.dates_row.addWidget(cb)
+        self.dates_row.addStretch(1)
+
+    def on_date_toggled(self):
+        keys = [k for k, cb in self.date_checks.items() if cb.isChecked()]
+        try:
+            self.lot.set_dates(keys)
+        except ValueError as e:
+            widgets.warn(self, "Chọn ngày giao", str(e))
+            self.refresh_dates()  # khôi phục các ô tích theo lô đang làm
+            return
+        n = len(self.lot.items)
+        self.set_status(f"Invoice này gồm {n} dòng của ngày giao: {', '.join(self.lot.selected_dates)}.", ok=True)
         self.changed.emit()
 
     def dragEnterEvent(self, e):
@@ -367,7 +385,7 @@ class InfoStep(QWidget):
         spec = [
             ("doc", "Chứng từ", [("po", "Số PO"), ("po_date", "Ngày PO (dd/mm/yyyy)"), ("doc_date", "Ngày chứng từ (yyyy-mm-dd)"),
                                  ("pxk", "Số PXK (phiếu xuất kho)"), ("hd", "Số hóa đơn VAT"), ("tk", "Số tờ khai hải quan")]),
-            ("ship", "Vận chuyển", [("xe", "Biển số xe"), ("driver", "Họ tên lái xe"), ("ldd", "Số lệnh điều động"), ("tare", "Bì cộng thêm mỗi dòng (kg)")]),
+            ("ship", "Vận chuyển", [("xe", "Biển số xe"), ("driver", "Họ tên lái xe"), ("ldd", "Số lệnh điều động"), ("tare", "Bì cộng thêm mỗi dòng (kg, vd 0.02; hoặc % như 0.08%)")]),
             ("pay", "Thanh toán và giao hàng", [("pay_days", "Hạn thanh toán (số ngày)"), ("delivery", "Ngày giao phiếu giao hàng (yyyy-mm-dd, để trống = ngày chứng từ + 1)")]),
         ]
         for gkey, title, fields in spec:

@@ -23,7 +23,7 @@ def test_full_workbook_matches_snapshot(customer, seed, full_workbook, snapshot,
 @pytest.mark.parametrize(
     "customer, sheets",
     [
-        ("shirai", ["SO_202637HT_30.10", "Invoice_30.10", "VAT_BKAV_30.10", "PXK_30.10", "DNTT"]),
+        ("shirai", ["SO_202637HT_30.10", "30,10", "VAT_BKAV_30.10", "PXK_30.10", "DNTT"]),  # invoice Shirai: tên sheet = ngày "d,m"
         ("kodi", ["Invoice_28.10", "VAT_BKAV_28.10", "PXK_28.10", "DNTT"]),
         ("tesa", ["Invoice_30.10", "VAT_BKAV_30.10", "PXK_30.10", "ToKhai_B11_30.10", "PLX_30.10", "DNTT"]),
     ],
@@ -68,9 +68,9 @@ def test_pxk_sheet_has_24_columns_and_lenh_dieu_dong(seed):
 
 
 def test_pkl_standard_formulas(seed):
-    ws = app.build_invoice_pkl_sheet(new_wb(), seed["shirai"])
+    ws = app.build_invoice_pkl_sheet(new_wb(), seed["tesa"])
     assert ws.max_column == 11
-    n = len(seed["shirai"]["items"])
+    n = len(seed["tesa"]["items"])
     assert ws["A13"].value == "=ROW()-12"
     assert ws["K13"].value == "=J13*E13"
     tot = 13 + n
@@ -118,3 +118,21 @@ def test_plx_lists_every_item_and_sums_all(customer, seed):
 def test_long_sheet_names_are_truncated_to_excel_limit(seed):
     ws = app.build_vat_bkav_sheet(new_wb(), seed["kodi"], "X" * 40)
     assert len(ws.title) == 31
+
+
+def test_pkl_shirai_layout_follows_users_invoice(seed):
+    """Mẫu invoice Shirai: 12 cột, cột Mã hàng ẩn, dòng hàng từ hàng 12, Tổng bằng SUBTOTAL, sheet tên "d,m"."""
+    rec = dict(seed["shirai"], docDate="2026-05-25", pxkNo="00000057")
+    ws = app.build_invoice_pkl_sheet(new_wb(), rec)
+    n = len(rec["items"])
+    assert ws.title == "25,5" and ws.max_column == 12 and ws.column_dimensions["B"].hidden
+    assert ws["F2"].value == "PXKKVCNB : 00000057" and ws["J2"].value == "Ngày: 25/05/2026"
+    assert ws["A9"].value.startswith("Từ:") and "\nĐến: " in ws["A9"].value
+    assert [ws.cell(11, c).value for c in (1, 2, 3, 4, 5, 12)] == ["STT", "Mã hàng", "Tên Hàng", "PO", "ĐVT", "Thành Tiền \nVND"]
+    assert ws["A12"].value == "=ROW()-11" and ws["L12"].value == "=K12*F12"  # thành tiền luôn = SL x đơn giá
+    it = rec["items"][0]
+    assert ws["D12"].value == f"Po.No {it['po']}" and ws["F12"].value == it["qty"] and ws["I12"].value == it["net"] and ws["H12"].value == it["gross"]
+    tot = 12 + n
+    assert ws[f"C{tot}"].value == "Tổng" and ws[f"L{tot}"].value == f"=SUBTOTAL(9,L12:L{tot - 1})"  # không có hàng trống
+    assert ws[f"E{tot + 1}"].value == f"=J{tot}" and ws[f"F{tot + 1}"].value == "kiện"
+    assert ws.row_dimensions[12].height == 73.5 and ws.page_setup.scale == 47 and ws.print_title_rows == "$11:$11"

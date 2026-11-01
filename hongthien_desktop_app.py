@@ -53,7 +53,8 @@ except ImportError:
 
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import get_column_letter, range_boundaries
+from openpyxl.worksheet.page import PageMargins
 
 try:
     import pypdf
@@ -342,6 +343,97 @@ DEFAULT_TESA_ITEMS = [
 ]
 
 
+def round_half_up(x, nd=2):
+    """Làm tròn kiểu Excel (từ .5 làm tròn lên). Hàm round() của Python làm tròn về số chẵn và dính sai số số thực,
+    nên 51,145 ra 51,14 trong khi Excel ra 51,15."""
+    from decimal import ROUND_HALF_UP, Decimal
+    # Excel làm tròn theo ~15 chữ số có nghĩa: 53 x 0,965 = 51,14499999999999 trong máy nhưng hiển thị là 51,145 -> 51,15
+    return float(Decimal(format(float(x), ".12g")).quantize(Decimal(1).scaleb(-nd), rounding=ROUND_HALF_UP))
+
+
+def lot_gross(net, tare_text):
+    """Trọng lượng cả bì từ tịnh. `tare_text`: số kg cộng thêm mỗi dòng ("0.02", "0.01") hoặc phần trăm ("0.08%").
+    Ném ValueError nếu không hiểu."""
+    t = str(tare_text if tare_text is not None else "").strip().replace(",", ".")
+    if net <= 0:
+        return 0.0
+    if t.endswith("%"):
+        return round_half_up(net * (1 + float(t[:-1] or 0) / 100), 2)
+    return round_half_up(net + float(t or 0), 2)
+
+
+def _patch_xlrd():
+    """Một số file .xls của Shirai có tên liên kết ngoài hỏng làm xlrd báo lỗi giải mã; phần đó không chứa dữ liệu ô nên bỏ qua."""
+    from xlrd import biffh, book
+    if getattr(book, "_ht_patched", False):
+        return
+    orig = biffh.unpack_unicode_update_pos
+
+    def safe(data, pos, **kw):
+        try:
+            return orig(data, pos, **kw)
+        except UnicodeDecodeError:
+            return "", len(data)
+
+    book.unpack_unicode_update_pos = safe
+    book._ht_patched = True
+
+
+def excel_rows(path, sheet=0):
+    """Đọc một sheet Excel thành danh sách hàng (tuple giá trị). Hỗ trợ .xlsx/.xlsm (openpyxl) và .xls (xlrd).
+    Ô ngày được trả về dạng datetime ở cả hai loại file."""
+    if str(path).lower().endswith(".xls"):
+        try:
+            import xlrd
+        except ImportError:
+            raise ValueError("Chưa đọc được file .xls vì thiếu thư viện xlrd. Hãy lưu file thành .xlsx rồi thử lại.")
+        _patch_xlrd()
+        wb = xlrd.open_workbook(path)
+        ws = wb.sheet_by_index(sheet)
+        rows = []
+        for r in range(ws.nrows):
+            row = []
+            for c in range(ws.ncols):
+                cell = ws.cell(r, c)
+                if cell.ctype == xlrd.XL_CELL_DATE:
+                    row.append(xlrd.xldate_as_datetime(cell.value, wb.datemode))
+                elif cell.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK):
+                    row.append(None)
+                else:
+                    row.append(cell.value)
+            rows.append(tuple(row))
+        return rows
+    wb = openpyxl.load_workbook(path, data_only=True)
+    ws = wb.worksheets[sheet]
+    return list(ws.iter_rows(values_only=True))
+
+
+# Số lượng mỗi kiện mặc định của hàng Shirai khi chưa có định mức riêng cho mặt hàng.
+# Thùng 10/kiện; tấm lót AF*, BF_1 và Inner Pad 50/kiện; WF_1, WF_2 20/kiện. WF/BF không có số thứ tự: không đoán (trả 0).
+def _tare_number(tare_text, default=0.02):
+    try:
+        return float(str(tare_text).replace(",", "."))
+    except ValueError:
+        return default
+
+
+def shirai_default_div(name):
+    n = str(name).lower()
+    if "carton box" in n:
+        return 10
+    if "inner pad" in n:
+        return 50
+    m = re.search(r"\(\s*(wf|af|bf)(?:_(\w+))?\s*:", n)
+    if not m:
+        return 0
+    kind, sub = m.group(1), m.group(2) or ""
+    if kind == "af" or (kind == "bf" and sub == "1"):
+        return 50
+    if kind == "wf" and sub in ("1", "2"):
+        return 20
+    return 0
+
+
 def clean_str(s):
     if not s:
         return ""
@@ -608,6 +700,30 @@ class DedicatedDataStore:
         self.save_catalog()
         return self.company_info()
 
+    def import_learned(self, data, overwrite=False):
+        """Nạp file dữ liệu học (định mức từng mặt hàng: SL/kiện, kg/cái, HS) vào bộ nhớ định mức.
+        Mặc định không ghi đè định mức người dùng đã tự nhập. Trả {"them", "ghi_de", "bo_qua"}."""
+        if not isinstance(data, dict) or not isinstance(data.get("item_mem"), dict):
+            raise ValueError("File này không phải file dữ liệu học của phần mềm (thiếu mục item_mem).")
+        res = {"them": 0, "ghi_de": 0, "bo_qua": 0}
+        for name, v in data["item_mem"].items():
+            if not isinstance(v, dict) or not str(name).strip():
+                continue
+            try:
+                new = {"div": float(v.get("div") or 0), "kg": float(v.get("kg") or 0), "hs": str(v.get("hs") or "")}
+            except (TypeError, ValueError):
+                raise ValueError(f"Định mức của “{name}” không phải số.")
+            if name in self.item_mem:
+                if not overwrite:
+                    res["bo_qua"] += 1
+                    continue
+                res["ghi_de"] += 1
+            else:
+                res["them"] += 1
+            self.item_mem[name] = new
+        self.save_catalog()
+        return res
+
     def update_customer(self, key, fields):
         """Sửa thông tin khách (tên, MST, địa chỉ…). Khách có sẵn: lưu phần sửa; khách đã học: sửa trong hồ sơ khách."""
         if key not in PROFILES:
@@ -716,7 +832,8 @@ class DedicatedDataStore:
         tên gọi khách); hồ sơ làm từ bản cũ vẫn dùng thư mục kiểu cũ nếu thư mục đó đang có trên máy."""
         rel = rec.get("folder")
         if not rel:
-            saved = next((r for r in self.records if r.get("customer") == rec.get("customer") and r.get("poNumber") == rec.get("poNumber")), None)
+            i = self.find_record(rec)
+            saved = self.records[i] if i >= 0 else None
             if saved and saved.get("folder"):
                 rel = saved["folder"]
             elif saved and os.path.isdir(self.legacy_folder_path(saved)):
@@ -724,6 +841,18 @@ class DedicatedDataStore:
             else:
                 rel = self.new_record_folder(rec)
         return os.path.join(self.base_dir, rel)
+
+    def find_record(self, rec):
+        """Vị trí hồ sơ đã lưu trùng với `rec`: cùng mã hồ sơ, hoặc cùng khách + cùng PO + cùng ngày khai.
+        (Một PO có thể khai nhiều ngày khác nhau: mỗi ngày là một hồ sơ riêng.)"""
+        for i, r in enumerate(self.records):
+            if rec.get("id") and r.get("id") == rec["id"]:
+                return i
+        for i, r in enumerate(self.records):
+            if (r.get("customer") == rec.get("customer") and r.get("poNumber") == rec.get("poNumber")
+                    and (r.get("docDate") or "") == (rec.get("docDate") or "")):
+                return i
+        return -1
 
     def new_record_folder(self, rec):
         """Đường dẫn (tương đối) cho hồ sơ mới. Cùng khách, cùng ngày, khác PO thì thêm _2, _3… để không lẫn file."""
@@ -990,8 +1119,8 @@ def parse_kodi_po_text(text, kodi_catalog, data_store=None, tare_val=1.0):
             div = mem["div"] if (mem and mem.get("div")) else (known["div"] if known else 5)
             kg = mem["kg"] if (mem and mem.get("kg")) else (known["kg"] if known else 1.96)
             kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
-            net = round(qty * kg, 2) if kg > 0 else 0.0
-            gross = round(net + tare_val, 2) if net > 0 else 0.0
+            net = round_half_up(qty * kg, 2) if kg > 0 else 0.0
+            gross = round_half_up(net + tare_val, 2) if net > 0 else 0.0
             lines.append({
                 "stt": len(lines) + 1,
                 "po": po_no,
@@ -1090,8 +1219,8 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
         qty = res["qty"]
         price = res["price"] or (known["price"] if known else 0)
         kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
-        net = round(qty * kg, 2) if kg > 0 else 0.0
-        gross = round(net + tare, 2) if net > 0 else 0.0
+        net = round_half_up(qty * kg, 2) if kg > 0 else 0.0
+        gross = round_half_up(net + tare, 2) if net > 0 else 0.0
         found_lines.append({
             "stt": len(found_lines) + 1,
             "po": res["po"],
@@ -1114,10 +1243,8 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
     return first_po, found_lines
 
 
-def parse_shirai_po_excel(file_path, data_store):
-    wb = openpyxl.load_workbook(file_path, data_only=True)
-    ws = wb.active
-    rows = list(ws.iter_rows(values_only=True))
+def parse_shirai_po_excel(file_path, data_store, tare_text="0.02"):
+    rows = excel_rows(file_path)
     po_no = "202637HT"
     for r in rows[:25]:
         txt = str(r[1] if len(r) > 1 and r[1] else "")
@@ -1129,6 +1256,7 @@ def parse_shirai_po_excel(file_path, data_store):
 
     schedules = {}
     cur_cust_code = ""
+    seq = 0
     for r in rows:
         if len(r) < 8:
             continue
@@ -1142,6 +1270,7 @@ def parse_shirai_po_excel(file_path, data_store):
             price = float(r[7] or 0)
         except Exception:
             qty, price = 0, 0
+        po_amount = r[8] if len(r) > 8 and isinstance(r[8], (int, float)) and not isinstance(r[8], bool) else None
         if c_code:
             cur_cust_code = c_code
         if desc and desc.lower() not in ("total", "description") and qty > 0:
@@ -1176,18 +1305,33 @@ def parse_shirai_po_excel(file_path, data_store):
                     w_g = float(wobj.get("g") or 0.0)
                     break
 
+            low = desc.lower()
             final_name = desc
-            if "carton box" in desc.lower() and not desc.lower().startswith("thùng"):
+            if "carton box" in low and not low.startswith("thùng"):
                 final_name = "Thùng " + desc
-            elif "pad" in desc.lower() and not desc.lower().startswith("tấm"):
+            elif low.startswith("inner pad"):
+                final_name = "Tấm " + desc  # Inner Pad: "Tấm Inner Pad…", không có chữ "lót"
+            elif "pad" in low and not low.startswith("tấm"):
                 final_name = "Tấm lót " + desc
 
-            net_w = round(qty * w_kg, 2) if w_kg else 0.0
-            gross_w = round(net_w + 0.02, 2) if net_w > 0 else 0.0
+            # Định mức đã nhớ cho mặt hàng (SL/kiện, kg/cái, HS) được ưu tiên; chưa có thì dùng quy tắc theo loại hàng
+            mem = data_store.get_item_norm(final_name) or {}
+            if not w_kg and mem.get("kg"):
+                w_kg = float(mem["kg"])
+            div = float(mem.get("div") or 0) or float(shirai_default_div(final_name))
+            kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
+
+            net_w = round_half_up(qty * w_kg, 2) if w_kg else 0.0
+            try:
+                gross_w = lot_gross(net_w, tare_text)
+            except ValueError:
+                gross_w = lot_gross(net_w, "0.02")
+            seq += 1
             schedules[date_key]["items"].append({
                 "stt": len(schedules[date_key]["items"]) + 1,
+                "po_seq": seq,
                 "po": po_no,
-                "hs": "",
+                "hs": mem.get("hs") or "",
                 "ma_sp": erp_code,
                 "ten_sp": final_name,
                 "ten_hq": final_name,
@@ -1195,13 +1339,14 @@ def parse_shirai_po_excel(file_path, data_store):
                 "qty": int(qty) if qty == int(qty) else qty,
                 "price": price,
                 "amount": round(qty * price),
-                "div": 0,
+                "po_amount": po_amount,  # thành tiền ghi trên PO, chỉ để đối chiếu (thành tiền luôn là SL x đơn giá)
+                "div": div,
                 "kg": w_kg,
                 "weight_g": w_g,
-                "kien": 0,
+                "kien": kien,
                 "net": net_w,
                 "gross": gross_w,
-                "tare": 0.02,
+                "tare": 0.0 if str(tare_text).strip().endswith("%") else _tare_number(tare_text),
                 "ma_kh": cur_cust_code,
             })
 
@@ -1702,11 +1847,155 @@ def build_pkl_kodi_sheet(wb, rec, sheet_name="Invoice_Kodi", skip_h=False):
     return ws
 
 
+def build_pkl_shirai_sheet(wb, rec, sheet_name=None):
+    """Invoice / Bảng kê chi tiết của Shirai theo đúng mẫu người dùng đang dùng (invoice 57): 12 cột, cột Mã hàng ẩn,
+    tên sheet là ngày chứng từ dạng "25,5", trọng lượng ghi sẵn thành số, Tổng cộng cộng bằng SUBTOTAL."""
+    prof = PROFILES.get("shirai", PROFILES["shirai"])
+    dt = str(rec.get("docDate") or datetime.date.today().strftime("%Y-%m-%d")).split("-")
+    yy, mm, dd = (dt + ["", "", ""])[:3] if len(dt) == 3 else (str(datetime.date.today().year), "1", "1")
+    title = sheet_name or f"{int(dd)},{int(mm)}"
+    ws = wb.create_sheet(title=title[:31])
+    items = rec.get("items", [])
+    n = len(items)
+    first, last = 12, 11 + n
+    tot = last + 1
+
+    acc0 = '_(* #,##0_);_(* \\(#,##0\\);_(* "-"??_);_(@_)'
+    acc2 = '_(* #,##0.00_);_(* \\(#,##0.00\\);_(* "-"??_);_(@_)'
+    acc3 = '_(* #,##0.000_);_(* \\(#,##0.000\\);_(* "-"??_);_(@_)'
+    thin = Side(style="thin", color="000000")
+
+    def font(sz=16, b=False, u=None):
+        return Font(name="Times New Roman", size=sz, bold=b, underline=u)
+
+    def edge(rng, l=False, r=False, t=False, b=False):
+        """Viền mỏng quanh khối ô (gồm cả khối gộp): chỉ vẽ các cạnh được yêu cầu."""
+        c1, r1, c2, r2 = range_boundaries(rng)
+        for row in range(r1, r2 + 1):
+            for col in range(c1, c2 + 1):
+                cell = ws.cell(row=row, column=col)
+                old = cell.border
+                cell.border = Border(
+                    left=thin if (l and col == c1) else old.left,
+                    right=thin if (r and col == c2) else old.right,
+                    top=thin if (t and row == r1) else old.top,
+                    bottom=thin if (b and row == r2) else old.bottom,
+                )
+
+    def put(addr, value, sz=16, bold=False, h="left", v=None, wrap=None, under=None, merge=None, nf=None):
+        if merge:
+            ws.merge_cells(merge)
+        c = ws[addr]
+        c.value = value
+        c.font = font(sz, bold, under)
+        c.alignment = Alignment(horizontal=h, vertical=v, wrap_text=wrap)
+        if nf:
+            c.number_format = nf
+        return c
+
+    for col, w in zip("ABCDEFGHIJKL", (6.625, 13.875, 44.875, 20.0, 9.375, 12.125, 12.125, 17.0, 19.0, 11.0, 16.625, 22.5)):
+        ws.column_dimensions[col].width = w
+    ws.column_dimensions["B"].hidden = True  # cột Mã hàng có trong mẫu nhưng được ẩn
+    for r, h in {1: 46.5, 2: 46.5, 3: 38.25, 4: 38.25, 5: 28.5, 6: 49.5, 7: 69.0, 8: 36.75, 9: 57.75, 10: 42.0, 11: 73.5}.items():
+        ws.row_dimensions[r].height = h
+
+    cust_name = prof["name"]
+    put("A1", "HÓA ĐƠN THƯƠNG MẠI - BẢNG KÊ CHI TIẾT", 16, True, "center", "center", True, merge="A1:L1")
+    edge("A1:L1", b=True)
+    put("A2", "Người Xuất khẩu: ", merge="A2:E2")
+    put("F2", f"PXKKVCNB : {rec.get('pxkNo') or ''}", merge="F2:I2")
+    put("J2", f"Ngày: {dd}/{mm}/{yy}", merge="J2:L2")
+    for rng in ("A2:E2", "F2:I2", "J2:L2"):
+        edge(rng, True, True, True, True)
+    put("A3", HT_NAME, 16, True, "left", "center", True, merge="A3:E3")
+    put("A4", ADDR_HT, 16, False, "left", None, True, merge="A4:E4")
+    put("F3", "Phương thức thanh toán: ", 16, False, "left", "center")
+    put("F4", "Chuyển khoản", 16, False, "left", "center", merge="F4:L4")
+    edge("A3:E3", True, True, True)
+    edge("A4:E4", True, True, False, True)
+    edge("F3:L3", True, True, True)
+    edge("F4:L4", True, True, False, True)
+    put("A5", "Người nhận hàng:", merge="A5:E5")
+    put("F5", "Người nhập khẩu", merge="F5:L5")
+    put("A6", "\t\n" + cust_name, 16, True, "left", "center", True, merge="A6:E6")
+    put("F6", "=A6", 16, True, "left", "center", True, merge="F6:L6")
+    put("A7", prof.get("addrKho") or prof["addr"], 16, False, "left", "center", True, merge="A7:E7")
+    put("F7", "=A7", 16, False, "left", "center", True, merge="F7:L7")
+    edge("A5:E5", True, True, True)
+    edge("F5:L5", True, True, True)
+    edge("A6:E6", True, True)
+    edge("F6:L6", True, True)
+    edge("A7:E7", True, True, False, True)
+    edge("F7:L7", True, True, False, True)
+    put("A8", "Phương tiện vận tải: Xe Ôtô", merge="A8:E8")
+    put("F8", "Phương thức giao hàng: DAP", merge="F8:L8")
+    edge("A8:E8", True, True, True, True)
+    edge("F8:L8", True, True, True, True)
+    put("A9", f"Từ:{HT_NAME}\nĐến: {cust_name}", 16, False, "left", "center", True, merge="A9:L9")
+    edge("A9:L9", True, True, True, True)
+    put("A10", "Diễn giải:", 16, False, "left", None, None, "single", merge="A10:C10")
+    edge("A10:C10", True, False, True, True)
+
+    acc1 = '_(* #,##0.0_);_(* \\(#,##0.0\\);_(* "-"??_);_(@_)'
+    heads = [("STT", None, 16), ("Mã hàng", None, 16), ("Tên Hàng", None, 16), ("PO", None, 16), ("ĐVT", None, 16), ("Số \nLượng", acc0, 16),
+             ("Trọng lượng(kg/1 cái)", acc1, 16), ("Trọng lượng\n cả bì(kg)", acc2, 16), ("Trọng lượng\n tịnh(kg)", acc3, 16),
+             ("Số kiện", None, 18), ("Đơn Giá \nVND", acc0, 16), ("Thành Tiền \nVND", None, 16)]
+    for i, (text, nf, sz) in enumerate(heads, 1):
+        addr = f"{get_column_letter(i)}11"
+        put(addr, text, sz, True, "center" if i != 3 else None, "center", True if i >= 6 else None, nf=nf)
+        edge(addr, True, i not in (2, 3, 4), True, True)  # B, C, D không có viền phải (ô liền kề đã có viền trái)
+
+    for idx, it in enumerate(items):
+        r = first + idx
+        ws.row_dimensions[r].height = 73.5
+        put(f"A{r}", "=ROW()-11", 16, True, "center", "center")
+        put(f"C{r}", it.get("ten_sp", ""), 16, False, None, "center", True)
+        put(f"D{r}", f"Po.No {it.get('po', '')}", 18, False, None, "center", True)
+        put(f"E{r}", it.get("unit") or "cái", 18, False, "center", "center")
+        put(f"F{r}", it.get("qty", 0), 14, False, "center", "center", True, nf=acc0)
+        put(f"G{r}", it.get("kg", 0), 14, False, "left", "center", True, nf=acc2)
+        put(f"H{r}", it.get("gross", 0), 14, False, "right", "center", True, nf=acc2)
+        put(f"I{r}", it.get("net", 0), 16, False, "right", "center", True, nf=acc2)
+        put(f"J{r}", it.get("kien", 0), 14, False, "center", "center", True)
+        put(f"K{r}", it.get("price", 0), 16, False, None, "center", None, nf=acc0)
+        put(f"L{r}", f"=K{r}*F{r}", 16, False, "center", "center", True, nf=acc0)
+        for col in "ABCDEFGHIJKL":
+            edge(f"{col}{r}", True, True, True, True)
+
+    ws.row_dimensions[tot].height = 51.0
+    put(f"C{tot}", "Tổng", 16, True, "center", "center", True)
+    for col, nf, sz in (("F", acc0, 16), ("H", acc2, 16), ("I", acc3, 16), ("J", None, 18), ("L", acc0, 16)):
+        put(f"{col}{tot}", f"=SUBTOTAL(9,{col}{first}:{col}{last})", sz, True, "center", "center", True, nf=nf)
+    for col in "ABCDEFGHIJKL":
+        edge(f"{col}{tot}", True, True, True, True)
+    ws.row_dimensions[tot + 1].height = 28.5
+    put(f"C{tot + 1}", "Tổng:", 16, True, nf=acc0)
+    put(f"E{tot + 1}", f"=J{tot}", 16, True, nf=acc0)
+    put(f"F{tot + 1}", "kiện", 16, True, nf=acc0)
+    edge(f"E{tot + 1}:F{tot + 1}", t=True)
+    ws.row_dimensions[tot + 2].height = 33.0
+    put(f"C{tot + 2}", "Hàng được sản xuất tại Việt Nam, mới 100 %", 16, True)
+    ws.row_dimensions[tot + 3].height = 20.1
+    ws.row_dimensions[tot + 4].height = 22.5
+    put(f"E{tot + 3}", HT_NAME, 16, True, "center", "center", True, merge=f"E{tot + 3}:L{tot + 4}")
+
+    ws.sheet_view.zoomScale = 68
+    ws.page_setup.orientation = "portrait"
+    ws.page_setup.paperSize = 9
+    ws.page_setup.scale = 47
+    ws.page_margins = PageMargins(left=0.31, right=0.12, top=0.52, bottom=0.57, header=0.27, footer=0.5)
+    ws.print_title_rows = "11:11"
+    ws.print_area = f"A1:L{tot + 14}"
+    return ws
+
+
 def build_invoice_pkl_sheet(wb, rec, sheet_name="Invoice_PKL", skip_h=False):
     if is_best_docset(rec):
         return build_pkl_best_sheet(wb, rec, sheet_name)
     if rec.get("customer") == "kodi":
         return build_pkl_kodi_sheet(wb, rec, sheet_name, skip_h=skip_h)
+    if rec.get("customer") == "shirai":
+        return build_pkl_shirai_sheet(wb, rec)  # tên sheet theo ngày chứng từ ("25,5"), không dùng tên truyền vào
     return build_pkl_standard_sheet(wb, rec, sheet_name)
 
 
@@ -2193,6 +2482,10 @@ def check_lot(rec):
             out.append(f"{tag}: số lượng bằng 0.")
         if abs(qty * price - float(it.get("amount") or 0)) > 1:
             out.append(f"{tag}: SL x đơn giá khác thành tiền.")
+        po_amt = it.get("po_amount")
+        if isinstance(po_amt, (int, float)) and abs(qty * price - float(po_amt)) > 0.5:
+            out.append(f"{tag}: thành tiền trên PO ({float(po_amt):,.0f}) khác SL x đơn giá ({qty * price:,.0f}). "
+                       "Phần mềm luôn dùng SL x đơn giá, hãy kiểm tra lại PO.")
         if kg <= 0:
             out.append(f"{tag}: chưa có kg/đơn vị nên chưa tính được trọng lượng.")
         elif abs(qty * kg - net) > 0.01:
@@ -3383,8 +3676,8 @@ def parse_generic_po_text(text, profile, catalog_items, data_store=None, tare_va
         div = (mem or {}).get("div") or known.get("div") or profile.get("defaultDiv") or 0
         kg = (mem or {}).get("kg") or known.get("kg") or 0
         kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
-        net = round(qty * kg, 2) if kg > 0 else 0.0
-        gross = round(net + tare_val, 2) if net > 0 else 0.0
+        net = round_half_up(qty * kg, 2) if kg > 0 else 0.0
+        gross = round_half_up(net + tare_val, 2) if net > 0 else 0.0
         # Mã vật liệu / Inquiry / Customs No: ưu tiên giá trị đã nhớ (người dùng đã sửa ở Bước 1) hơn chữ OCR
         code = known.get("code") or refs.get("itemCode", "")
         extra = {k: known.get(k) or refs.get(k) for k in ("inquiry", "customsNo") if known.get(k) or refs.get(k)}
@@ -3417,11 +3710,13 @@ def parse_generic_po_text(text, profile, catalog_items, data_store=None, tare_va
 # Không dùng widget; nhận/trả dữ liệu thường để test được không cần cửa sổ.
 # ======================================================================
 def lot_recalc(items, customer, tare_text):
-    """Tính lại số kiện, KL tịnh, KL cả bì cho từng dòng (sửa trực tiếp `items`)."""
+    """Tính lại số kiện, KL tịnh, KL cả bì cho từng dòng (sửa trực tiếp `items`).
+    `tare_text`: kg cộng thêm mỗi dòng ("0.02") hoặc phần trăm ("0.08%")."""
     try:
-        tare_v = float(tare_text or 0)
-    except Exception:
-        tare_v = 1.0
+        lot_gross(1.0, tare_text)
+        spec = tare_text
+    except ValueError:
+        spec = "1.0"
     default_div = float(PROFILES.get(customer, {}).get("defaultDiv") or 0)
     for it in items:
         qty = float(it.get("qty", 0))
@@ -3431,8 +3726,8 @@ def lot_recalc(items, customer, tare_text):
         if div > 0:
             it["kien"] = math.ceil(round(qty / div * 1e6) / 1e6)
         if kg > 0:
-            it["net"] = round(qty * kg, 2)
-            it["gross"] = round(it["net"] + tare_v, 2) if it["net"] > 0 else 0.0
+            it["net"] = round_half_up(qty * kg, 2)
+            it["gross"] = lot_gross(it["net"], spec)
 
 
 def lot_build_record(store, form, items):
@@ -3452,7 +3747,7 @@ def lot_build_record(store, form, items):
     sched = g("schedule")
     s_key = sched if (cust == "shirai" and sched) else (dt[8:10] + "." + dt[5:7] if len(dt) == 10 else "30.10")
     rec = {
-        "id": f"HS-{dt.replace('-', '')}-{cust.upper()}-{len(store.records)+1:02d}",
+        "id": g("record_id") or f"HS-{dt.replace('-', '')}-{cust.upper()}-{len(store.records)+1:02d}",
         "zone": "WORKING",
         "customer": cust,
         "docDate": dt,
@@ -3617,7 +3912,7 @@ def lot_save_new(store, rec, exported_files):
         folder = store.get_record_folder_path(rec)
         if os.path.relpath(folder, store.base_dir).startswith(CUSTOMS_ROOT + os.sep):
             rec["folder"] = os.path.relpath(folder, store.base_dir)
-    idx = next((i for i, r in enumerate(store.records) if r.get("customer") == rec["customer"] and r.get("poNumber") == rec["poNumber"]), -1)
+    idx = store.find_record(rec)
     if idx >= 0:
         for k, v in store.records[idx].get("files", {}).items():
             if v and not rec["files"].get(k):
@@ -3645,6 +3940,15 @@ def lot_save_workbench(store, rec):
         store.records.insert(0, rec)
     store.save_records()
     return dest_dir
+
+
+def lot_merge_dates(schedules, keys):
+    """Gộp các dòng hàng của những ngày giao đã chọn, giữ đúng thứ tự dòng trong PO. Trả danh sách dòng mới (bản sao)."""
+    rows = [dict(it) for k in keys if k in schedules for it in schedules[k]["items"]]
+    rows.sort(key=lambda it: it.get("po_seq", 0))
+    for i, it in enumerate(rows, 1):
+        it["stt"] = i
+    return rows
 
 
 def lot_defaults(customer):
@@ -3707,12 +4011,13 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
         return res
 
     if ext in (".xlsx", ".xls"):
-        po_no, schedules = parse_shirai_po_excel(path, store)
+        po_no, schedules = parse_shirai_po_excel(path, store, tare_text or "0.02")
         if schedules:
             keys = list(schedules.keys())
-            res.update(ok=True, customer="shirai", po=po_no, schedules=schedules, schedule_key=keys[0],
-                       items=schedules[keys[0]]["items"], doc_date=schedules[keys[0]].get("dateStr", ""),
-                       msg=f"Đã bóc tách PO {po_no} gồm {len(keys)} đợt giao hàng ({', '.join(keys)}).")
+            res.update(ok=True, customer="shirai", po=po_no, schedules=schedules, schedule_key="",
+                       items=lot_merge_dates(schedules, keys),
+                       msg=f"Đã bóc tách PO {po_no}: {sum(len(v['items']) for v in schedules.values())} dòng, "
+                           f"{len(keys)} ngày giao ({', '.join(keys)}). Mặc định làm một invoice cho cả PO; bỏ tích ngày nào chưa khai.")
             return res
 
     raw_txt = extract_text_from_pdf_or_image_offline(path, is_tesa=(customer == "tesa"))
@@ -3765,16 +4070,17 @@ def lot_item_from_values(store, customer, vals, tare_text="1.0", base=None):
     g = lambda k: str(vals.get(k) or "").strip()
     try:
         qty, price, div, kg = (float(g(k).replace(",", "") or 0) for k in ("qty", "price", "div", "kg"))
-        tare_v = float(tare_text or 1.0)
+        tare_spec = str(tare_text).strip() or "1.0"
+        lot_gross(1.0, tare_spec)
     except ValueError:
-        raise ValueError("Số lượng, đơn giá, SL/kiện và kg/chiếc phải là số.")
+        raise ValueError("Số lượng, đơn giá, SL/kiện, kg/chiếc và bì phải là số.")
     if not g("ten_sp"):
         raise ValueError("Chưa nhập tên hàng hóa.")
     best = is_best_docset(PROFILES[customer])
     name, hs, code = g("ten_sp"), g("hs"), g("ma_sp")
     kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
-    net = round(qty * kg, 2) if kg > 0 else 0.0
-    gross = round(net + tare_v, 2) if net > 0 else 0.0
+    net = round_half_up(qty * kg, 2) if kg > 0 else 0.0
+    gross = lot_gross(net, tare_spec)
     store.remember_item_norm(name, div, kg, hs)
     if customer not in BUILTIN_CUSTOMERS:
         store.remember_item_refs(customer, name, {"code": code, **{k: g(k) for k in ("inquiry", "customsNo") if k in vals}})
@@ -3786,7 +4092,7 @@ def lot_item_from_values(store, customer, vals, tare_text="1.0", base=None):
     num = lambda v: int(v) if v == int(v) else v
     item.update({"po": g("po"), "hs": hs, "ma_sp": code, "ten_sp": name, "ten_hq": (hit.get("ten_hq") if hit else "") or name,
                  "unit": g("unit"), "qty": num(qty), "price": num(price), "amount": round(qty * price), "div": div,
-                 "kg": kg, "kien": kien, "net": net, "gross": gross, "tare": tare_v})
+                 "kg": kg, "kien": kien, "net": net, "gross": gross, "tare": 0.0 if tare_spec.endswith("%") else _tare_number(tare_spec, 1.0)})
     return item
 
 
@@ -4362,8 +4668,8 @@ class HongThienCustomsDesktopApp:
                 kg = mem["kg"] if (mem and mem.get("kg")) else (hit["kg"] if hit else 0)
                 tare = hit.get("tare", 1.0) if hit else 1.0
                 kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
-                net = round(qty * kg, 2) if kg > 0 else 0.0
-                gross = round(net + tare, 2) if net > 0 else 0.0
+                net = round_half_up(qty * kg, 2) if kg > 0 else 0.0
+                gross = round_half_up(net + tare, 2) if net > 0 else 0.0
                 self.cur_items.append({
                     "stt": idx, "po": po, "hs": hit.get("hs", "48229090") if hit else "48229090",
                     "ma_sp": code, "ten_sp": name, "ten_hq": hit.get("ten_hq", "") if hit else "",
@@ -4838,8 +5144,8 @@ class HongThienCustomsDesktopApp:
             name = vars_map["ten_sp"].get().strip()
             tare_v = float(self.cur_tare.get() or 1.0)
             kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
-            net = round(qty * kg, 2) if kg > 0 else 0.0
-            gross = round(net + tare_v, 2) if net > 0 else 0.0
+            net = round_half_up(qty * kg, 2) if kg > 0 else 0.0
+            gross = round_half_up(net + tare_v, 2) if net > 0 else 0.0
             self.store.remember_item_norm(name, div, kg, hs)
             if self.cur_customer.get() not in BUILTIN_CUSTOMERS:
                 self.store.remember_item_refs(self.cur_customer.get(), name, {

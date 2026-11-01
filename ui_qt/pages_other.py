@@ -560,6 +560,24 @@ class SettingsPage(_Page):
         dl.addWidget(tip)
         lay.addWidget(dbox)
 
+        lbox = QGroupBox("Dữ liệu học (định mức từng mặt hàng)")
+        ll = QVBoxLayout(lbox)
+        ll.addWidget(QLabel("Nạp file dữ liệu học (.json) do người hỗ trợ cung cấp: số lượng mỗi kiện, kg mỗi cái của từng mặt hàng. "
+                            "Định mức bạn đã tự nhập được giữ nguyên, không bị ghi đè."))
+        ll.itemAt(0).widget().setWordWrap(True)
+        lrow = QHBoxLayout()
+        lb = QPushButton("📥  Nạp dữ liệu học…")
+        lb.setObjectName("sec")
+        lb.clicked.connect(self.import_learned)
+        lrow.addWidget(lb)
+        lrow.addStretch(1)
+        ll.addLayout(lrow)
+        self.learn_msg = QLabel("")
+        self.learn_msg.setObjectName("hint")
+        self.learn_msg.setWordWrap(True)
+        ll.addWidget(self.learn_msg)
+        lay.addWidget(lbox)
+
         obox = QGroupBox("Đọc ảnh scan (OCR)")
         ol = QVBoxLayout(obox)
         self.ocr = QLabel("Đang kiểm tra…")
@@ -606,6 +624,20 @@ class SettingsPage(_Page):
     def set_ocr(self, ok):
         self.ocr.setText("✅  Đọc ảnh scan (OCR): sẵn sàng." if ok else
                          "⚠  Đọc ảnh scan (OCR): chưa dùng được. Hãy để thư mục Tesseract-OCR cạnh file .exe. PDF có sẵn chữ và file Excel vẫn đọc bình thường.")
+
+    def import_learned(self, path=None):
+        if not path:
+            path, _ = QFileDialog.getOpenFileName(self, "Chọn file dữ liệu học", "", "Dữ liệu học (*.json)")
+        if not path:
+            return
+        import json
+        try:
+            with open(path, encoding="utf-8") as f:
+                res = self.store.import_learned(json.load(f))
+        except (ValueError, OSError) as e:  # json lỗi cũng là ValueError
+            widgets.warn(self, "Chưa nạp được dữ liệu học", str(e))
+            return
+        self.learn_msg.setText(f"✅  Đã thêm {res['them']} mặt hàng; bỏ qua {res['bo_qua']} mặt hàng đã có định mức.")
 
     def change_dir(self):
         d = QFileDialog.getExistingDirectory(self, "Chọn thư mục lưu dữ liệu")

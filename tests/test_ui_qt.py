@@ -395,5 +395,60 @@ def test_export_files_land_in_customs_customer_month_day_folder(win, tmp_path, s
     win.lot.go(4)
     win.lot.step5.do_export("VAT")  # xuất lại cùng lô: vẫn cùng thư mục, không tạo thêm
     assert os.listdir(os.path.join(store.base_dir, "HAI_QUAN", "Kodi", "2026_Thang_11")) == ["2026-11-01"]
-    rec = next(r for r in store.records if r["customer"] == "kodi" and r["poNumber"] == "03102026-01KDHT")
+    rec = next(r for r in store.records if r["customer"] == "kodi" and r["poNumber"] == "03102026-01KDHT" and r["docDate"] == "2026-11-01")
     assert rec["folder"] == os.path.join("HAI_QUAN", "Kodi", "2026_Thang_11", "2026-11-01")  # hồ sơ nhớ thư mục của nó
+
+
+# --------------------------------------------------------------------------- Shirai: chọn ngày giao để khai; dữ liệu học
+SHIRAI_FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "po_shirai_gia.xls")
+
+
+def load_shirai_po(win):
+    win.lot.step1.cards["shirai"].click()
+    win.lot.step2.load_file(SHIRAI_FIXTURE)
+    wait(win, lambda: bool(win.lot.lot.items))
+
+
+def test_delivery_dates_are_checkboxes_default_all_one_invoice(win):
+    assert not win.lot.step2.dates_box.isVisibleTo(win.lot.step2)  # chưa nạp PO: không hiện
+    load_shirai_po(win)
+    step = win.lot.step2
+    assert step.dates_box.isVisibleTo(step) and list(step.date_checks) == ["25.10", "29.10"]
+    assert all(cb.isChecked() for cb in step.date_checks.values()) and len(win.lot.lot.items) == 4
+    assert "(2 dòng)" in step.date_checks["25.10"].text()
+
+
+def test_uncheck_a_date_makes_invoice_for_the_other_date_only(win):
+    load_shirai_po(win)
+    step = win.lot.step2
+    step.date_checks["25.10"].setChecked(False)
+    assert win.lot.lot.selected_dates == ["29.10"] and len(win.lot.lot.items) == 2
+    assert "29.10" in step.status.text() and "2 dòng" in step.status.text()
+    win.lot.go(2)
+    assert win.lot.step3.table.rowCount() == 2
+
+
+def test_cannot_uncheck_every_date(win):
+    load_shirai_po(win)
+    step = win.lot.step2
+    step.date_checks["25.10"].setChecked(False)
+    step.date_checks["29.10"].setChecked(False)
+    assert win.shown[-1][0] == "warn" and "ít nhất một ngày" in win.shown[-1][2]
+    assert len(win.lot.lot.items) == 2 and step.date_checks["29.10"].isChecked()  # khôi phục
+
+
+def test_single_date_po_hides_date_picker(win, tmp_path, monkeypatch):
+    load_kodi_po(win, tmp_path)
+    assert not win.lot.step2.dates_box.isVisibleTo(win.lot.step2)
+
+
+def test_settings_import_learned_file(win, store, tmp_path):
+    import json
+    f = tmp_path / "hoc.json"
+    f.write_text(json.dumps({"item_mem": {"Mặt hàng thử": {"div": 50, "kg": 0.05, "hs": ""}}}), encoding="utf-8")
+    win.settings.import_learned(str(f))
+    assert store.item_mem["Mặt hàng thử"]["div"] == 50 and "Đã thêm 1" in win.settings.learn_msg.text()
+    bad = tmp_path / "hong.json"
+    bad.write_text("{không phải json", encoding="utf-8")
+    win.settings.import_learned(str(bad))
+    assert win.shown[-1][0] == "warn"
