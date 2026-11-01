@@ -994,6 +994,45 @@ class DedicatedDataStore:
         except Exception:
             pass
 
+    def declaration_folders(self):
+        """Các thư mục tờ khai đang có trong HAI_QUAN (quét thật trên ổ đĩa/OneDrive) ghép với thông tin hồ sơ nếu có.
+        Mỗi mục: {customer, label, day, path, record (hoặc None), files}. Mới nhất trước. Thư mục bắt đầu bằng _ bị bỏ qua."""
+        root = os.path.join(self.base_dir, CUSTOMS_ROOT)
+        by_path = {}
+        for r in self.records:
+            try:
+                by_path[os.path.normcase(os.path.normpath(self.get_record_folder_path(r)))] = r
+            except Exception:
+                pass
+        out, seen = [], set()
+        try:
+            custs = sorted(d for d in os.listdir(root) if not d.startswith("_") and os.path.isdir(os.path.join(root, d)))
+        except OSError:
+            custs = []
+        for cust in custs:
+            for month in sorted(os.listdir(os.path.join(root, cust))):
+                mdir = os.path.join(root, cust, month)
+                if not os.path.isdir(mdir) or "_Thang_" not in month:
+                    continue
+                for day in sorted(os.listdir(mdir)):
+                    path = os.path.join(mdir, day)
+                    if not os.path.isdir(path):
+                        continue
+                    key = os.path.normcase(os.path.normpath(path))
+                    seen.add(key)
+                    files = [f for f in os.listdir(path) if not f.startswith(".")]
+                    out.append({"customer": cust, "label": cust, "day": day, "path": path, "record": by_path.get(key), "files": len(files)})
+        for key, r in by_path.items():  # hồ sơ đã lưu nhưng chưa có thư mục (chưa xuất file nào)
+            if key not in seen:
+                out.append({"customer": r.get("customer", ""), "label": PROFILES.get(r.get("customer", ""), {}).get("label", r.get("customer", "")),
+                            "day": r.get("docDate", ""), "path": key, "record": r, "files": 0})
+        for o in out:
+            r = o["record"]
+            if r:
+                o["label"] = PROFILES.get(r.get("customer", ""), {}).get("label", o["label"])
+        out.sort(key=lambda o: (str((o["record"] or {}).get("docDate") or o["day"])[:10], o["path"]), reverse=True)
+        return out
+
     def get_record_folder_path(self, rec):
         """Thư mục của một hồ sơ: HAI_QUAN / <Khách> / <Năm>_Thang_<mm> / <Ngày làm tờ khai>.
 

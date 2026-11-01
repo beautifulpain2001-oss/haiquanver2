@@ -61,6 +61,48 @@ class _Page(QWidget):
         return e
 
 
+class DeclarationsPage(_Page):
+    """Tờ khai đang có trong thư mục HAI_QUAN (quét thật trên ổ đĩa/OneDrive) và nút mở thẳng thư mục của từng tờ khai."""
+
+    def __init__(self, core, store):
+        super().__init__()
+        self.core, self.store, self.shown = core, store, []
+        self.lay.addWidget(_head("Tờ khai đang có", "")[0])
+        self.lay.addWidget(_head("", "Danh sách lấy từ thư mục HAI_QUAN. Bấm “Mở thư mục” (hoặc bấm đúp dòng) để vào thẳng thư mục tờ khai và xem chi tiết.")[1])
+        self.search = self.search_box("🔍  Tìm theo khách, số tờ khai, số PO, ngày…", lambda _t: self.refresh())
+        self.lay.addWidget(self.search)
+        self.table = _table(["Khách", "Ngày", "Số tờ khai", "Số PO", "Người làm", "File", "Mở"], 3)
+        self.table.doubleClicked.connect(lambda _i: self.open_current())
+        self.lay.addWidget(self.table, 1)
+
+    def refresh(self):
+        q = self.search.text().lower().strip()
+        self.shown = []
+        rows = []
+        for o in self.store.declaration_folders():
+            r = o["record"] or {}
+            vals = [o["label"], r.get("docDate") or o["day"], r.get("tkNo") or "Chưa khai", r.get("poNumber", ""), r.get("workedBy", ""), o["files"]]
+            if q and q not in " ".join(str(v) for v in vals).lower():
+                continue
+            self.shown.append(o)
+            rows.append(vals)
+        _fill(self.table, rows, right=(5,))
+        self.table.setColumnWidth(6, 150)
+        for i, o in enumerate(self.shown):
+            btn = QPushButton("📁  Mở thư mục")
+            btn.setObjectName("sec")
+            ok = os.path.isdir(o["path"])
+            btn.setEnabled(ok)
+            btn.setToolTip(o["path"])
+            btn.clicked.connect(lambda _=False, f=o["path"]: widgets.open_folder(f))
+            self.table.setCellWidget(i, 6, btn)
+
+    def open_current(self):
+        rows = self.table.selectionModel().selectedRows()
+        if rows and os.path.isdir(self.shown[rows[0].row()]["path"]):
+            widgets.open_folder(self.shown[rows[0].row()]["path"])
+
+
 class RecordsPage(_Page):
     open_record = Signal(dict)
 

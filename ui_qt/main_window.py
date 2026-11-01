@@ -10,9 +10,9 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QListWidget, QM
 
 from . import theme, widgets
 from .pages_lot import STEPS, LotPage  # noqa: F401 - STEPS giữ ở đây cho code/test cũ
-from .pages_other import CatalogPage, CustomersPage, RecordsPage, SettingsPage
+from .pages_other import CatalogPage, CustomersPage, DeclarationsPage, RecordsPage, SettingsPage
 
-NAV = ["📝  Làm chứng từ", "🗂  Hồ sơ đã lưu", "📚  Danh mục", "👥  Khách hàng", "⚙  Cài đặt"]
+NAV = ["📝  Làm chứng từ", "📑  Tờ khai đang có", "🗂  Hồ sơ đã lưu", "📚  Danh mục", "👥  Khách hàng", "⚙  Cài đặt"]
 
 
 class MainWindow(QMainWindow):
@@ -40,15 +40,17 @@ class MainWindow(QMainWindow):
         sl.addWidget(self.nav, 1)
 
         self.lot = LotPage(core, store)
+        self.declarations = DeclarationsPage(core, store)
         self.records = RecordsPage(core, store)
         self.catalog = CatalogPage(core, store)
         self.customers = CustomersPage(core, store)
         self.settings = SettingsPage(core, store)
         self.pages = QStackedWidget()
-        for p in (self.lot, self.records, self.catalog, self.customers, self.settings):
+        for p in (self.lot, self.declarations, self.records, self.catalog, self.customers, self.settings):
             self.pages.addWidget(p)
         self.nav.currentRowChanged.connect(self.show_page)
         self.lot.saved.connect(self.records.refresh)
+        self.lot.saved.connect(self.declarations.refresh)
         self.records.open_record.connect(self.open_record)
         self.settings.data_changed.connect(self.lot.start_new)
         self.customers.changed.connect(self.lot.step1.refresh)
@@ -73,7 +75,7 @@ class MainWindow(QMainWindow):
         try:
             if self.store.sync():
                 page = self.pages.currentWidget()
-                if page in (self.records, self.catalog, self.customers) and hasattr(page, "refresh"):
+                if page in (self.declarations, self.records, self.catalog, self.customers) and hasattr(page, "refresh"):
                     page.refresh()
         except Exception:
             pass  # thư mục dùng chung tạm thời không đọc được (đang đồng bộ): thử lại lần sau

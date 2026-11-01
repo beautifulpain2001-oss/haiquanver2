@@ -182,7 +182,7 @@ def test_export_all_then_save_then_reopen(win, tmp_path, store):
     assert len(step.done_lines) == 5 and "Đã xuất 5 file" in step.msg.text()  # mỗi chứng từ một file
     step.do_save()
     assert win.lot.lot.saved
-    win.nav.setCurrentRow(1)
+    win.nav.setCurrentRow(2)
     rows = [win.records.table.item(r, 2).text() for r in range(win.records.table.rowCount())]
     assert "03102026-01KDHT" in rows
     win.records.table.selectRow(rows.index("03102026-01KDHT"))
@@ -266,7 +266,7 @@ def test_settings_page_opens_instantly_even_if_ocr_check_is_slow(win, monkeypatc
 
 
 def test_customers_edit_saves_and_updates_lot_step(win, store):
-    win.nav.setCurrentRow(3)
+    win.nav.setCurrentRow(4)
     page = win.customers
     page.table.selectRow(page.keys.index("kodi"))
     assert page.form.edits["name"].text() == "CÔNG TY TNHH KODI NEW MATERIAL VIỆT NAM"
@@ -279,7 +279,7 @@ def test_customers_edit_saves_and_updates_lot_step(win, store):
 
 
 def test_customers_bad_mst_warns(win):
-    win.nav.setCurrentRow(3)
+    win.nav.setCurrentRow(4)
     win.customers.table.selectRow(win.customers.keys.index("tesa"))
     win.customers.form.edits["mst"].setText("12")
     win.customers.save()
@@ -317,7 +317,7 @@ def test_month_view_defaults_to_current_month(win, store):
     today = datetime.date.today()
     add_record(store, "kodi", today.strftime("%Y-%m-%d"), tk="306000000001", po="PO-THANG-NAY")
     add_record(store, "tesa", "2020-03-15", tk="306000000002", po="PO-CU")
-    win.nav.setCurrentRow(2)
+    win.nav.setCurrentRow(3)
     mv = win.catalog.by_month
     assert mv.combo.currentData() == this_month()
     assert [mv.table.item(r, 4).text() for r in range(mv.table.rowCount())] == ["PO-THANG-NAY"]  # chỉ hồ sơ tháng này
@@ -326,7 +326,7 @@ def test_month_view_defaults_to_current_month(win, store):
 
 def test_month_view_switch_months_and_empty_current_month(win, store):
     add_record(store, "tesa", "2020-03-15", tk="306000000002", po="PO-CU")
-    win.nav.setCurrentRow(2)
+    win.nav.setCurrentRow(3)
     mv = win.catalog.by_month
     assert mv.combo.currentData() == this_month() and mv.table.rowCount() == 0 and "chưa có hồ sơ" in mv.empty.text()
     mv.prev.click()  # lùi về tháng trước đó có hồ sơ
@@ -343,7 +343,7 @@ def test_customer_view_lists_declared_customs_and_folder_link(win, store, monkey
     t1 = add_record(store, "tesa", "2026-09-10", tk="306111111111", po="PO-T1", folder_files=True)
     add_record(store, "tesa", "2026-08-10", tk="", po="PO-CHUA-KHAI")
     add_record(store, "kodi", "2026-09-11", tk="306222222222", po="PO-K1")
-    win.nav.setCurrentRow(2)
+    win.nav.setCurrentRow(3)
     win.catalog.tabs.setCurrentIndex(1)
     cv = win.catalog.by_customer
     labels = [cv.list.item(i).text() for i in range(cv.list.count())]
@@ -365,7 +365,7 @@ def test_customer_view_lists_declared_customs_and_folder_link(win, store, monkey
 
 def test_folder_button_disabled_when_folder_missing(win, store):
     add_record(store, "kodi", "2026-09-11", tk="306222222222", po="PO-CHUA-XUAT")
-    win.nav.setCurrentRow(2)
+    win.nav.setCurrentRow(3)
     win.catalog.tabs.setCurrentIndex(1)
     cv = win.catalog.by_customer
     cv.list.setCurrentRow(cv.keys.index("kodi"))
@@ -374,10 +374,10 @@ def test_folder_button_disabled_when_folder_missing(win, store):
 
 
 def test_catalog_and_customer_pages_list_data(win):
-    win.nav.setCurrentRow(2)
+    win.nav.setCurrentRow(3)
     win.catalog.tabs.setCurrentIndex(2)
     assert win.catalog.weights.rowCount() > 100 and win.catalog.erp.rowCount() > 1000
-    win.nav.setCurrentRow(3)
+    win.nav.setCurrentRow(4)
     assert {"Shirai", "Kodi", "Tesa"} <= {win.customers.table.item(r, 0).text() for r in range(win.customers.table.rowCount())}
 
 
@@ -452,3 +452,16 @@ def test_settings_import_learned_file(win, store, tmp_path):
     bad.write_text("{không phải json", encoding="utf-8")
     win.settings.import_learned(str(bad))
     assert win.shown[-1][0] == "warn"
+
+
+def test_declarations_page_lists_folders_and_opens_link(win, monkeypatch):
+    opened = []
+    monkeypatch.setattr("ui_qt.widgets.open_folder", lambda p: opened.append(p))
+    d = os.path.join(win.store.base_dir, "HAI_QUAN", "Best", "2026_Thang_10", "2026-10-29")
+    os.makedirs(d)
+    win.nav.setCurrentRow(1)
+    page = win.declarations
+    assert any(o["path"] == d for o in page.shown)
+    row = [o["path"] for o in page.shown].index(d)
+    page.table.cellWidget(row, 6).click()
+    assert opened == [d]

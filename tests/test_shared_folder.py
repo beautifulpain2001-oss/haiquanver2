@@ -57,3 +57,21 @@ def test_lock_file_is_removed_and_stale_lock_is_ignored(data_dir, tmp_path):
     os.utime(lock, (0, 0))  # khóa cũ do máy tắt đột ngột
     a.save_records()
     assert not lock.exists()
+
+
+def test_declaration_folders_scan_disk_and_match_records(data_dir, tmp_path):
+    s = make_store(data_dir, tmp_path, "a")
+    r = rec("R1", "PO-R1", "2026-11-02")
+    r["folder"] = "HAI_QUAN/Kodi/2026_Thang_11/2026-11-02"
+    r["tkNo"] = "TK-123"
+    s.records.insert(0, r)
+    (data_dir / "HAI_QUAN" / "Kodi" / "2026_Thang_11" / "2026-11-02").mkdir(parents=True)
+    (data_dir / "HAI_QUAN" / "Kodi" / "2026_Thang_11" / "2026-11-02" / "invoice.xlsx").write_text("x")
+    (data_dir / "HAI_QUAN" / "Best" / "2026_Thang_10" / "2026-10-29").mkdir(parents=True)  # máy khác tạo, chưa có hồ sơ
+    (data_dir / "HAI_QUAN" / "_KIEM_TRA").mkdir(parents=True)  # thư mục kiểm tra nội bộ: bỏ qua
+    got = {o["customer"]: o for o in s.declaration_folders() if o["customer"] in ("Kodi", "Best")}
+    assert got["Kodi"]["record"]["tkNo"] == "TK-123" and got["Kodi"]["files"] == 1
+    assert got["Best"]["record"] is None and got["Best"]["day"] == "2026-10-29"
+    assert not any(o["customer"] == "_KIEM_TRA" for o in s.declaration_folders())
+    days = [o["day"] for o in s.declaration_folders()]
+    assert days.index("2026-11-02") < days.index("2026-10-29")  # mới nhất trước
