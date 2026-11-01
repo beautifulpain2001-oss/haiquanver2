@@ -3322,8 +3322,12 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
     """
     if not rec.get("items"):
         raise ValueError("Chưa có dòng hàng nào để xuất file Excel.")
-    if mode == "BEST" and not is_best_docset(rec):
+    if mode in ("BEST", "PACK", "PGH", "DCCN") and not is_best_docset(rec):
         raise ValueError("Khách này chưa đặt bộ mẫu 'best'. Thêm khách bằng nút 'Thêm Khách Mới' và chọn bộ mẫu best.")
+    if mode == "SO" and rec["customer"] != "shirai":
+        raise ValueError("Phiếu SO chỉ dùng cho khách Shirai.")
+    if mode == "B11" and not (rec["customer"] == "tesa" or PROFILES.get(rec["customer"], {}).get("customs")):
+        raise ValueError("Khách này chưa có thông tin tờ khai B11.")
     work_dir = store.get_record_folder_path(rec)
     os.makedirs(work_dir, exist_ok=True)
     clean_po = re.sub(r"[^a-zA-Z0-9_-]", "", rec["poNumber"])[:24]
@@ -3357,6 +3361,25 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
     elif mode == "DSH":
         build_ecus_dsh_sheet(wb, rec)
         fname = f"dsh_{rec['pxkNo'] or rec['customer']}.xlsx"
+    elif mode == "SO":
+        build_so_shirai_sheet(wb, rec, f"SO_{clean_po}_{s_key}")
+        fname = f"SO_{rec['customer']}_{clean_po}_{s_key}.xlsx"
+    elif mode == "B11":
+        build_customs_b11_sheet(wb, rec, f"ToKhai_B11_{s_key}")
+        fname = f"ToKhai_B11_{rec['customer']}_{s_key}.xlsx"
+    elif mode == "PACK":
+        build_packing_best_sheet(wb, rec, f"DongGoi_{s_key}")
+        fname = f"DongGoi_{rec['customer']}_{s_key}.xlsx"
+    elif mode == "PGH":
+        build_pgh_best_sheet(wb, rec, f"PGH_{s_key}")
+        fname = f"PhieuGiaoHang_{rec['customer']}_{s_key}.xlsx"
+    elif mode == "DCCN":
+        build_dccn_best_sheet(wb, rec, f"DCCN_{s_key}")
+        fname = f"DoiChieuCongNo_{rec['customer']}_{s_key}.xlsx"
+    elif mode == "CHECK":
+        problems = check_lot(rec)
+        build_check_sheet(wb, rec, problems, f"KiemTra_{s_key}")
+        fname = f"KiemTraCheo_{rec['customer']}_{s_key}.xlsx"
     else:
         build_full_bundle(wb, rec, s_key, skip_h=skip_h)
         problems = check_lot(rec)
@@ -3374,6 +3397,46 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
         dsh = f"dsh_{rec['pxkNo'] or rec['customer']}.xlsx"
         wb_dsh.save(os.path.join(work_dir, dsh))
     return {"path": out_path, "fname": fname, "problems": problems, "dsh": dsh}
+
+
+LOT_MODE_LABELS = {
+    "SO": "Phiếu SO", "PKL": "Invoice / Packing List", "PACK": "Chi tiết đóng gói", "VAT": "Hóa đơn VAT", "PXK": "Phiếu xuất kho",
+    "B11": "Tờ khai B11", "PLX": "Phụ lục X", "PGH": "Phiếu giao hàng", "DCCN": "Đối chiếu công nợ", "DNTT": "Đề nghị thanh toán",
+    "DSH": "Danh sách hàng ECUS", "CHECK": "Kiểm tra chéo",
+}
+
+
+def lot_bundle_modes(rec):
+    """Các chứng từ thuộc 'trọn bộ' của khách (cùng thành phần với build_full_bundle), theo thứ tự làm việc."""
+    cust = rec["customer"]
+    prof = PROFILES.get(cust, PROFILES["shirai"])
+    best = is_best_docset(prof)
+    modes = ["SO"] if cust == "shirai" else []
+    modes.append("PKL")
+    if best:
+        modes.append("PACK")
+    modes += ["VAT", "PXK"]
+    if cust == "tesa":
+        modes += ["B11", "PLX"]
+    elif prof.get("customs"):
+        modes.append("B11")
+    if best:
+        modes += ["PGH", "DCCN"]
+    modes.append("DNTT")
+    if cust not in BUILTIN_CUSTOMERS:
+        modes.append("DSH")
+    modes.append("CHECK")
+    return modes
+
+
+def lot_export_each(store, rec, skip_h=False):
+    """Xuất trọn bộ nhưng MỖI CHỨNG TỪ MỘT FILE Excel riêng (cùng thư mục hồ sơ).
+    Trả {"files": [{"mode", "label", "name", "path"}], "problems": [điểm lệch khi kiểm tra chéo]}."""
+    files = []
+    for mode in lot_bundle_modes(rec):
+        res = lot_export(store, rec, mode, skip_h=skip_h)
+        files.append({"mode": mode, "label": LOT_MODE_LABELS[mode], "name": res["fname"], "path": res["path"]})
+    return {"files": files, "problems": check_lot(rec)}
 
 
 def lot_save_new(store, rec, exported_files):

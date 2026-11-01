@@ -79,12 +79,47 @@ def test_validate_warns_missing_pxk_then_export_save_reload(kodi_lot, store):
     assert errors == [] and any("PXK" in w for w in warns)
     kodi_lot.form.update(pxk="0000777", hd="0000888")
     res = kodi_lot.export("ALL")
-    assert os.path.isfile(res["path"]) and {"vat", "pxk", "pkl"} <= set(kodi_lot.exported)
+    assert all(os.path.isfile(f["path"]) for f in res["files"])
+    assert {"vat", "pxk", "pkl"} <= set(kodi_lot.exported)
     rec = kodi_lot.save()
-    assert kodi_lot.saved and rec["pxkNo"] == "0000777" and rec["files"]["vat"]["name"] == res["fname"]
+    vat_name = next(f["name"] for f in res["files"] if f["mode"] == "VAT")
+    assert kodi_lot.saved and rec["pxkNo"] == "0000777" and rec["files"]["vat"]["name"] == vat_name
     other = Lot(app, store)
     other.load_record(rec)
     assert other.customer == "kodi" and other.form["pxk"] == "0000777" and len(other.items) == 2 and other.saved
+
+
+def test_export_all_makes_one_file_per_document(kodi_lot):
+    kodi_lot.form.update(pxk="0000777", hd="0000888")
+    res = kodi_lot.export("ALL")
+    assert [f["mode"] for f in res["files"]] == ["PKL", "VAT", "PXK", "DNTT", "CHECK"]
+    assert len({f["path"] for f in res["files"]}) == 5  # mỗi chứng từ một file riêng
+    import openpyxl
+    for f in res["files"]:
+        assert len(openpyxl.load_workbook(f["path"]).sheetnames) == 1  # mỗi file chỉ một chứng từ
+    assert [x["mode"] for x in kodi_lot.files] == ["PKL", "VAT", "PXK", "DNTT", "CHECK"]
+
+
+def test_exporting_again_replaces_entry_not_duplicates(kodi_lot):
+    kodi_lot.export("ALL")
+    kodi_lot.export("VAT")
+    assert [f["mode"] for f in kodi_lot.files].count("VAT") == 1
+
+
+@pytest.mark.parametrize("customer,expected", [
+    ("shirai", ["SO", "PKL", "VAT", "PXK", "DNTT", "CHECK"]),
+    ("kodi", ["PKL", "VAT", "PXK", "DNTT", "CHECK"]),
+    ("tesa", ["PKL", "VAT", "PXK", "B11", "PLX", "DNTT", "CHECK"]),
+])
+def test_bundle_modes_match_full_bundle_per_customer(store, seed, customer, expected):
+    assert app.lot_bundle_modes(seed[customer]) == expected
+
+
+def test_single_modes_reject_wrong_customer(store, seed):
+    rec = app.lot_build_record(store, {"customer": "kodi", "po": "P"}, seed["kodi"]["items"])
+    for mode in ("SO", "B11", "PACK", "PGH", "DCCN"):
+        with pytest.raises(ValueError):
+            app.lot_export(store, rec, mode)
 
 
 def test_export_without_items_is_a_clear_error(lot):

@@ -160,7 +160,7 @@ def test_export_all_then_save_then_reopen(win, tmp_path, store):
     step = win.lot.step4
     assert step.big.isEnabled()
     step.do_export("ALL")
-    assert step.done.count() == 1 and "Đã xuất" in step.msg.text()  # 1 file dù ghi nhận cho 3 loại chứng từ
+    assert len(step.done_lines) == 5 and "Đã xuất 5 file" in step.msg.text()  # mỗi chứng từ một file
     step.do_save()
     assert win.lot.lot.saved
     win.nav.setCurrentRow(1)
@@ -175,7 +175,7 @@ def test_export_blocked_without_items(win):
     win.lot.step1.cards["kodi"].click()
     win.lot.go(3)
     assert not win.lot.step4.big.isEnabled()
-    assert "Chưa có dòng hàng" in win.lot.step4.checks.item(0).text()
+    assert "Chưa có dòng hàng" in win.lot.step4.check_lines[0]
 
 
 def test_new_lot_resets(win, tmp_path):
@@ -190,3 +190,25 @@ def test_catalog_and_customer_pages_list_data(win):
     assert win.catalog.weights.rowCount() > 100 and win.catalog.erp.rowCount() > 1000
     win.nav.setCurrentRow(3)
     assert {"shirai", "kodi", "tesa"} <= {win.customers.table.item(r, 0).text() for r in range(win.customers.table.rowCount())}
+
+
+def test_check_text_is_wrapped_and_complete(win, tmp_path):
+    load_kodi_po(win, tmp_path)
+    lot = win.lot.lot
+    long_name = "Ống lõi giấy phi 33.02 x 2.65 x 1750mm_51036 blue red (39817-91750-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013123)" * 2
+    lot.items[0]["ten_sp"] = long_name
+    lot.items[0]["kg"] = 0
+    win.lot.go(3)
+    step = win.lot.step4
+    assert step.checks.wordWrap()  # tự xuống dòng thay vì cắt chữ
+    assert any("TAH-COC-013123" in t for t in step.check_lines)  # hiện đủ tên hàng dài
+    assert long_name[:60] in step.checks.text()
+
+
+def test_export_shows_each_file_in_done_list(win, tmp_path):
+    load_kodi_po(win, tmp_path)
+    win.lot.go(3)
+    win.lot.step4.do_export("ALL")
+    text = " ".join(win.lot.step4.done_lines)
+    for label in ("Hóa đơn VAT", "Phiếu xuất kho", "Đề nghị thanh toán", "Kiểm tra chéo"):
+        assert label in text

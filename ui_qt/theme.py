@@ -56,4 +56,7 @@ QProgressBar::chunk {{ background: {NAVY}; border-radius: 4px; }}
 QTabWidget::pane {{ border: 1px solid {LINE}; border-radius: 6px; }}
 QTabBar::tab {{ padding: 8px 16px; background: #EDF2F7; border-top-left-radius: 6px; border-top-right-radius: 6px; margin-right: 2px; }}
 QTabBar::tab:selected {{ background: {NAVY}; color: #FFFFFF; }}
+QFrame#textcard {{ background: #FFFFFF; border: 1px solid {LINE}; border-radius: 6px; }}
+QScrollArea {{ background: transparent; border: none; }}
+QScrollArea > QWidget > QWidget {{ background: transparent; }}
 """

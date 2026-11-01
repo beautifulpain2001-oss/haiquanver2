@@ -19,7 +19,8 @@ class Lot:
         self.po_dates = {}
         self.schedules = None
         self.schedule_key = ""
-        self.exported = {}
+        self.exported = {}  # ô chứng từ của hồ sơ (vat, pxk, pkl, tk) -> file
+        self.files = []  # mọi file đã xuất trong lô này, để hiển thị
         self.saved = False
         self.skip_h = False  # Kodi: Invoice không lấy cột Thành Tiền
         self.form = {"doc_date": datetime.date.today().strftime("%Y-%m-%d"), "po": "", "po_date": "", "pxk": "", "hd": "", "tk": ""}
@@ -140,20 +141,29 @@ class Lot:
         warns += [w for w in self.core.check_lot(self.record()) if w not in warns]
         return errors, warns
 
+    def _note_file(self, mode, name, path, now):
+        entry = {"mode": mode, "label": self.core.LOT_MODE_LABELS.get(mode, mode), "name": name, "path": path, "time": now}
+        self.files = [f for f in self.files if f["mode"] != mode] + [entry]
+        slot = {"VAT": "vat", "PXK": "pxk", "PKL": "pkl", "B11": "tk", "ALL": None}.get(mode)
+        if slot:
+            self.exported[slot] = {"name": name, "path": path, "time": now}
+        if mode == "PLX" and "tk" not in self.exported:
+            self.exported["tk"] = {"name": name, "path": path, "time": now}
+
     def export(self, mode):
+        """mode "ALL": mỗi chứng từ một file riêng. Mode khác: chỉ chứng từ đó.
+        Trả {"files": [...], "problems": [...], "dsh": None}."""
         rec = self.record()
-        res = self.core.lot_export(self.store, rec, mode, skip_h=self.skip_h)
         now = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
-        entry = {"name": res["fname"], "path": res["path"], "time": now}
-        if mode in ("VAT", "ALL"):
-            self.exported["vat"] = entry
-        if mode in ("PXK", "ALL"):
-            self.exported["pxk"] = entry
-        if mode in ("PKL", "ALL"):
-            self.exported["pkl"] = entry
-        if mode in ("PLX", "ALL") and (self.customer == "tesa" or self.profile.get("customs")):
-            self.exported["tk"] = entry
-        return res
+        if mode == "ALL":
+            res = self.core.lot_export_each(self.store, rec, skip_h=self.skip_h)
+            for f in res["files"]:
+                self._note_file(f["mode"], f["name"], f["path"], now)
+            return {"files": res["files"], "problems": res["problems"], "dsh": None}
+        res = self.core.lot_export(self.store, rec, mode, skip_h=self.skip_h)
+        self._note_file(mode, res["fname"], res["path"], now)
+        one = {"mode": mode, "label": self.core.LOT_MODE_LABELS.get(mode, mode), "name": res["fname"], "path": res["path"]}
+        return {"files": [one], "problems": res["problems"], "dsh": res["dsh"]}
 
     def save(self):
         rec = self.core.lot_save_new(self.store, self.record(), self.exported)
@@ -176,4 +186,5 @@ class Lot:
         self.po_dates = dict(rec.get("poDates") or {})
         self.items = [dict(x) for x in rec.get("items", [])]
         self.exported = {k: v for k, v in (rec.get("files") or {}).items() if v}
+        self.files = []
         self.saved = True

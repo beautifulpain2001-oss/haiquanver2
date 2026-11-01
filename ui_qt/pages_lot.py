@@ -1,10 +1,12 @@
 """Trang "Làm chứng từ": 4 bước ① Chọn khách & nạp PO → ② Kiểm tra dòng hàng → ③ Thông tin chuyến hàng → ④ Xuất & lưu."""
 
-from PySide6.QtCore import Qt, Signal
+import html
+
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame, QGridLayout, QGroupBox,
-    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QProgressBar, QPushButton, QStackedWidget,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QProgressBar, QPushButton, QScrollArea, QStackedWidget,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -354,6 +356,26 @@ EXPORTS = [("VAT", "Hóa đơn VAT (Bkav)"), ("PKL", "Invoice / Packing List"), 
            ("DNTT", "Đề nghị thanh toán"), ("PLX", "Phụ lục X"), ("BEST", "Mẫu riêng của Best"), ("DSH", "Danh sách hàng ECUS (dsh)")]
 
 
+def _lines_html(lines):
+    """Mỗi mục một đoạn, tự xuống dòng khi dài; không cắt chữ."""
+    return "".join(f'<p style="margin:3px 0">{html.escape(t)}</p>' for t in lines)
+
+
+def _text_card(parent_layout):
+    """Khung trắng chứa văn bản nhiều dòng, cao theo nội dung (không thanh cuộn riêng)."""
+    card = QFrame()
+    card.setObjectName("textcard")
+    lay = QVBoxLayout(card)
+    lay.setContentsMargins(12, 8, 12, 8)
+    lb = QLabel()
+    lb.setTextFormat(Qt.RichText)
+    lb.setWordWrap(True)
+    lb.setTextInteractionFlags(Qt.TextSelectableByMouse)
+    lay.addWidget(lb)
+    parent_layout.addWidget(card)
+    return lb
+
+
 class ExportStep(QWidget):
     saved = Signal()
     new_lot = Signal()
@@ -362,14 +384,23 @@ class ExportStep(QWidget):
         super().__init__()
         self.setObjectName("inner")
         self.lot = lot
-        lay = QVBoxLayout(self)
+        self.check_lines, self.done_lines = [], []
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.scroll = scroll = QScrollArea()
+        scroll.setWidgetResizable(True)  # cả trang cuộn được khi có nhiều cảnh báo
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # chữ tự xuống dòng nên không cần cuộn ngang
+        scroll.setFrameShape(QFrame.NoFrame)
+        content = QWidget()
+        content.setObjectName("inner")
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
+        lay = QVBoxLayout(content)
         lay.setContentsMargins(28, 20, 28, 20)
         lay.setSpacing(10)
         lay.addWidget(_label("Kiểm tra trước khi xuất", "h2"))
-        self.checks = QListWidget()
-        self.checks.setMaximumHeight(120)
-        lay.addWidget(self.checks)
-        self.big = QPushButton("📦  Xuất trọn bộ chứng từ")
+        self.checks = _text_card(lay)
+        self.big = QPushButton("📦  Xuất trọn bộ chứng từ (mỗi chứng từ một file)")
         self.big.setObjectName("big")
         self.big.clicked.connect(lambda: self.do_export("ALL"))
         lay.addWidget(self.big)
@@ -381,12 +412,10 @@ class ExportStep(QWidget):
             b.setObjectName("sec")
             b.clicked.connect(lambda _=False, m=mode: self.do_export(m))
             self.btns[mode] = b
-            g.addWidget(b, i // 4, i % 4)
+            g.addWidget(b, i // 3, i % 3)
         lay.addWidget(self.one)
         lay.addWidget(_label("File đã xuất", "h2"))
-        self.done = QListWidget()
-        self.done.setMaximumHeight(110)
-        lay.addWidget(self.done)
+        self.done = _text_card(lay)
         row = QHBoxLayout()
         self.open_btn = QPushButton("📁  Mở thư mục chứa file")
         self.open_btn.setObjectName("sec")
@@ -402,16 +431,14 @@ class ExportStep(QWidget):
         lay.addLayout(row)
         self.msg = _label("", "hint", wrap=True)
         lay.addWidget(self.msg)
+        lay.addStretch(1)
 
     def refresh(self, keep_msg=False):
         errors, warns = self.lot.validate()
-        self.checks.clear()
-        for t in errors:
-            self.checks.addItem("❌  " + t)
-        for t in warns:
-            self.checks.addItem("⚠  " + t)
+        self.check_lines = ["❌  " + t for t in errors] + ["⚠  " + t for t in warns]
         if not errors and not warns:
-            self.checks.addItem("✅  Mọi thứ khớp, sẵn sàng xuất.")
+            self.check_lines = ["✅  Mọi thứ khớp, sẵn sàng xuất."]
+        self.checks.setText(_lines_html(self.check_lines))
         ok = not errors
         self.big.setEnabled(ok)
         self.one.setEnabled(ok)
@@ -419,12 +446,8 @@ class ExportStep(QWidget):
         self.btns["PLX"].setVisible(self.lot.customer in ("tesa", "kodi", "shirai") or bool(self.lot.customer and self.lot.profile.get("customs")))
         self.save_btn.setEnabled(ok)
         self.open_btn.setEnabled(ok)
-        self.done.clear()
-        seen = set()
-        for f in self.lot.exported.values():
-            if f.get("path") not in seen:
-                seen.add(f.get("path"))
-                self.done.addItem(f"✅  {f.get('name', '')}  ({f.get('time', '')})")
+        self.done_lines = [f"✅  {f['label']}: {f['name']}  ({f['time']})" for f in self.lot.files] or ["Chưa xuất file nào."]
+        self.done.setText(_lines_html(self.done_lines))
         if not keep_msg:
             self.msg.setText("Hồ sơ đã được lưu." if self.lot.saved else "")
 
@@ -440,11 +463,21 @@ class ExportStep(QWidget):
             raise
         finally:
             QApplication.restoreOverrideCursor()
+        n = len(res["files"])
         extra = f" Kèm {res['dsh']}." if res["dsh"] else ""
         if mode == "ALL":
-            extra += (" Kiểm tra chéo: đạt." if not res["problems"] else f" Kiểm tra chéo còn {len(res['problems'])} điểm cần xem (sheet KiemTra).")
+            extra += (" Kiểm tra chéo: đạt." if not res["problems"] else f" Kiểm tra chéo còn {len(res['problems'])} điểm cần xem (xem trong file KiemTraCheo).")
         self.refresh(keep_msg=True)
-        self.msg.setText(f"Đã xuất: {res['fname']}.{extra}")
+        self.msg.setText(f"Đã xuất {n} file vào thư mục hồ sơ.{extra}")
+        self.show_result()
+
+    def show_result(self):
+        """Cuộn xuống để người dùng thấy ngay danh sách file đã xuất và thông báo (sau khi bố cục cập nhật)."""
+        def down():
+            bar = self.scroll.verticalScrollBar()
+            bar.setValue(bar.maximum())
+        QTimer.singleShot(0, down)
+        QTimer.singleShot(60, down)  # lần nữa sau khi bố cục tính xong chiều cao mới
 
     def open_dir(self):
         widgets.open_folder(self.lot.folder())
@@ -453,6 +486,7 @@ class ExportStep(QWidget):
         rec = self.lot.save()
         self.refresh(keep_msg=True)
         self.msg.setText(f"Đã lưu hồ sơ PO {rec['poNumber'] or '(chưa có số)'}. Xem lại ở mục “Hồ sơ đã lưu”.")
+        self.show_result()
         self.saved.emit()
 
     def on_new(self):
