@@ -75,3 +75,19 @@ def test_declaration_folders_scan_disk_and_match_records(data_dir, tmp_path):
     assert not any(o["customer"] == "_KIEM_TRA" for o in s.declaration_folders())
     days = [o["day"] for o in s.declaration_folders()]
     assert days.index("2026-11-02") < days.index("2026-10-29")  # mới nhất trước
+
+
+def test_folder_activity_reads_status_from_file_names(tmp_path):
+    f = tmp_path / "d"
+    f.mkdir()
+    S = app.DedicatedDataStore
+    assert S.folder_activity(str(f))["status"] == "Thư mục trống"
+    for n in ("invoice_best_00000300_26.10.xlsx", "DongGoi_best_26.10.xlsx", "00_HO_SO_abc.json"):
+        (f / n).write_text("x")
+    a = S.folder_activity(str(f))
+    assert a["status"] == "Đã chuẩn bị 3 chứng từ · chờ khai" and not a["other"]
+    (f / "ghi chu.txt").write_text("x")
+    assert S.folder_activity(str(f))["status"].startswith("Máy khác đã thêm file: ghi chu.txt")
+    (f / "ToKhai_306891234560_Xanh.pdf").write_text("x")  # tờ khai do máy làm hải quan thêm
+    a = S.folder_activity(str(f))
+    assert a["tk"] == "306891234560" and a["status"] == "Đã khai · số tờ khai 306891234560"

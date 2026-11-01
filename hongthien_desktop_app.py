@@ -994,6 +994,41 @@ class DedicatedDataStore:
         except Exception:
             pass
 
+    # Tên file do phần mềm này làm ra (chuẩn bị cho khai hải quan). File khác trong thư mục là do máy làm hải quan thêm vào.
+    PREPARED_PREFIXES = (("invoice_", "Invoice"), ("DongGoi_", "Đóng gói"), ("Hoa_Don_VAT", "Hóa đơn VAT"), ("PXK_", "Phiếu xuất kho"),
+                         ("ToKhai_B11", "Dữ liệu tờ khai B11"), ("PhieuGiaoHang", "Phiếu giao hàng"), ("DoiChieuCongNo", "Đối chiếu công nợ"),
+                         ("DNTT", "Đề nghị thanh toán"), ("dsh_", "Danh sách hàng ECUS"), ("KiemTraCheo", "Kiểm tra chéo"),
+                         ("Bo_Ho_So_Xuat_Hang", "Bộ hồ sơ"), ("00_HO_SO_", "Hồ sơ lưu"), ("PhuLucX", "Phụ lục X"), ("SO_", "Đơn đặt hàng"))
+
+    @classmethod
+    def folder_activity(cls, path):
+        """Đọc thư mục tờ khai, đoán đã làm gì chỉ bằng tên file:
+        prepared = chứng từ do phần mềm này làm; other = file máy khác thêm vào; tk = số tờ khai (12 chữ số) trong tên file nếu có."""
+        prepared, other, tk = [], [], ""
+        try:
+            names = sorted(n for n in os.listdir(path) if not n.startswith((".", "~$")) and os.path.isfile(os.path.join(path, n)))
+        except OSError:
+            names = []
+        for n in names:
+            hit = next((lbl for pre, lbl in cls.PREPARED_PREFIXES if n.lower().startswith(pre.lower())), "")
+            if hit:
+                if hit not in prepared:
+                    prepared.append(hit)
+                continue
+            other.append(n)
+            m = re.search(r"(?<!\d)(\d{12})(?!\d)", n)
+            if m and not tk:
+                tk = m.group(1)
+        if tk:
+            status = f"Đã khai · số tờ khai {tk}"
+        elif other:
+            status = "Máy khác đã thêm file: " + ", ".join(other[:3]) + ("…" if len(other) > 3 else "")
+        elif prepared:
+            status = f"Đã chuẩn bị {len(prepared)} chứng từ · chờ khai"
+        else:
+            status = "Thư mục trống"
+        return {"prepared": prepared, "other": other, "tk": tk, "status": status}
+
     def declaration_folders(self):
         """Các thư mục tờ khai đang có trong HAI_QUAN (quét thật trên ổ đĩa/OneDrive) ghép với thông tin hồ sơ nếu có.
         Mỗi mục: {customer, label, day, path, record (hoặc None), files}. Mới nhất trước. Thư mục bắt đầu bằng _ bị bỏ qua."""
@@ -1021,11 +1056,12 @@ class DedicatedDataStore:
                     key = os.path.normcase(os.path.normpath(path))
                     seen.add(key)
                     files = [f for f in os.listdir(path) if not f.startswith(".")]
-                    out.append({"customer": cust, "label": cust, "day": day, "path": path, "record": by_path.get(key), "files": len(files)})
+                    out.append({"customer": cust, "label": cust, "day": day, "path": path, "record": by_path.get(key), "files": len(files), **self.folder_activity(path)})
         for key, r in by_path.items():  # hồ sơ đã lưu nhưng chưa có thư mục (chưa xuất file nào)
             if key not in seen:
                 out.append({"customer": r.get("customer", ""), "label": PROFILES.get(r.get("customer", ""), {}).get("label", r.get("customer", "")),
-                            "day": r.get("docDate", ""), "path": key, "record": r, "files": 0})
+                            "day": r.get("docDate", ""), "path": key, "record": r, "files": 0,
+                            "prepared": [], "other": [], "tk": "", "status": "Chưa có thư mục (chưa xuất file nào)"})
         for o in out:
             r = o["record"]
             if r:

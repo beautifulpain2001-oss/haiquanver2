@@ -71,7 +71,7 @@ class DeclarationsPage(_Page):
         self.lay.addWidget(_head("", "Danh sách lấy từ thư mục HAI_QUAN. Bấm “Mở thư mục” (hoặc bấm đúp dòng) để vào thẳng thư mục tờ khai và xem chi tiết.")[1])
         self.search = self.search_box("🔍  Tìm theo khách, số tờ khai, số PO, ngày…", lambda _t: self.refresh())
         self.lay.addWidget(self.search)
-        self.table = _table(["Khách", "Ngày", "Số tờ khai", "Số PO", "Người làm", "File", "Mở"], 3)
+        self.table = _table(["Khách", "Ngày", "Số tờ khai", "Số PO", "Tình trạng (đọc từ tên file trong thư mục)", "Người làm", "Mở"], 4)
         self.table.doubleClicked.connect(lambda _i: self.open_current())
         self.lay.addWidget(self.table, 1)
 
@@ -81,13 +81,17 @@ class DeclarationsPage(_Page):
         rows = []
         for o in self.store.declaration_folders():
             r = o["record"] or {}
-            vals = [o["label"], r.get("docDate") or o["day"], r.get("tkNo") or "Chưa khai", r.get("poNumber", ""), r.get("workedBy", ""), o["files"]]
+            vals = [o["label"], r.get("docDate") or o["day"], o.get("tk") or r.get("tkNo") or "Chưa khai", r.get("poNumber", ""), o.get("status", ""),
+                    r.get("workedBy", "")]
             if q and q not in " ".join(str(v) for v in vals).lower():
                 continue
             self.shown.append(o)
             rows.append(vals)
-        _fill(self.table, rows, right=(5,))
+        _fill(self.table, rows)
         self.table.setColumnWidth(6, 150)
+        for i, o in enumerate(self.shown):
+            tip = "Chứng từ do phần mềm làm: " + (", ".join(o.get("prepared", [])) or "(chưa có)") + "\nFile khác: " + (", ".join(o.get("other", [])) or "(chưa có)")
+            self.table.item(i, 4).setToolTip(tip)
         for i, o in enumerate(self.shown):
             btn = QPushButton("📁  Mở thư mục")
             btn.setObjectName("sec")
