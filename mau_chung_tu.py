@@ -164,7 +164,7 @@ def _po_lines(core, rec, pos_fmt):
 
 def fill_pkl(core, wb, rec, prof, tws, title):
     items, pos = rec.get("items", []), core.rec_po_list(rec) or [("", "")]
-    ws, pl = clone_sheet(wb, tws, title, [(3, 4, len(pos)), (15, 26, max(len(items), 1))])
+    ws, pl = clone_sheet(wb, tws, title, [(3, 4, max(len(pos), 2)), (15, 26, max(len(items), 1))])
     dt = core._dmy(core._iso_to_date(rec.get("docDate")))
     ws[f"I{pl.map(2)}"] = f"PXKKVCNB : {rec.get('pxkNo', '')}"
     ws[f"L{pl.map(2)}"] = f"     Ngày :{dt}"
@@ -192,7 +192,7 @@ def fill_pkl(core, wb, rec, prof, tws, title):
 
 def fill_pack(core, wb, rec, prof, tws, title):
     items, pos = rec.get("items", []), core.rec_po_list(rec) or [("", "")]
-    ws, pl = clone_sheet(wb, tws, title, [(3, 4, len(pos)), (18, 29, max(len(items), 1))])
+    ws, pl = clone_sheet(wb, tws, title, [(3, 4, max(len(pos), 2)), (18, 29, max(len(items), 1))])
     dt = core._dmy(core._iso_to_date(rec.get("docDate")))
     ws["D2"] = f"PXKKVCNB : {rec.get('pxkNo', '')}"
     ws["F2"] = f" Ngày: {dt}"

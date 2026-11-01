@@ -4038,6 +4038,99 @@ def lot_defaults(customer):
     }
 
 
+_MONEY = re.compile(r"^\d{1,3}(?:,\d{3})*\.\d{2}$")
+
+
+def _runs(flags, gap=6):
+    out = []
+    for y, f in enumerate(flags):
+        if f:
+            if out and y - out[-1][-1] <= gap:
+                out[-1].append(y)
+            else:
+                out.append([y])
+    return [int(sum(r) / len(r)) for r in out]
+
+
+def read_best_po_table(path, catalog_items):
+    """PO Best scan (mẫu in từ ERP): tìm các đường kẻ của bảng rồi đọc từng ô ở độ nét cao. Đọc cả trang hay làm mất dấu
+    thập phân (1,200.00 -> 120000) hoặc dính hai số vào nhau. Trả [{name, code, qty, price, amount, inquiry}] hoặc [] nếu
+    không chắc (không thấy bảng, không nhận ra mặt hàng, SL x giá khác thành tiền) để quay về cách đọc cũ."""
+    if pdfium is None or pytesseract is None:
+        return []
+    try:
+        import numpy as np
+        img = auto_rotate_scan(pdfium.PdfDocument(path)[0].render(scale=4.5).to_pil()).convert("L")
+        arr = np.array(img)
+    except Exception:
+        return []
+    H, W = arr.shape
+    x0, x1 = int(W * 0.04), int(W * 0.93)
+    ys = _runs((arr[:, x0:x1] < 140).mean(axis=1) > 0.3)  # đường kẻ ngang
+    if len(ys) < 3:
+        return []
+    diffs = sorted(b - a for a, b in zip(ys, ys[1:]))
+    pitch = diffs[len(diffs) // 2]
+    run = [ys[0]]
+    for y in ys[1:]:  # đoạn đường kẻ cách đều từ đầu bảng (viền trên, đáy tiêu đề, các dòng hàng)
+        if abs(y - run[-1] - pitch) <= pitch * 0.12:
+            run.append(y)
+        elif y - run[-1] > pitch * 1.5 and len(run) >= 3:
+            break
+        elif len(run) < 3:
+            run = [y]
+    if len(run) < 3:
+        return []
+    band = arr[run[1] + 10:run[2] - 10, :]
+    xs = _runs((band < 140).mean(axis=0) > 0.8)  # đường kẻ dọc
+    if len(xs) < 10:
+        xs = [int(W * f) for f in (0.036, 0.059, 0.117, 0.23, 0.349, 0.393, 0.427, 0.475, 0.532, 0.608)]
+    col = {"spec": (xs[3], xs[4]), "qty": (xs[4], xs[5]), "price": (xs[6], xs[7]), "amount": (xs[7], xs[8]), "inquiry": (xs[8], xs[9])}
+
+    def cell(key, y0, y1, cfg):
+        a, b = col[key]
+        c = img.crop((a + 12, y0 + 10, b - 12, y1 - 10))
+        c = c.resize((int(c.width * 1.5), int(c.height * 1.5)))
+        return pytesseract.image_to_string(c, lang="eng", config=cfg).strip()
+
+    num = "--psm 7 -c tessedit_char_whitelist=0123456789,."
+
+    def money(t):  # OCR đọc sai dấu: '600,00', '7,684,200,00', '7471100.00'
+        t = t.strip().strip(",.")
+        t = re.sub(r",(\d{2})$", r".\1", t).replace(",", "")
+        return float(t) if re.fullmatch(r"\d+\.\d{2}", t) else None
+
+    def close(a, b):  # cùng độ dài, lệch tối đa 1 chữ số (OCR nhầm 0/3, 6/8...)
+        a, b = str(int(a)), str(int(b))
+        return len(a) == len(b) and sum(x != y for x, y in zip(a, b)) <= 1
+
+    rows = []
+    for y0, y1 in zip(run[1:-1], run[2:]):
+        q, p, am = (money(cell(k, y0, y1, num)) for k in ("qty", "price", "amount"))
+        nums = re.findall(r"\d+(?:\.\d+)?", cell("spec", y0, y1, "--psm 7"))
+        item = next((it for it in catalog_items if len(nums) >= 3 and _name_dims(it.get("name"))[0][1:] == nums[-2:]), None)
+        if item is None and p:  # quy cách đọc hỏng: nhận mặt hàng theo đơn giá đã học
+            item = next((it for it in catalog_items if it.get("price") and close(it["price"], p)), None)
+        if q and not am and item and p and close(p, item.get("price") or 0):
+            am = q * float(item["price"])  # ô thành tiền hỏng nhưng SL và đơn giá khớp đơn giá đã học
+        if not (q and am and item):
+            return []
+        qty = price = 0
+        for pc in [x for x in (p, item.get("price")) if x]:  # đơn giá OCR hoặc đơn giá đã học: lấy cái cho SL x giá = thành tiền
+            for qc in (q, am / pc):
+                if qc > 0 and abs(qc - round(qc)) < 1e-9 and abs(round(qc) * pc - am) <= 1:
+                    qty, price = int(round(qc)), int(pc)
+                    break
+            if qty:
+                break
+        if not qty:
+            return []
+        inq = re.findall(r"Q[^\d\s]{0,2}(\d{10,11})(?!\d)", cell("inquiry", y0, y1, "--psm 7 -c tessedit_char_whitelist=QS0123456789"))
+        rows.append({"name": item["name"], "code": item.get("code") or "", "qty": qty, "price": price, "amount": int(am),
+                     "inquiry": ("QS" + inq[0][-10:]) if inq else ""})
+    return rows
+
+
 def fix_inquiries_from_scan(path, lines):
     """PO scan: OCR cỡ thường hay đọc nhầm số Inquiry (QS2603000725 -> QS3603000735). Đọc lại ở độ nét cao,
     chỉ lấy các mã QS...; đủ bằng số dòng hàng thì gán theo thứ tự dòng. PDF có chữ sẵn thì bỏ qua (đã chính xác)."""
@@ -4056,6 +4149,29 @@ def fix_inquiries_from_scan(path, lines):
         found = [top if f != top and found.count(top) >= 3 and sum(x != y for x, y in zip(f, top)) == 1 else f for f in found]
         for ln, num in zip(lines, found):
             ln["inquiry"] = "QS" + num
+
+
+def _pdf_has_text(path):
+    try:
+        return len(re.sub(r"\s+", "", pypdf.PdfReader(path).pages[0].extract_text() or "")) > 80
+    except Exception:
+        return False
+
+
+def best_scan_lines(path, prof, store, po_no, po_date, tare_v):
+    """Dòng hàng của PO Best scan đọc theo từng ô của bảng; dựng lại thành chữ sạch rồi cho bộ đọc PO chung xử lý
+    (cùng cách tính kiện, tịnh, cả bì như mọi PO khác). Trả [] nếu không đọc chắc để quay về cách đọc cả trang."""
+    catalog = store.items_for_customer(prof["key"])
+    rows = read_best_po_table(path, catalog)
+    if not rows:
+        return []
+    d = re.match(r"(\d{2})/(\d{2})/(\d{4})", po_date or "")
+    text = f"PO No: {po_no}\n" + (f"PO Date {d.group(3)}/{d.group(2)}/{d.group(1)}\n" if d else "")
+    for i, r in enumerate(rows, 1):
+        text += (f"{i} | {r['code']} {r['name']} {r['qty']:,.2f} PCS {r['price']:,.2f} {r['amount']:,.2f} {r['inquiry']} "
+                 f"PRS0000000000 PackingF001 QC VAI\n")
+    _, _, lines = parse_generic_po_text(text, prof, catalog, data_store=store, tare_val=tare_v)
+    return lines if len(lines) == len(rows) else []
 
 
 def lot_load_po(store, path, customer, tare_text="", existing_items=None, append=False, po_dates=None):
@@ -4080,8 +4196,8 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
         except Exception:
             tare_v = 0.0
         po_no, po_date, lines = parse_generic_po_text(read_document_text(path), prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
-        if lines and ext == ".pdf" and "inquiry" in (prof.get("lineRefs") or {}):
-            fix_inquiries_from_scan(path, lines)
+        if lines and ext == ".pdf" and "inquiry" in (prof.get("lineRefs") or {}) and not _pdf_has_text(path):
+            lines = best_scan_lines(path, prof, store, po_no, po_date, tare_v) or (fix_inquiries_from_scan(path, lines) or lines)
         if not lines:
             res["msg"] = "Không tìm thấy dòng hàng nào khớp mã/tên hàng đã học. Hãy thêm dòng trực tiếp, hoặc nạp thêm chứng từ mẫu cho khách này."
             return res
