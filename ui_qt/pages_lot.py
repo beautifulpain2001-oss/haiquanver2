@@ -3,6 +3,7 @@
 import html
 
 from PySide6.QtCore import Qt, QTimer, Signal
+from shiboken6 import isValid
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame, QGridLayout, QGroupBox,
@@ -474,6 +475,8 @@ class ExportStep(QWidget):
     def show_result(self):
         """Cuộn xuống để người dùng thấy ngay danh sách file đã xuất và thông báo (sau khi bố cục cập nhật)."""
         def down():
+            if not isValid(self.scroll):  # cửa sổ có thể đã đóng trong lúc chờ
+                return
             bar = self.scroll.verticalScrollBar()
             bar.setValue(bar.maximum())
         QTimer.singleShot(0, down)
