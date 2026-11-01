@@ -55,6 +55,7 @@ def build():
         "--exclude-module", "numpy",
         # Giao diện mới chỉ dùng QtCore/QtGui/QtWidgets; bỏ các module Qt nặng không dùng
         "--hidden-import", "ui_qt.main_window",
+        "--hidden-import", "mau_chung_tu",
         *[a for m in QT_EXCLUDES for a in ("--exclude-module", m)],
         "hongthien_desktop_app.py",
     ]

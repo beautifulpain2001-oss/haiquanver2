@@ -197,9 +197,9 @@ def test_reopened_record_updates_same_record_even_if_date_changed(store, lot):
 # ---------------------------------------------------------------- nạp dữ liệu học
 def test_import_learned_adds_skips_existing_and_persists(store, data_dir):
     data = {"item_mem": {"Mặt hàng A": {"div": 50, "kg": 0.09, "hs": ""}, "Mặt hàng B": {"div": 10}}}
-    assert store.import_learned(data) == {"them": 2, "ghi_de": 0, "bo_qua": 0, "khach": ""}
+    assert store.import_learned(data) == {"them": 2, "ghi_de": 0, "bo_qua": 0, "khach": "", "mau": 0}
     store.item_mem["Mặt hàng A"]["div"] = 25  # người dùng tự sửa
-    assert store.import_learned(data) == {"them": 0, "ghi_de": 0, "bo_qua": 2, "khach": ""}
+    assert store.import_learned(data) == {"them": 0, "ghi_de": 0, "bo_qua": 2, "khach": "", "mau": 0}
     assert store.item_mem["Mặt hàng A"]["div"] == 25  # không bị ghi đè
     assert store.import_learned(data, overwrite=True)["ghi_de"] == 2
     again = app.DedicatedDataStore(base_dir=str(data_dir))

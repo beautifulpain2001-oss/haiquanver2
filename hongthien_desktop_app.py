@@ -99,6 +99,19 @@ if pytesseract is not None and os.name == "nt":
 
 
 # Thư mục gốc chứa toàn bộ hồ sơ hải quan trong kho dữ liệu: HAI_QUAN/<Khách>/<Năm>_Thang_<mm>/<Ngày>/
+try:
+    import mau_chung_tu
+except ImportError:  # thiếu module: dùng mẫu dựng sẵn trong phần mềm
+    mau_chung_tu = None
+TEMPLATE_DIR = ""  # thư mục chứa file mẫu chứng từ của khách (đặt theo thư mục dữ liệu)
+
+
+def best_template(prof, doc):
+    """Đường dẫn file mẫu chứng từ riêng của khách (nếu đã nạp), không có thì None."""
+    p = os.path.join(TEMPLATE_DIR, str(prof.get("key") or ""), doc + ".xlsx") if TEMPLATE_DIR and mau_chung_tu else ""
+    return p if p and os.path.isfile(p) else None
+
+
 CUSTOMS_ROOT = "HAI_QUAN"
 
 _OCR_OK = None
@@ -548,6 +561,8 @@ class DedicatedDataStore:
         self.catalog_file = os.path.join(self.base_dir, "master_catalog.json")
         self.records_file = os.path.join(self.base_dir, "hongthien_records.json")
         self.sqlite_file = os.path.join(self.base_dir, "hongthien_haiquan.db")
+        global TEMPLATE_DIR
+        TEMPLATE_DIR = os.path.join(self.base_dir, "MAU_CHUNG_TU")
 
     def change_base_dir(self, new_dir):
         self.base_dir = os.path.abspath(new_dir)
@@ -706,12 +721,13 @@ class DedicatedDataStore:
         cust = data.get("khach_moi") if isinstance(data, dict) else None
         if not isinstance(data, dict) or not (isinstance(data.get("item_mem"), dict) or isinstance(cust, dict)):
             raise ValueError("File này không phải file dữ liệu học của phần mềm (thiếu mục item_mem).")
-        res = {"them": 0, "ghi_de": 0, "bo_qua": 0, "khach": ""}
+        res = {"them": 0, "ghi_de": 0, "bo_qua": 0, "khach": "", "mau": 0}
         if isinstance(cust, dict):  # khách học sẵn (hồ sơ + danh mục hàng); khách đã có thì giữ nguyên trừ khi chọn ghi đè
             key = re.sub(r"[^a-z0-9_]", "", str(cust.get("key") or "").lower())
             if key and (overwrite or key not in PROFILES):
                 self.save_learned_customer(key, dict(cust.get("profile") or {}), list(cust.get("items") or []))
                 res["khach"] = key
+                res["mau"] = self.save_templates(key, cust.get("mau") or {}, overwrite)
         for name, v in (data.get("item_mem") or {}).items():
             if not isinstance(v, dict) or not str(name).strip():
                 continue
@@ -729,6 +745,23 @@ class DedicatedDataStore:
             self.item_mem[name] = new
         self.save_catalog()
         return res
+
+    def save_templates(self, key, mau, overwrite=False):
+        """Lưu file mẫu chứng từ của khách (base64 trong file dữ liệu học) vào MAU_CHUNG_TU/<khách>/<doc>.xlsx."""
+        import base64
+        folder = os.path.join(TEMPLATE_DIR or os.path.join(self.base_dir, "MAU_CHUNG_TU"), key)
+        n = 0
+        for doc, b64 in (mau or {}).items():
+            if doc not in ("pkl", "pack", "pgh", "dccn", "dntt"):
+                continue
+            path = os.path.join(folder, doc + ".xlsx")
+            if os.path.exists(path) and not overwrite:
+                continue
+            os.makedirs(folder, exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(base64.b64decode(b64))
+            n += 1
+        return n
 
     def update_customer(self, key, fields):
         """Sửa thông tin khách (tên, MST, địa chỉ…). Khách có sẵn: lưu phần sửa; khách đã học: sửa trong hồ sơ khách."""
@@ -2584,6 +2617,9 @@ def _box(ws, r1, c1, r2, c2):
 
 def build_pkl_best_sheet(wb, rec, sheet_name="Invoice"):
     """HÓA ĐƠN THƯƠNG MẠI - BẢNG KÊ CHI TIẾT kiểu Best: một dòng 'Số ĐĐH' cho mỗi PO, tổng kiện = tổng SL / SL mỗi kiện."""
+    tpl = best_template(PROFILES[rec["customer"]], "pkl")
+    if tpl:
+        return mau_chung_tu.build_from_template(sys.modules[__name__], "pkl", wb, rec, PROFILES[rec["customer"]], tpl, sheet_name)
     ws = wb.create_sheet(title=sheet_name[:31])
     prof = PROFILES[rec["customer"]]
     put = _sheet_put(ws)
@@ -2665,6 +2701,9 @@ def build_pkl_best_sheet(wb, rec, sheet_name="Invoice"):
 
 def build_packing_best_sheet(wb, rec, sheet_name="DongGoi"):
     """CHI TIẾT ĐÓNG GÓI: không có giá; N.W, G.W từng dòng; tổng kiện."""
+    tpl = best_template(PROFILES[rec["customer"]], "pack")
+    if tpl:
+        return mau_chung_tu.build_from_template(sys.modules[__name__], "pack", wb, rec, PROFILES[rec["customer"]], tpl, sheet_name)
     ws = wb.create_sheet(title=sheet_name[:31])
     prof = PROFILES[rec["customer"]]
     put = _sheet_put(ws)
@@ -2739,6 +2778,9 @@ def build_packing_best_sheet(wb, rec, sheet_name="DongGoi"):
 
 def build_pgh_best_sheet(wb, rec, sheet_name="PhieuGiaoHang"):
     """送货单 PHIẾU GIAO HÀNG theo mẫu khách: mã vật liệu, quy cách, Inquiry No, số PO, bộ phận, Customs No."""
+    tpl = best_template(PROFILES[rec["customer"]], "pgh")
+    if tpl:
+        return mau_chung_tu.build_from_template(sys.modules[__name__], "pgh", wb, rec, PROFILES[rec["customer"]], tpl, sheet_name)
     ws = wb.create_sheet(title=sheet_name[:31])
     prof = PROFILES[rec["customer"]]
     put = _sheet_put(ws)
@@ -2792,6 +2834,9 @@ def build_pgh_best_sheet(wb, rec, sheet_name="PhieuGiaoHang"):
 
 def build_dccn_best_sheet(wb, rec, sheet_name="DCCN"):
     """对账单 Đối Chiếu Công Nợ: mỗi dòng hàng một dòng, hạn thanh toán = ngày hóa đơn + số ngày."""
+    tpl = best_template(PROFILES[rec["customer"]], "dccn")
+    if tpl:
+        return mau_chung_tu.build_from_template(sys.modules[__name__], "dccn", wb, rec, PROFILES[rec["customer"]], tpl, sheet_name)
     ws = wb.create_sheet(title=sheet_name[:31])
     prof = PROFILES[rec["customer"]]
     put = _sheet_put(ws)
@@ -2859,6 +2904,9 @@ def build_dccn_best_sheet(wb, rec, sheet_name="DCCN"):
 
 def build_dntt_best_sheet(wb, rec, sheet_name="DNTT"):
     """請款單 PHIẾU ĐỀ NGHỊ THANH TOÁN theo mẫu khách: ngày xin thanh toán = ngày hóa đơn + số ngày."""
+    tpl = best_template(PROFILES[rec["customer"]], "dntt")
+    if tpl:
+        return mau_chung_tu.build_from_template(sys.modules[__name__], "dntt", wb, rec, PROFILES[rec["customer"]], tpl, sheet_name)
     ws = wb.create_sheet(title=sheet_name[:31])
     prof = PROFILES[rec["customer"]]
     put = _sheet_put(ws)
