@@ -703,10 +703,16 @@ class DedicatedDataStore:
     def import_learned(self, data, overwrite=False):
         """Nạp file dữ liệu học (định mức từng mặt hàng: SL/kiện, kg/cái, HS) vào bộ nhớ định mức.
         Mặc định không ghi đè định mức người dùng đã tự nhập. Trả {"them", "ghi_de", "bo_qua"}."""
-        if not isinstance(data, dict) or not isinstance(data.get("item_mem"), dict):
+        cust = data.get("khach_moi") if isinstance(data, dict) else None
+        if not isinstance(data, dict) or not (isinstance(data.get("item_mem"), dict) or isinstance(cust, dict)):
             raise ValueError("File này không phải file dữ liệu học của phần mềm (thiếu mục item_mem).")
-        res = {"them": 0, "ghi_de": 0, "bo_qua": 0}
-        for name, v in data["item_mem"].items():
+        res = {"them": 0, "ghi_de": 0, "bo_qua": 0, "khach": ""}
+        if isinstance(cust, dict):  # khách học sẵn (hồ sơ + danh mục hàng); khách đã có thì giữ nguyên trừ khi chọn ghi đè
+            key = re.sub(r"[^a-z0-9_]", "", str(cust.get("key") or "").lower())
+            if key and (overwrite or key not in PROFILES):
+                self.save_learned_customer(key, dict(cust.get("profile") or {}), list(cust.get("items") or []))
+                res["khach"] = key
+        for name, v in (data.get("item_mem") or {}).items():
             if not isinstance(v, dict) or not str(name).strip():
                 continue
             try:
@@ -2355,6 +2361,8 @@ BEST_DOCSET_DEFAULTS = {
     "nameCn": "",
     "buyerContact": "",
     "sellerContact": "",
+    "sellerTel": "",
+    "buyerTel": "",
     "deliveryPlace": "",
     "ocrLoose": True,
     "customs": {
@@ -2801,8 +2809,8 @@ def build_dccn_best_sheet(wb, rec, sheet_name="DCCN"):
     put("H3", "H3:M3", f"甲方（买方）: {prof.get('nameCn', '')}", 11)
     put("A4", "A4:G4", f"联系人/Người liên hệ：{prof.get('sellerContact', '')}", 11)
     put("H4", "H4:M4", f"联系人/Người liên hệ：{prof.get('buyerContact', '')}", 11)
-    put("A5", "A5:G5", "电话/Điện thoại：", 11)
-    put("H5", "H5:M5", "电话/Điện thoại：", 11)
+    put("A5", "A5:G5", f"电话/Điện thoại：{prof.get('sellerTel', '')}", 11)
+    put("H5", "H5:M5", f"电话/Điện thoại：{prof.get('buyerTel', '')}", 11)
     put("A6", "A6:G6", "传真/Số Fax：", 11)
     put("H6", "H6:M6", "传真/Số Fax：", 11)
     for rr in range(2, 7):
@@ -3964,6 +3972,26 @@ def lot_defaults(customer):
     }
 
 
+def fix_inquiries_from_scan(path, lines):
+    """PO scan: OCR cỡ thường hay đọc nhầm số Inquiry (QS2603000725 -> QS3603000735). Đọc lại ở độ nét cao,
+    chỉ lấy các mã QS...; đủ bằng số dòng hàng thì gán theo thứ tự dòng. PDF có chữ sẵn thì bỏ qua (đã chính xác)."""
+    if pypdf is None or pdfium is None or pytesseract is None:
+        return
+    try:
+        if len(re.sub(r"\s+", "", pypdf.PdfReader(path).pages[0].extract_text() or "")) > 80:
+            return
+        img = auto_rotate_scan(pdfium.PdfDocument(path)[0].render(scale=4.5).to_pil())
+        txt = pytesseract.image_to_string(img, lang="vie+eng", config="--psm 4")
+    except Exception:
+        return
+    found = [m.group(1)[-10:] for m in re.finditer(r"Q[^\d\s]{0,2}\s?(\d{10,11})(?!\d)", txt)]  # 'QS82603000725': OCR thêm 1 số 8 sau chữ S
+    if len(found) == len(lines):
+        top = max(set(found), key=found.count)  # mã nhiều dòng dùng chung; dòng lệch đúng 1 chữ số so với mã đó là OCR đọc nhầm
+        found = [top if f != top and found.count(top) >= 3 and sum(x != y for x, y in zip(f, top)) == 1 else f for f in found]
+        for ln, num in zip(lines, found):
+            ln["inquiry"] = "QS" + num
+
+
 def lot_load_po(store, path, customer, tare_text="", existing_items=None, append=False, po_dates=None):
     """Đọc file PO của khách `customer` (offline). Không đụng giao diện.
 
@@ -3986,6 +4014,8 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
         except Exception:
             tare_v = 0.0
         po_no, po_date, lines = parse_generic_po_text(read_document_text(path), prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
+        if lines and ext == ".pdf" and "inquiry" in (prof.get("lineRefs") or {}):
+            fix_inquiries_from_scan(path, lines)
         if not lines:
             res["msg"] = "Không tìm thấy dòng hàng nào khớp mã/tên hàng đã học. Hãy thêm dòng trực tiếp, hoặc nạp thêm chứng từ mẫu cho khách này."
             return res

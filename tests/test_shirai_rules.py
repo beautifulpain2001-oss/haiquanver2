@@ -197,9 +197,9 @@ def test_reopened_record_updates_same_record_even_if_date_changed(store, lot):
 # ---------------------------------------------------------------- nạp dữ liệu học
 def test_import_learned_adds_skips_existing_and_persists(store, data_dir):
     data = {"item_mem": {"Mặt hàng A": {"div": 50, "kg": 0.09, "hs": ""}, "Mặt hàng B": {"div": 10}}}
-    assert store.import_learned(data) == {"them": 2, "ghi_de": 0, "bo_qua": 0}
+    assert store.import_learned(data) == {"them": 2, "ghi_de": 0, "bo_qua": 0, "khach": ""}
     store.item_mem["Mặt hàng A"]["div"] = 25  # người dùng tự sửa
-    assert store.import_learned(data) == {"them": 0, "ghi_de": 0, "bo_qua": 2}
+    assert store.import_learned(data) == {"them": 0, "ghi_de": 0, "bo_qua": 2, "khach": ""}
     assert store.item_mem["Mặt hàng A"]["div"] == 25  # không bị ghi đè
     assert store.import_learned(data, overwrite=True)["ghi_de"] == 2
     again = app.DedicatedDataStore(base_dir=str(data_dir))
@@ -211,3 +211,15 @@ def test_import_learned_rejects_wrong_files(store):
         store.import_learned({"khac": 1})
     with pytest.raises(ValueError, match="không phải số"):
         store.import_learned({"item_mem": {"X": {"div": "abc"}}})
+
+
+def test_import_learned_adds_customer_with_items(store, data_dir):
+    cust = {"key": "kh_gia", "profile": {"docSet": "best", "name": "CÔNG TY GIẢ", "addr": "Địa chỉ giả", "label": "Giả"},
+            "items": [{"name": "Ống giả 40 x 4 x 1000mm", "code": "VN9990001", "price": 1000, "kg": 0.5, "div": 20, "hs": "48229090"}]}
+    res = store.import_learned({"khach_moi": cust})
+    assert res["khach"] == "kh_gia" and "kh_gia" in app.PROFILES and app.is_best_docset(app.PROFILES["kh_gia"])
+    assert store.items_for_customer("kh_gia")[0]["code"] == "VN9990001"
+    assert store.import_learned({"khach_moi": dict(cust, profile={"name": "SỬA"})})["khach"] == ""  # có rồi: giữ nguyên
+    assert app.PROFILES["kh_gia"]["name"] == "CÔNG TY GIẢ"
+    again = app.DedicatedDataStore(base_dir=str(data_dir))
+    assert "kh_gia" in again.custom_profiles

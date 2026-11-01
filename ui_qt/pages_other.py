@@ -637,7 +637,10 @@ class SettingsPage(_Page):
         except (ValueError, OSError) as e:  # json lỗi cũng là ValueError
             widgets.warn(self, "Chưa nạp được dữ liệu học", str(e))
             return
-        self.learn_msg.setText(f"✅  Đã thêm {res['them']} mặt hàng; bỏ qua {res['bo_qua']} mặt hàng đã có định mức.")
+        kh = f" Đã thêm khách hàng “{res['khach']}”." if res.get("khach") else ""
+        self.learn_msg.setText(f"✅ {kh} Đã thêm {res['them']} mặt hàng; bỏ qua {res['bo_qua']} mặt hàng đã có định mức.")
+        if res.get("khach"):
+            self.data_changed.emit()
 
     def change_dir(self):
         d = QFileDialog.getExistingDirectory(self, "Chọn thư mục lưu dữ liệu")
