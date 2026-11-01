@@ -5948,10 +5948,14 @@ if __name__ == "__main__":
             sys.exit(1)
         sys.exit(0)
     store = DedicatedDataStore()
-    if "--giao-dien-moi" in sys.argv:
-        # Giao diện mới (PySide6); bản Tkinter cũ vẫn là mặc định cho tới khi người dùng xác nhận bản mới
-        from ui_qt.main_window import run as run_qt
-        sys.exit(run_qt(sys.modules[__name__], store, smoke="--gui-smoke" in sys.argv))
+    if "--giao-dien-cu" not in sys.argv:
+        # Giao diện mới (PySide6) là mặc định. Giao diện Tkinter cũ chỉ mở khi cần: --giao-dien-cu (file MO_GIAO_DIEN_CU.bat)
+        try:
+            from ui_qt.main_window import run as run_qt
+        except ImportError:
+            run_qt = None  # thiếu PySide6 (chạy từ mã nguồn): dùng giao diện cũ
+        if run_qt:
+            sys.exit(run_qt(sys.modules[__name__], store, smoke="--gui-smoke" in sys.argv))
     root = tk.Tk()
     app = HongThienCustomsDesktopApp(root, store)
     if "--gui-smoke" in sys.argv:
