@@ -4836,6 +4836,10 @@ if __name__ == "__main__":
             sys.exit(1)
         sys.exit(0)
     store = DedicatedDataStore()
+    if "--giao-dien-moi" in sys.argv:
+        # Giao diện mới (PySide6); bản Tkinter cũ vẫn là mặc định cho tới khi người dùng xác nhận bản mới
+        from ui_qt.main_window import run as run_qt
+        sys.exit(run_qt(sys.modules[__name__], store, smoke="--gui-smoke" in sys.argv))
     root = tk.Tk()
     app = HongThienCustomsDesktopApp(root, store)
     if "--gui-smoke" in sys.argv:
