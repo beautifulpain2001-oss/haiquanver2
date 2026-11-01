@@ -133,7 +133,7 @@ class Lot:
         if not self.customer:
             return ["Chưa chọn khách hàng."], warns
         if not self.items:
-            return ["Chưa có dòng hàng nào. Hãy nạp file PO hoặc thêm dòng ở bước ②."], warns
+            return ["Chưa có dòng hàng nào. Hãy nạp file PO ở bước ② hoặc thêm dòng ở bước ③."], warns
         if not str(self.form.get("po", "")).strip():
             warns.append("Chưa nhập số PO.")
         if not str(self.form.get("pxk", "")).strip():

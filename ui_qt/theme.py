@@ -59,4 +59,7 @@ QTabBar::tab:selected {{ background: {NAVY}; color: #FFFFFF; }}
 QFrame#textcard {{ background: #FFFFFF; border: 1px solid {LINE}; border-radius: 6px; }}
 QScrollArea {{ background: transparent; border: none; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}
+QListWidget::item {{ padding: 9px 10px; }}
+QListWidget::item:selected {{ background: #BEE3F8; color: {TEXT}; }}
+QTableWidget QPushButton {{ padding: 5px 10px; }}
 """

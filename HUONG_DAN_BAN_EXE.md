@@ -45,6 +45,9 @@ PHẦN MỀM HỒ SƠ HẢI QUAN HỒNG THIÊN - BẢN .EXE (KHÔNG CẦN CÀI P
 
 - Bấm đúp `HongThien_HaiQuan_Desktop.exe` mở giao diện cũ như trước.
 - Bấm đúp `MO_GIAO_DIEN_MOI.bat` (cùng thư mục) để mở giao diện mới. Hai giao diện dùng chung thư mục `DATA_LUU_TRU_HONG_THIEN`, hồ sơ làm ở bên nào cũng mở được ở bên kia.
-- Giao diện mới đã làm được chứng từ: ① chọn khách và nạp file PO (kéo thả được) → ② kiểm tra và sửa dòng hàng (dòng thiếu thông tin tô vàng) → ③ nhập số PXK, hóa đơn, xe, tài xế → ④ kiểm tra (hiện đủ từng cảnh báo, tự xuống dòng), xuất trọn bộ — mỗi chứng từ một file Excel riêng, kèm file KiemTraCheo — hoặc chỉ xuất từng file, rồi lưu hồ sơ. Mục "Hồ sơ đã lưu" để mở lại lô cũ làm tiếp.
+- Giao diện mới làm chứng từ theo 5 bước: ① chọn khách hàng → ② nạp file PO (kéo thả được) → ③ kiểm tra và sửa dòng hàng (dòng thiếu thông tin tô vàng) → ④ nhập số PXK, hóa đơn, xe, tài xế → ⑤ kiểm tra (hiện đủ từng cảnh báo), xuất trọn bộ (mỗi chứng từ một file Excel riêng, kèm file KiemTraCheo) hoặc chỉ xuất từng file, rồi lưu hồ sơ.
+- **Danh mục** có hai cách xem hồ sơ: *theo tháng* (mặc định là tháng hiện tại, có mũi tên chuyển tháng) và *theo khách hàng* (bấm tên khách để xem các tờ khai đã khai, kèm nút mở thư mục hồ sơ trên máy). Hai bảng cân nặng và mã ERP vẫn ở cùng mục.
+- **Cài đặt**: sửa thông tin công ty (tên, mã số thuế, địa chỉ, tài khoản ngân hàng…) — được in lên hóa đơn, phiếu xuất kho, invoice, đề nghị thanh toán, tờ khai. Đổi thư mục lưu dữ liệu.
+- **Khách hàng**: sửa tên, mã số thuế, địa chỉ, email, lái xe, biển số xe của từng khách; thêm khách mới (chỉ thông tin hành chính).
 - Chưa có ở giao diện mới (vẫn dùng giao diện cũ): thêm khách mới từ chứng từ mẫu, nạp danh mục ERP từ Excel, nạp file chứng từ vào 6 ô lưu trữ (Bước 2 cũ), nạp lô mẫu Tesa 3010/2010.
 - Lỗi của giao diện mới được ghi vào `LOI_PHAN_MEM.txt` cạnh file .exe.

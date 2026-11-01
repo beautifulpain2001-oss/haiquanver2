@@ -8,6 +8,7 @@ import traceback
 from PySide6.QtCore import QThread, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QMessageBox
+from shiboken6 import isValid
 
 
 class Job(QThread):
@@ -28,14 +29,28 @@ class Job(QThread):
             self.failed.emit(str(e) or e.__class__.__name__)
 
 
-def run_job(owner, fn, on_done, on_failed):
+_JOBS = set()
+
+
+def run_job(owner, fn, on_done, on_failed=None):
     """Giữ tham chiếu tới luồng trong `owner` để không bị dọn mất khi đang chạy."""
     job = Job(fn, owner)
     owner._job = job
+    _JOBS.add(job)
+    job.finished.connect(lambda j=job: _JOBS.discard(j))
     job.done.connect(on_done)
-    job.failed.connect(on_failed)
+    job.failed.connect(on_failed or (lambda _msg: None))
     job.start()
     return job
+
+
+def wait_jobs(ms=5000):
+    """Chờ các việc nền xong (gọi khi đóng cửa sổ để luồng không bị hủy giữa chừng)."""
+    for j in list(_JOBS):
+        if not isValid(j):  # luồng đã bị Qt hủy cùng cửa sổ chủ: bỏ qua
+            _JOBS.discard(j)
+            continue
+        j.wait(ms)
 
 
 # Tách ra hàm riêng để test thay thế được (không bật hộp thoại chặn trong test)

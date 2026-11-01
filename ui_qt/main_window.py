@@ -8,7 +8,7 @@ import traceback
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QListWidget, QMainWindow, QMessageBox, QStackedWidget, QVBoxLayout, QWidget
 
-from . import theme
+from . import theme, widgets
 from .pages_lot import STEPS, LotPage  # noqa: F401 - STEPS giữ ở đây cho code/test cũ
 from .pages_other import CatalogPage, CustomersPage, RecordsPage, SettingsPage
 
@@ -51,6 +51,9 @@ class MainWindow(QMainWindow):
         self.lot.saved.connect(self.records.refresh)
         self.records.open_record.connect(self.open_record)
         self.settings.data_changed.connect(self.lot.start_new)
+        self.customers.changed.connect(self.lot.step1.refresh)
+        # Kiểm tra OCR chạy chương trình Tesseract (chậm): làm sẵn ở nền ngay khi mở để trang Cài đặt hiện tức thì
+        widgets.run_job(self, core.ocr_available, lambda _ok: None)
 
         root = QWidget()
         lay = QHBoxLayout(root)
@@ -60,6 +63,10 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.pages, 1)
         self.setCentralWidget(root)
         self.nav.setCurrentRow(0)
+
+    def closeEvent(self, e):
+        widgets.wait_jobs()  # đợi việc nền xong, tránh hủy luồng giữa chừng
+        super().closeEvent(e)
 
     def show_page(self, i):
         self.pages.setCurrentIndex(i)

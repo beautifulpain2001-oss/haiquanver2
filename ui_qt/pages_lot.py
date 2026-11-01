@@ -1,4 +1,4 @@
-"""Trang "Làm chứng từ": 4 bước ① Chọn khách & nạp PO → ② Kiểm tra dòng hàng → ③ Thông tin chuyến hàng → ④ Xuất & lưu."""
+"""Trang "Làm chứng từ": 5 bước ① Chọn khách hàng → ② Nạp file PO → ③ Kiểm tra dòng hàng → ④ Thông tin chuyến hàng → ⑤ Xuất & lưu."""
 
 import html
 
@@ -15,10 +15,7 @@ from . import theme, widgets
 from .dialogs import ItemDialog
 from .state import Lot
 
-STEPS = ["① Chọn khách & nạp PO", "② Kiểm tra dòng hàng", "③ Thông tin chuyến hàng", "④ Xuất & lưu hồ sơ"]
-PO_FILTER = "File PO (*.pdf *.xlsx *.xls *.png *.jpg *.jpeg *.tif *.tiff *.txt)"
-
-
+STEPS = ["① Chọn khách hàng", "② Nạp file PO", "③ Kiểm tra dòng hàng", "④ Thông tin chuyến hàng", "⑤ Xuất & lưu hồ sơ"]
 def _label(text, name=None, wrap=False):
     lb = QLabel(text)
     if name:
@@ -57,8 +54,87 @@ class StepBar(QWidget):
             lb.style().polish(lb)
 
 
-# --------------------------------------------------------------------------- ① khách + PO
+# --------------------------------------------------------------------------- ① chọn khách
+KIND = {"shirai": "PO dạng Excel", "kodi": "PO dạng PDF hoặc ảnh scan", "tesa": "PO PDF nhiều trang"}
+
+
 class CustomerStep(QWidget):
+    changed = Signal()
+
+    def __init__(self, lot: Lot):
+        super().__init__()
+        self.setObjectName("inner")
+        self.lot = lot
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(28, 24, 28, 24)
+        lay.setSpacing(12)
+        lay.addWidget(_label("Làm chứng từ cho khách hàng nào?", "h2"))
+        self.grid = QGridLayout()
+        self.grid.setSpacing(12)
+        lay.addLayout(self.grid)
+        self.cards = {}
+        self.build_cards()
+        self.info = QFrame()
+        self.info.setObjectName("textcard")
+        il = QVBoxLayout(self.info)
+        il.setContentsMargins(16, 12, 16, 12)
+        il.addWidget(_label("Thông tin khách hàng", "h2"))
+        self.info_text = QLabel()
+        self.info_text.setWordWrap(True)
+        self.info_text.setTextFormat(Qt.RichText)
+        il.addWidget(self.info_text)
+        il.addWidget(_label("Cần sửa tên, mã số thuế, địa chỉ: vào mục “Khách hàng” ở thanh bên trái.", "hint", wrap=True))
+        lay.addWidget(self.info)
+        lay.addStretch(1)
+        self.refresh()
+
+    @property
+    def customer(self):
+        return self.lot.customer
+
+    def build_cards(self):
+        for b in self.cards.values():
+            self.grid.removeWidget(b)
+            b.deleteLater()
+        self.cards = {}
+        for i, (key, prof) in enumerate(self.lot.core.PROFILES.items()):
+            b = QPushButton(f"{prof.get('label') or key}\n{KIND.get(key, 'Khách đã học')}")
+            b.setObjectName("cust")
+            b.setCheckable(True)
+            b.setMinimumHeight(64)
+            b.clicked.connect(lambda _=False, k=key: self.pick(k))
+            self.cards[key] = b
+            self.grid.addWidget(b, i // 3, i % 3)
+
+    def refresh(self):
+        profiles = self.lot.core.PROFILES
+        if set(self.cards) != set(profiles) or any(not b.text().startswith(str(profiles[k].get("label") or k)) for k, b in self.cards.items()):
+            self.build_cards()  # khách mới thêm hoặc đổi tên gọi ở mục Khách hàng
+        c = self.lot.customer
+        for k, b in self.cards.items():
+            b.setChecked(k == c)
+        self.info.setVisible(bool(c))
+        if c:
+            p = profiles[c]
+            rows = [("Tên công ty", p.get("name")), ("Mã số thuế", p.get("mst")), ("Địa chỉ", p.get("addr")),
+                    ("Kho nhận hàng", p.get("addrKho")), ("Lái xe", p.get("driver")), ("Biển số xe", p.get("xe"))]
+            self.info_text.setText("".join(f'<p style="margin:2px 0"><b>{html.escape(k)}:</b> {html.escape(str(v or "(chưa nhập)"))}</p>' for k, v in rows))
+
+    def pick(self, key):
+        if key != self.lot.customer and self.lot.items and not widgets.ask(
+                self, "Đổi khách hàng", "Đổi khách sẽ bỏ các dòng hàng đang làm. Bạn có chắc không?"):
+            self.refresh()
+            return
+        self.lot.select_customer(key)
+        self.refresh()
+        self.changed.emit()
+
+
+# --------------------------------------------------------------------------- ② nạp PO
+PO_FILTER = "File PO (*.pdf *.xlsx *.xls *.png *.jpg *.jpeg *.tif *.tiff *.txt)"
+
+
+class PoStep(QWidget):
     changed = Signal()
 
     def __init__(self, lot: Lot):
@@ -69,23 +145,9 @@ class CustomerStep(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(28, 24, 28, 24)
         lay.setSpacing(12)
-        lay.addWidget(_label("Khách hàng nào?", "h2"))
-        grid = QGridLayout()
-        grid.setSpacing(12)
-        self.cards = {}
-        core = lot.core
-        for i, (key, prof) in enumerate(core.PROFILES.items()):
-            kind = {"shirai": "PO dạng Excel", "kodi": "PO dạng PDF hoặc ảnh scan", "tesa": "PO PDF nhiều trang"}.get(key, "Khách đã học")
-            b = QPushButton(f"{prof.get('label') or key}\n{kind}")
-            b.setObjectName("cust")
-            b.setCheckable(True)
-            b.setMinimumHeight(64)
-            b.clicked.connect(lambda _=False, k=key: self.pick(k))
-            self.cards[key] = b
-            grid.addWidget(b, i // 3, i % 3)
-        lay.addLayout(grid)
-
-        lay.addWidget(_label("File PO của khách", "h2"))
+        self.who = _label("", "h2", wrap=True)
+        lay.addWidget(self.who)
+        lay.addWidget(_label("Chọn file PO của khách", "h2"))
         row = QHBoxLayout()
         self.drop = QPushButton("📂  Bấm để chọn file PO (hoặc kéo thả file vào đây)")
         self.drop.setObjectName("drop")
@@ -96,7 +158,6 @@ class CustomerStep(QWidget):
         self.add_po.clicked.connect(lambda: self.choose_file(True))
         row.addWidget(self.add_po)
         lay.addLayout(row)
-
         self.busy = QProgressBar()
         self.busy.setRange(0, 0)
         self.busy.setTextVisible(False)
@@ -105,7 +166,6 @@ class CustomerStep(QWidget):
         lay.addWidget(self.busy)
         self.status = _label("", "hint", wrap=True)
         lay.addWidget(self.status)
-
         sched = QHBoxLayout()
         self.sched_lbl = _label("Đợt giao hàng:")
         self.sched = QComboBox()
@@ -114,18 +174,14 @@ class CustomerStep(QWidget):
         sched.addWidget(self.sched)
         sched.addStretch(1)
         lay.addLayout(sched)
+        lay.addWidget(_label("Không có file PO? Bấm “Tiếp tục” rồi thêm dòng hàng bằng tay ở bước ③.", "hint", wrap=True))
         lay.addStretch(1)
         self.refresh()
 
-    @property
-    def customer(self):
-        return self.lot.customer
-
     def refresh(self):
         c = self.lot.customer
-        for k, b in self.cards.items():
-            b.setChecked(k == c)
-        self.drop.setEnabled(bool(c))
+        self.who.setText(f"Khách hàng: {self.lot.profile.get('label') or c} — {self.lot.profile.get('name', '')}" if c else "Chưa chọn khách hàng. Bấm “Quay lại” để chọn.")
+        self.drop.setEnabled(bool(c) and not self.busy.isVisible())
         self.add_po.setVisible(self.lot.multi_po)
         has = bool(self.lot.schedules)
         self.sched_lbl.setVisible(has)
@@ -136,18 +192,9 @@ class CustomerStep(QWidget):
             self.sched.addItems(list(self.lot.schedules))
             self.sched.setCurrentText(self.lot.schedule_key)
             self.sched.blockSignals(False)
-        if not c:
-            self.status.setText("Chọn khách hàng trước, rồi chọn file PO.")
-
-    def pick(self, key):
-        if key != self.lot.customer and self.lot.items and not widgets.ask(
-                self, "Đổi khách hàng", "Đổi khách sẽ bỏ các dòng hàng đang làm. Bạn có chắc không?"):
-            self.refresh()
-            return
-        self.lot.select_customer(key)
-        self.set_status("", ok=None)
-        self.refresh()
-        self.changed.emit()
+        if not self.status.text() and c:
+            n = len(self.lot.items)
+            self.set_status(f"Lô đang có {n} dòng hàng." if n else "Chọn file PO để phần mềm tự đọc các dòng hàng.", ok=None)
 
     def choose_file(self, append):
         path, _ = QFileDialog.getOpenFileName(self, "Chọn file PO", "", PO_FILTER)
@@ -156,7 +203,7 @@ class CustomerStep(QWidget):
 
     def load_file(self, path, append=False):
         if not self.lot.customer:
-            widgets.warn(self, "Chưa chọn khách", "Hãy chọn khách hàng trước khi nạp file PO.")
+            widgets.warn(self, "Chưa chọn khách", "Hãy chọn khách hàng ở bước ① trước khi nạp file PO.")
             return
         self.busy.show()
         self.drop.setEnabled(False)
@@ -172,7 +219,7 @@ class CustomerStep(QWidget):
     def on_loaded(self, res):
         self._idle()
         if self.lot.apply_po(res):
-            self.set_status(res["msg"] + " Hãy kiểm tra lại ở bước ②.", ok=True)
+            self.set_status(res["msg"] + " Bấm “Tiếp tục” để kiểm tra các dòng hàng.", ok=True)
         else:
             self.set_status(res["msg"] or "Không đọc được file PO.", ok=False)
         self.refresh()
@@ -238,7 +285,7 @@ class ItemsStep(QWidget):
         self.table.setColumnHidden(0, True)  # STT: không cần để soát số liệu
         self.table.doubleClicked.connect(lambda _i: self.edit())
         lay.addWidget(self.table, 1)
-        self.empty = _label("Chưa có dòng hàng. Quay lại bước ① để nạp file PO, hoặc bấm “Thêm dòng”.", "hint", wrap=True)
+        self.empty = _label("Chưa có dòng hàng. Quay lại bước ② để nạp file PO, hoặc bấm “Thêm dòng”.", "hint", wrap=True)
         lay.addWidget(self.empty)
         self.summary = _label("", "h2")
         lay.addWidget(self.summary)
@@ -516,15 +563,17 @@ class LotPage(QWidget):
         QVBoxLayout(card).addWidget(self.stack)
         lay.addWidget(card, 1)
         self.step1 = CustomerStep(self.lot)
-        self.step2 = ItemsStep(self.lot)
-        self.step3 = InfoStep(self.lot)
-        self.step4 = ExportStep(self.lot)
-        self.steps = [self.step1, self.step2, self.step3, self.step4]
+        self.step2 = PoStep(self.lot)
+        self.step3 = ItemsStep(self.lot)
+        self.step4 = InfoStep(self.lot)
+        self.step5 = ExportStep(self.lot)
+        self.steps = [self.step1, self.step2, self.step3, self.step4, self.step5]
         for s in self.steps:
             self.stack.addWidget(s)
         self.step1.changed.connect(self.refresh_buttons)
-        self.step4.saved.connect(self.saved)
-        self.step4.new_lot.connect(self.start_new)
+        self.step2.changed.connect(self.refresh_buttons)
+        self.step5.saved.connect(self.saved)
+        self.step5.new_lot.connect(self.start_new)
         nav = QHBoxLayout()
         self.back = QPushButton("← Quay lại")
         self.next = QPushButton("Tiếp tục →")
@@ -556,6 +605,6 @@ class LotPage(QWidget):
         self.go(0)
 
     def open_record(self, rec):
-        """Nạp hồ sơ đã lưu để làm tiếp, mở ở bước ② để soát lại dòng hàng."""
+        """Nạp hồ sơ đã lưu để làm tiếp, mở ở bước ③ để soát lại dòng hàng."""
         self.lot.load_record(rec)
-        self.go(1)
+        self.go(2)

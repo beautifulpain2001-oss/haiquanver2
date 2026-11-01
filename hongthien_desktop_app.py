@@ -442,6 +442,8 @@ class DedicatedDataStore:
         self.item_mem = {}
         self.custom_profiles = {}
         self.custom_items = {}
+        self.company = {}  # thông tin công ty người dùng đã sửa (Cài đặt); trống = dùng mặc định
+        self.profile_overrides = {}  # chỗ người dùng đã sửa trên 3 khách có sẵn (mục Khách hàng)
         self.records = []
         self.load_all()
 
@@ -489,9 +491,13 @@ class DedicatedDataStore:
                     self.item_mem = data["item_mem"]
                 self.custom_profiles = data.get("custom_profiles") or {}
                 self.custom_items = data.get("custom_items") or {}
+                self.company = data.get("company_info") or {}
+                self.profile_overrides = data.get("profile_overrides") or {}
             except Exception:
                 pass
         self.register_custom_profiles()
+        apply_company(self.company)  # luôn áp lại: mỗi kho dữ liệu có thông tin công ty riêng
+        apply_profile_overrides(self.profile_overrides)
         self.rebuild_erp_map()
 
         if os.path.exists(self.records_file):
@@ -582,14 +588,73 @@ class DedicatedDataStore:
         self.save_catalog()
         return key
 
+    # ---- Cài đặt công ty / sửa thông tin khách (giao diện mới) ----------------------------
+    def company_info(self):
+        """Thông tin công ty đang dùng (mặc định + phần người dùng đã sửa)."""
+        c = dict(COMPANY_DEFAULTS)
+        c.update(self.company)
+        return c
+
+    def set_company(self, fields):
+        """Lưu thông tin công ty; áp ngay cho mọi mẫu xuất. Ném ValueError (tiếng Việt) nếu nhập sai."""
+        clean = {k: str(fields.get(k, "")).strip() for k, _ in COMPANY_FIELDS}
+        if not clean["name"]:
+            raise ValueError("Tên công ty không được để trống.")
+        if not re.fullmatch(r"\d{10}(-\d{3})?|\d{13}", clean["mst"]):
+            raise ValueError("Mã số thuế gồm 10 chữ số (hoặc 10 số kèm -xxx, hoặc 13 số).")
+        if not clean["addr"]:
+            raise ValueError("Địa chỉ công ty không được để trống.")
+        self.company = clean
+        apply_company(self.company)
+        apply_profile_overrides(self.profile_overrides)
+        self.save_catalog()
+        return self.company_info()
+
+    def update_customer(self, key, fields):
+        """Sửa thông tin khách (tên, MST, địa chỉ…). Khách có sẵn: lưu phần sửa; khách đã học: sửa trong hồ sơ khách."""
+        if key not in PROFILES:
+            raise ValueError("Không tìm thấy khách hàng này.")
+        names = dict(CUSTOMER_FIELDS)
+        clean = {k: str(v).strip() for k, v in fields.items() if k in names}
+        if "name" in clean and not clean["name"]:
+            raise ValueError("Tên công ty của khách không được để trống.")
+        if clean.get("mst") and not re.fullmatch(r"[0-9\-]{10,14}", clean["mst"]):
+            raise ValueError("Mã số thuế gồm 10 đến 14 chữ số (có thể kèm dấu -).")
+        if key in BUILTIN_CUSTOMERS:
+            self.profile_overrides.setdefault(key, {}).update(clean)
+            apply_profile_overrides(self.profile_overrides)
+        else:
+            prof = self.custom_profiles.setdefault(key, {})
+            prof.update(clean)
+            PROFILES[key] = build_custom_profile(key, prof)
+            apply_company_exporter()
+        self.save_catalog()
+        return PROFILES[key]
+
+    def add_customer(self, fields):
+        """Thêm khách mới chỉ với thông tin hành chính (chưa có danh mục hàng). Trả mã khách."""
+        name = str(fields.get("name", "")).strip()
+        if not name:
+            raise ValueError("Hãy nhập tên công ty của khách.")
+        if fields.get("mst") and not re.fullmatch(r"[0-9\-]{10,14}", str(fields["mst"]).strip()):
+            raise ValueError("Mã số thuế gồm 10 đến 14 chữ số (có thể kèm dấu -).")
+        key = customer_key_from_name(name, taken=set(PROFILES))
+        prof = {k: str(v).strip() for k, v in fields.items() if k in dict(CUSTOMER_FIELDS) and str(v).strip()}
+        prof.setdefault("label", name.split()[-1].capitalize() if name.split() else key.capitalize())
+        self.save_learned_customer(key, prof, [])
+        apply_company_exporter()
+        return key
+
     def save_catalog(self):
         try:
             with open(self.catalog_file, "w", encoding="utf-8") as f:
                 json.dump(
                     {
-                        "company": "CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN",
+                        "company": HT_NAME,
                         "address": ADDR_HT,
                         "tax_code": MST_HT,
+                        "company_info": self.company,
+                        "profile_overrides": self.profile_overrides,
                         "weights_db": self.weights_db,
                         "erp_catalog": self.erp_catalog,
                         "kodi_items": self.kodi_items,
@@ -1727,11 +1792,11 @@ def build_plx_sheet(wb, rec, sheet_name="PLX"):
     put("A2", "A2:E2", "BẢN KHAI BÁO XUẤT XỨ CỦA NHÀ SẢN XUẤT/NHÀ CUNG CẤP NGUYÊN LIỆU TRONG NƯỚC", 11, True)
     put("A3", "A3:E3", "(ban hành kèm theo Thông tư số 05/2018/TT-BCT ngày 03 tháng 4 năm 2018  quy định về xuất xứ hàng hóa)", 12, italic=True)
     put("A4", None, f"                                                   Số:     {no} ngày {d_short}", 13, italic=True, align_h="left")
-    put("A5", None, "Tên nhà sản xuất: CÔNG TY CỔ PHẦN GIẤY  BAO BÌ HỒNG THIÊN", 13, align_h="left")
+    put("A5", None, f"Tên nhà sản xuất: {HT_NAME}", 13, align_h="left")
     put("A6", None, f"Mã số Doanh nghiệp : {MST_HT}", 13, align_h="left")
     put("A7", None, "Số lượng hàng hóa: ", 13, align_h="left")
     put("A8", None, "Trị giá hàng hóa (FOB):        ", 13, align_h="left")
-    put("A9", "A9:E9", f"Hóa đơn giá trị gia tăng số:  {no} ngày {d_short} CÔNG TY CỔ PHẦN GIẤY  BAO BÌ HỒNG THIÊN xác nhận rằng nguyên liệu/hàng hóa (1) có tên sau:  ", 13, align_h="left")
+    put("A9", "A9:E9", f"Hóa đơn giá trị gia tăng số:  {no} ngày {d_short} {HT_NAME} xác nhận rằng nguyên liệu/hàng hóa (1) có tên sau:  ", 13, align_h="left")
     ws.row_dimensions[9].height = 41.25
 
     hr = 11
@@ -2449,7 +2514,7 @@ def build_dccn_best_sheet(wb, rec, sheet_name="DCCN"):
     put(f"A{r + 3}", f"A{r + 3}:H{r + 3}", f"Địa chỉ trụ sở chính地址：{ADDR_HT}", 11, wrap=True)
     put(f"A{r + 4}", f"A{r + 4}:H{r + 4}", f"Số tài khoản账号：{HT_BANK_ACC}", 11)
     put(f"A{r + 5}", f"A{r + 5}:H{r + 5}", f"tại Ngân hàng 开户行:  {HT_BANK_AT}", 11)
-    put(f"A{r + 6}", f"A{r + 6}:H{r + 6}", "Đơn vị  hưởng thụ 收款单位名称：CT CỔ PHẦN GIẤY  BAO BÌ HỒNG THIÊN", 11)
+    put(f"A{r + 6}", f"A{r + 6}:H{r + 6}", f"Đơn vị  hưởng thụ 收款单位名称：{HT_NAME_SHORT}", 11)
     put(f"A{r + 7}", f"A{r + 7}:H{r + 7}", f"Swift code: {HT_SWIFT}", 11)
     put(f"I{r + 1}", f"I{r + 1}:K{r + 1}", "供货方/Nhà cung cấp ：", 11)
     put(f"I{r + 2}", f"I{r + 2}:K{r + 3}", "对账人 ：\nNgười đối chiếu", 11, wrap=True, valign="top")
