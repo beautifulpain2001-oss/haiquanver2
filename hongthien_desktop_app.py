@@ -3408,6 +3408,149 @@ def lot_save_workbench(store, rec):
     return dest_dir
 
 
+def lot_defaults(customer):
+    """Giá trị mặc định các ô nhập khi chọn khách (xe, tài xế, bì, hạn thanh toán…)."""
+    prof = PROFILES.get(customer, PROFILES["shirai"])
+    if customer in BUILTIN_CUSTOMERS:
+        tare = "0.0" if customer == "tesa" else ("0.02" if customer == "shirai" else "1.0")
+    else:
+        tare = str(prof.get("tare", 0.0))
+    return {
+        "xe": prof["xe"], "driver": prof["driver"], "ldd": prof["lenhSeq"], "tare": tare,
+        "pay_days": str(prof.get("payDays", 30)), "delivery": "", "luong": "Xanh",
+    }
+
+
+def lot_load_po(store, path, customer, tare_text="", existing_items=None, append=False, po_dates=None):
+    """Đọc file PO của khách `customer` (offline). Không đụng giao diện.
+
+    Trả dict: ok, msg (tiếng Việt), customer (có thể đổi theo nhận dạng file), po, po_date, po_dates,
+    items, và với Shirai: schedules {khóa: {dateStr, items}}, schedule_key, doc_date.
+    Ném ValueError khi yêu cầu không hợp lệ (vd gộp PO cho khách có sẵn).
+    """
+    existing_items = list(existing_items or [])
+    po_dates = dict(po_dates or {})
+    res = {"ok": False, "msg": "", "customer": customer, "po": "", "po_date": "", "po_dates": po_dates,
+           "items": existing_items, "schedules": None, "schedule_key": "", "doc_date": ""}
+    if append and customer in BUILTIN_CUSTOMERS:
+        raise ValueError("Gộp nhiều PO vào một lô dùng cho khách đã học (VD Best). Shirai/Kodi/Tesa giữ cách quét cũ.")
+    ext = os.path.splitext(path)[1].lower()
+
+    if customer not in BUILTIN_CUSTOMERS:
+        prof = PROFILES[customer]
+        try:
+            tare_v = float(tare_text or 0.0)
+        except Exception:
+            tare_v = 0.0
+        po_no, po_date, lines = parse_generic_po_text(read_document_text(path), prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
+        if not lines:
+            res["msg"] = "Không tìm thấy dòng hàng nào khớp mã/tên hàng đã học. Hãy thêm dòng trực tiếp, hoặc nạp thêm chứng từ mẫu cho khách này."
+            return res
+        if append and existing_items:
+            if po_no and po_no in {str(x.get("po") or "") for x in existing_items}:
+                res["msg"] = f"PO {po_no} đã có trong lô này, không gộp lần nữa."
+                return res
+            items = existing_items + lines
+        else:
+            items, po_dates = lines, {}
+            if po_date:
+                res["po_date"] = po_date
+        if po_no:
+            po_dates[po_no] = po_date or po_dates.get(po_no, "")
+        pos = []
+        for x in items:
+            p = str(x.get("po") or "")
+            if p and p not in pos:
+                pos.append(p)
+        res.update(ok=True, items=items, po_dates=po_dates, po=" + ".join(pos) if pos else po_no)
+        res["msg"] = (f"Đã gộp PO {po_no} ({len(lines)} dòng) vào lô: {len(pos)} PO, {len(items)} dòng."
+                      if append else f"Đã đọc PO {po_no or '(chưa rõ số)'} gồm {len(lines)} dòng hàng.")
+        return res
+
+    if ext in (".xlsx", ".xls"):
+        po_no, schedules = parse_shirai_po_excel(path, store)
+        if schedules:
+            keys = list(schedules.keys())
+            res.update(ok=True, customer="shirai", po=po_no, schedules=schedules, schedule_key=keys[0],
+                       items=schedules[keys[0]]["items"], doc_date=schedules[keys[0]].get("dateStr", ""),
+                       msg=f"Đã bóc tách PO {po_no} gồm {len(keys)} đợt giao hàng ({', '.join(keys)}).")
+            return res
+
+    raw_txt = extract_text_from_pdf_or_image_offline(path, is_tesa=(customer == "tesa"))
+    if customer == "tesa" or "8600" in raw_txt:
+        po_no, lines = parse_tesa_po_text(raw_txt, store.tesa_items, data_store=store)
+        if lines:
+            res.update(ok=True, customer="tesa", items=lines, po=f"{po_no}.. ({len(lines)} PO)" if len(lines) > 1 else po_no,
+                       msg=f"Đã đọc {len(lines)} PO Tesa từ trang chẵn hoàn toàn offline.")
+            return res
+    try:
+        tare_v = float(tare_text or 1.0)
+    except Exception:
+        tare_v = 1.0
+    po_no, po_date, lines = parse_kodi_po_text(raw_txt, store.kodi_items, data_store=store, tare_val=tare_v)
+    if lines:
+        res.update(ok=True, customer="kodi", items=lines, po=po_no or "", po_date=po_date or "",
+                   msg=f"Đã bóc tách PO {po_no} ({len(lines)} dòng hàng) hoàn toàn offline.")
+        return res
+    res["msg"] = ("Không tìm thấy dòng hàng trong file (kể cả sau khi OCR ảnh scan). Bản scan có thể mờ/nghiêng; bạn có thể thêm dòng trực tiếp."
+                  if ocr_available() else
+                  "File PDF là ảnh scan chưa có lớp chữ nhúng và máy chưa có bộ OCR (thư mục Tesseract-OCR cạnh file .exe). Bạn có thể thêm dòng trực tiếp.")
+    return res
+
+
+def lot_item_defaults(customer, po="", tare_text="1.0"):
+    """Dòng hàng trống để người dùng điền khi bấm 'Thêm dòng'."""
+    prof = PROFILES[customer]
+    try:
+        tare = float(tare_text or 1.0)
+    except Exception:
+        tare = 1.0
+    return {"po": po, "hs": "48229090", "ma_sp": "", "ten_sp": "", "unit": prof["unit"], "qty": 1000, "price": 0,
+            "div": prof.get("defaultDiv") or 0, "kg": 0, "tare": tare}
+
+
+def lot_lookup_code(store, customer, code):
+    """Tra mã hàng trong danh mục Tesa / khách đã học; trả dict điền sẵn (tên, HS, ĐVT, giá, SL/kiện, kg) hoặc None."""
+    code = (code or "").strip()
+    hit = next((x for x in store.tesa_items + store.custom_items.get(customer, []) if code and x.get("code") == code), None)
+    if not hit:
+        return None
+    mem = store.get_item_norm(hit["name"])
+    return {"ten_sp": hit["name"], "hs": hit.get("hs", "48229090"), "unit": hit.get("unit", "ống"),
+            "price": hit.get("price", 0), "div": mem["div"] if mem else hit.get("div", 0), "kg": mem["kg"] if mem else hit.get("kg", 0)}
+
+
+def lot_item_from_values(store, customer, vals, tare_text="1.0", base=None):
+    """Dựng một dòng hàng từ các ô nhập `vals` (chuỗi), tính kiện/tịnh/cả bì và NHỚ định mức cho lần sau.
+    `base`: dòng cũ khi sửa (giữ các trường không có ô nhập). Ném ValueError nếu số không hợp lệ."""
+    g = lambda k: str(vals.get(k) or "").strip()
+    try:
+        qty, price, div, kg = (float(g(k).replace(",", "") or 0) for k in ("qty", "price", "div", "kg"))
+        tare_v = float(tare_text or 1.0)
+    except ValueError:
+        raise ValueError("Số lượng, đơn giá, SL/kiện và kg/chiếc phải là số.")
+    if not g("ten_sp"):
+        raise ValueError("Chưa nhập tên hàng hóa.")
+    best = is_best_docset(PROFILES[customer])
+    name, hs, code = g("ten_sp"), g("hs"), g("ma_sp")
+    kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
+    net = round(qty * kg, 2) if kg > 0 else 0.0
+    gross = round(net + tare_v, 2) if net > 0 else 0.0
+    store.remember_item_norm(name, div, kg, hs)
+    if customer not in BUILTIN_CUSTOMERS:
+        store.remember_item_refs(customer, name, {"code": code, **{k: g(k) for k in ("inquiry", "customsNo") if k in vals}})
+    hit = next((x for x in store.tesa_items if x["name"] == name or x["code"] == code), None)
+    item = dict(base) if base else {}
+    item.update({k: g(k) for k in ("inquiry", "customsNo") if k in vals})
+    if best and not item.get("dept"):
+        item["dept"] = PROFILES[customer].get("dept", "")
+    num = lambda v: int(v) if v == int(v) else v
+    item.update({"po": g("po"), "hs": hs, "ma_sp": code, "ten_sp": name, "ten_hq": (hit.get("ten_hq") if hit else "") or name,
+                 "unit": g("unit"), "qty": num(qty), "price": num(price), "amount": round(qty * price), "div": div,
+                 "kg": kg, "kien": kien, "net": net, "gross": gross, "tare": tare_v})
+    return item
+
+
 class HongThienCustomsDesktopApp:
     def __init__(self, root, data_store):
         self.root = root

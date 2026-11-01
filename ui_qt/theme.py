@@ -37,4 +37,23 @@ QPushButton#cust:checked {{ border-color: {NAVY}; background: #EBF4FF; font-weig
 QPushButton#drop {{ background: #FAFBFD; color: {NAVY}; border: 2px dashed {LINE}; border-radius: 10px; padding: 28px; font-size: 12pt; }}
 QPushButton#drop:hover {{ border-color: {NAVY}; background: #EBF4FF; }}
 QLabel#h2 {{ font-size: 12pt; font-weight: 600; color: {NAVY}; }}
+QPushButton#sec {{ background: #EDF2F7; color: {NAVY}; border: 1px solid {LINE}; }}
+QPushButton#sec:hover {{ background: #E2E8F0; }}
+QPushButton#sec:disabled {{ background: #F7FAFC; color: #A0AEC0; }}
+QPushButton#big {{ background: #2F855A; font-size: 13pt; font-weight: 600; padding: 16px; border-radius: 8px; }}
+QPushButton#big:hover {{ background: #276749; }}
+QPushButton#big:disabled {{ background: {LINE}; }}
+QGroupBox {{ border: 1px solid {LINE}; border-radius: 8px; margin-top: 12px; padding: 14px 12px 10px 12px; font-weight: 600; color: {NAVY}; }}
+QGroupBox::title {{ subcontrol-origin: margin; left: 12px; padding: 0 6px; }}
+QLineEdit, QComboBox {{ background: #FFFFFF; border: 1px solid {LINE}; border-radius: 6px; padding: 6px 8px; }}
+QLineEdit:focus, QComboBox:focus {{ border: 1px solid {NAVY}; }}
+QTableWidget {{ font-size: 10pt; background: #FFFFFF; alternate-background-color: #F7FAFC; border: 1px solid {LINE}; border-radius: 6px; gridline-color: #EDF2F7; }}
+QHeaderView::section {{ background: #EDF2F7; color: {NAVY}; font-size: 10pt; font-weight: 600; border: none; border-right: 1px solid {LINE}; padding: 8px 4px; }}
+QTableWidget::item:selected {{ background: #BEE3F8; color: {TEXT}; }}
+QListWidget {{ background: #FFFFFF; border: 1px solid {LINE}; border-radius: 6px; }}
+QProgressBar {{ background: #E2E8F0; border: none; border-radius: 4px; }}
+QProgressBar::chunk {{ background: {NAVY}; border-radius: 4px; }}
+QTabWidget::pane {{ border: 1px solid {LINE}; border-radius: 6px; }}
+QTabBar::tab {{ padding: 8px 16px; background: #EDF2F7; border-top-left-radius: 6px; border-top-right-radius: 6px; margin-right: 2px; }}
+QTabBar::tab:selected {{ background: {NAVY}; color: #FFFFFF; }}
 """

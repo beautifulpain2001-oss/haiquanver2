@@ -1,0 +1,179 @@
+"""Trạng thái một lô hàng đang làm trong giao diện mới. Thuần Python (không Qt) để test được.
+
+Mọi tính toán/đọc/xuất/lưu đều gọi các hàm lot_* của lõi (`core` = hongthien_desktop_app),
+nên giao diện Tkinter cũ và giao diện mới cho kết quả giống hệt nhau.
+"""
+
+import datetime
+
+
+class Lot:
+    def __init__(self, core, store):
+        self.core, self.store = core, store
+        self.reset(None)
+
+    # ---- khởi tạo / đổi khách -------------------------------------------------
+    def reset(self, customer):
+        self.customer = customer
+        self.items = []
+        self.po_dates = {}
+        self.schedules = None
+        self.schedule_key = ""
+        self.exported = {}
+        self.saved = False
+        self.skip_h = False  # Kodi: Invoice không lấy cột Thành Tiền
+        self.form = {"doc_date": datetime.date.today().strftime("%Y-%m-%d"), "po": "", "po_date": "", "pxk": "", "hd": "", "tk": ""}
+        if customer:
+            self.apply_defaults()
+
+    def apply_defaults(self):
+        d = self.core.lot_defaults(self.customer)
+        self.form.update(xe=d["xe"], driver=d["driver"], ldd=d["ldd"], tare=d["tare"], pay_days=d["pay_days"],
+                         delivery=d["delivery"], luong=d["luong"])
+
+    def select_customer(self, customer):
+        if customer != self.customer:
+            self.reset(customer)
+
+    @property
+    def profile(self):
+        return self.core.PROFILES[self.customer]
+
+    @property
+    def is_best(self):
+        return bool(self.customer) and self.core.is_best_docset(self.profile)
+
+    @property
+    def multi_po(self):
+        """Khách gom nhiều PO một lô (khách đã học)."""
+        return bool(self.customer) and self.customer not in self.core.BUILTIN_CUSTOMERS
+
+    # ---- nạp PO ----------------------------------------------------------------
+    def read_po(self, path, append=False):
+        """Đọc PO (chạy được ở luồng nền: không đụng trạng thái). Trả kết quả để `apply_po` áp dụng."""
+        return self.core.lot_load_po(self.store, path, self.customer, self.form.get("tare", ""), self.items, append, self.po_dates)
+
+    def apply_po(self, res):
+        if not res["ok"]:
+            return False
+        if res["customer"] != self.customer:  # app tự nhận ra khách theo nội dung file
+            self.customer = res["customer"]
+            self.apply_defaults()
+        self.items = res["items"]
+        self.po_dates = res["po_dates"]
+        self.form["po"] = res["po"] or self.form["po"]
+        if res["po_date"]:
+            self.form["po_date"] = res["po_date"]
+        if res["schedules"]:
+            self.schedules, self.schedule_key = res["schedules"], res["schedule_key"]
+            if res["doc_date"]:
+                self.form["doc_date"] = res["doc_date"]
+        self.saved = False
+        return True
+
+    def select_schedule(self, key):
+        if self.schedules and key in self.schedules:
+            self.schedule_key = key
+            self.form["doc_date"] = self.schedules[key].get("dateStr", self.form["doc_date"])
+            self.items = [dict(x) for x in self.schedules[key].get("items", [])]
+
+    # ---- dòng hàng -------------------------------------------------------------
+    def new_item_values(self):
+        return self.core.lot_item_defaults(self.customer, str(self.form.get("po", "")).split(" + ")[-1], self.form.get("tare", ""))
+
+    def save_item(self, vals, idx=None):
+        base = self.items[idx] if idx is not None else None
+        item = self.core.lot_item_from_values(self.store, self.customer, vals, self.form.get("tare", ""), base)
+        if idx is None:
+            self.items.append(item)
+        else:
+            self.items[idx] = item
+        self.saved = False
+        return item
+
+    def delete_item(self, idx):
+        if 0 <= idx < len(self.items):
+            self.items.pop(idx)
+            self.saved = False
+
+    def recalc(self):
+        self.core.lot_recalc(self.items, self.customer, self.form.get("tare", ""))
+        self.saved = False
+
+    def normalize(self):
+        for i, it in enumerate(self.items, 1):
+            it["stt"] = i
+            it["amount"] = round(float(it.get("qty", 0)) * float(it.get("price", 0)))
+
+    def row_issues(self, it):
+        out = []
+        if float(it.get("qty") or 0) <= 0:
+            out.append("Số lượng bằng 0")
+        if float(it.get("kg") or 0) <= 0:
+            out.append("Thiếu kg/chiếc")
+        if float(it.get("div") or 0) <= 0:
+            out.append("Thiếu SL/kiện")
+        if not it.get("hs"):
+            out.append("Thiếu mã HS")
+        return out
+
+    # ---- hồ sơ, kiểm tra, xuất, lưu -------------------------------------------
+    def record(self):
+        self.normalize()
+        form = dict(self.form, customer=self.customer, schedule=self.schedule_key, po_dates=self.po_dates)
+        return self.core.lot_build_record(self.store, form, self.items)
+
+    def totals(self):
+        return self.core.lot_totals(self.record())
+
+    def validate(self):
+        """(lỗi chặn xuất, cảnh báo cho phép xuất), mỗi mục là một câu tiếng Việt."""
+        errors, warns = [], []
+        if not self.customer:
+            return ["Chưa chọn khách hàng."], warns
+        if not self.items:
+            return ["Chưa có dòng hàng nào. Hãy nạp file PO hoặc thêm dòng ở bước ②."], warns
+        if not str(self.form.get("po", "")).strip():
+            warns.append("Chưa nhập số PO.")
+        if not str(self.form.get("pxk", "")).strip():
+            warns.append("Chưa nhập số PXK (file Invoice sẽ dùng số tạm).")
+        warns += [w for w in self.core.check_lot(self.record()) if w not in warns]
+        return errors, warns
+
+    def export(self, mode):
+        rec = self.record()
+        res = self.core.lot_export(self.store, rec, mode, skip_h=self.skip_h)
+        now = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+        entry = {"name": res["fname"], "path": res["path"], "time": now}
+        if mode in ("VAT", "ALL"):
+            self.exported["vat"] = entry
+        if mode in ("PXK", "ALL"):
+            self.exported["pxk"] = entry
+        if mode in ("PKL", "ALL"):
+            self.exported["pkl"] = entry
+        if mode in ("PLX", "ALL") and (self.customer == "tesa" or self.profile.get("customs")):
+            self.exported["tk"] = entry
+        return res
+
+    def save(self):
+        rec = self.core.lot_save_new(self.store, self.record(), self.exported)
+        self.saved = True
+        return rec
+
+    def folder(self):
+        return self.store.get_record_folder_path(self.record())
+
+    def load_record(self, rec):
+        """Nạp hồ sơ đã lưu để làm tiếp."""
+        self.reset(rec.get("customer") or "kodi")
+        g = lambda k, d="": rec.get(k, d) or d
+        self.form.update(doc_date=g("docDate", self.form["doc_date"]), po=g("poNumber"), po_date=g("poDate"), pxk=g("pxkNo"),
+                         hd=g("hdNo"), tk=g("tkNo"), luong=g("luong", "Xanh"), xe=g("xeNo", self.form.get("xe", "")),
+                         driver=g("driver", self.form.get("driver", "")), ldd=g("lddSeq", self.form.get("ldd", "")))
+        if rec.get("payDays"):
+            self.form["pay_days"] = str(rec["payDays"])
+        self.form["delivery"] = g("deliveryDate")
+        self.po_dates = dict(rec.get("poDates") or {})
+        self.items = [dict(x) for x in rec.get("items", [])]
+        self.exported = {k: v for k, v in (rec.get("files") or {}).items() if v}
+        self.saved = True

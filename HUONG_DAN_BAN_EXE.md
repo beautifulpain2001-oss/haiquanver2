@@ -44,5 +44,7 @@ PHẦN MỀM HỒ SƠ HẢI QUAN HỒNG THIÊN - BẢN .EXE (KHÔNG CẦN CÀI P
 ## Giao diện mới (đang thử nghiệm)
 
 - Bấm đúp `HongThien_HaiQuan_Desktop.exe` mở giao diện cũ như trước.
-- Bấm đúp `MO_GIAO_DIEN_MOI.bat` (cùng thư mục) để xem giao diện mới. Bản mới chưa làm được chứng từ thật; vẫn dùng giao diện cũ để làm việc.
-- Hai giao diện dùng chung thư mục `DATA_LUU_TRU_HONG_THIEN`.
+- Bấm đúp `MO_GIAO_DIEN_MOI.bat` (cùng thư mục) để mở giao diện mới. Hai giao diện dùng chung thư mục `DATA_LUU_TRU_HONG_THIEN`, hồ sơ làm ở bên nào cũng mở được ở bên kia.
+- Giao diện mới đã làm được chứng từ: ① chọn khách và nạp file PO (kéo thả được) → ② kiểm tra và sửa dòng hàng (dòng thiếu thông tin tô vàng) → ③ nhập số PXK, hóa đơn, xe, tài xế → ④ kiểm tra, xuất trọn bộ (hoặc từng file) và lưu hồ sơ. Mục "Hồ sơ đã lưu" để mở lại lô cũ làm tiếp.
+- Chưa có ở giao diện mới (vẫn dùng giao diện cũ): thêm khách mới từ chứng từ mẫu, nạp danh mục ERP từ Excel, nạp file chứng từ vào 6 ô lưu trữ (Bước 2 cũ), nạp lô mẫu Tesa 3010/2010.
+- Lỗi của giao diện mới được ghi vào `LOI_PHAN_MEM.txt` cạnh file .exe.
