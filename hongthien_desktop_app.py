@@ -263,6 +263,7 @@ CUSTOMER_FIELDS = [
     ("addrKho", "Địa chỉ kho nhận hàng"), ("emails", "Email nhận hóa đơn (ngăn cách bằng dấu ;)"),
     ("driver", "Lái xe thường dùng"), ("xe", "Biển số xe thường dùng"),
     ("owner", "Nhân viên phụ trách khách này (để trống = ai cũng làm được)"),
+    ("extraDocs", "Chứng từ làm thêm khi xuất trọn bộ (mã PLX, DNTT, B11; cách nhau dấu phẩy)"),
 ]
 
 
@@ -2344,7 +2345,84 @@ def build_dntt_sheet(wb, rec, sheet_name="DNTT"):
     return ws
 
 
+EXTRA_DOC_CODES = ("PLX", "DNTT", "B11")
+
+
+def customer_extra_docs(prof):
+    """Chứng từ làm thêm ngoài bộ mặc định (Invoice + Hóa đơn VAT + Phiếu xuất kho) của khách đã học. Arizon: Phụ lục X."""
+    raw = str((prof or {}).get("extraDocs") or "")
+    codes = [c for c in re.split(r"[,;\s]+", raw.upper()) if c in EXTRA_DOC_CODES]
+    if not codes and "ARIZON" in str((prof or {}).get("name") or "").upper():
+        codes = ["PLX"]
+    return codes
+
+
+def is_arizon_plx(prof):
+    return (prof or {}).get("plxStyle") == "arizon" or "ARIZON" in str((prof or {}).get("name") or "").upper()
+
+
+def build_plx_arizon_sheet(wb, rec, sheet_name="PLX"):
+    """Phụ lục X theo mẫu Arizon: STT | Mã hàng | Tên hàng | Số lượng; tổng SL và trị giá (FOB), số hóa đơn và ngày."""
+    ws = wb.create_sheet(title=sheet_name[:31])
+    d = _iso_to_date(rec.get("docDate"))
+    dmy = _dmy(d)
+    items = rec.get("items", [])
+    unit = str((items[0].get("unit") if items else "") or "chiếc")
+    unit_cap = unit[:1].upper() + unit[1:]
+    for i, w in enumerate([8, 24, 58, 16], 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    def put(addr, rng, val, size=13, bold=False, italic=False, h="left", wrap=True):
+        if rng:
+            ws.merge_cells(rng)
+        c = ws[addr]
+        c.value = val
+        c.font = Font(name="Times New Roman", size=size, bold=bold, italic=italic)
+        c.alignment = Alignment(horizontal=h, vertical="center", wrap_text=wrap)
+        return c
+
+    put("A1", "A1:D1", "PHỤ LỤC X", 14, True, h="center")
+    put("A2", "A2:D2", "BẢN KHAI BÁO XUẤT XỨ CỦA NHÀ SẢN XUẤT/NHÀ CUNG CẤP NGUYÊN LIỆU TRONG NƯỚC", 12, True, h="center")
+    put("A3", "A3:D3", "(ban hành kèm theo Thông tư số 05/2018/TT-BCT ngày 03 tháng 4 năm 2018 quy định về xuất xứ hàng hóa)", 11, italic=True, h="center")
+    put("A4", "A4:D4", f"Tên nhà sản xuất: {HT_NAME}")
+    put("A5", "A5:D5", f"Mã số Doanh nghiệp: {MST_HT}")
+    first, last = 11, 10 + max(len(items), 1)
+    put("A6", "A6:B6", "Số lượng:")
+    put("C6", None, f"=SUM(D{first}:D{last})", 13, True, h="left").number_format = "#,##0"
+    put("D6", None, f"({unit_cap})", 12, h="left")
+    put("A7", "A7:B7", "Trị giá (FOB):")
+    put("C7", None, round(sum(float(x.get("amount") or 0) for x in items)), 13, True, h="left").number_format = "#,##0"
+    put("D7", None, "VNĐ", 12, h="left")
+    put("A8", "A8:D8", f"Hóa đơn giá trị gia tăng: {rec.get('hdNo') or ''} Ngày {dmy}")
+    put("A9", "A9:D9", f"{HT_NAME} xác nhận rằng:")
+    thin = Side(style="thin", color="000000")
+    box = Border(top=thin, bottom=thin, left=thin, right=thin)
+    for col, h in zip("ABCD", ("STT", "Mã hàng", "Tên hàng", "Số lượng")):
+        c = put(f"{col}10", None, h, 13, False, h="center")
+        c.border = box
+    for i, it in enumerate(items):
+        r = first + i
+        for col, v, al in (("A", i + 1, "left"), ("B", str(it.get("ma_sp") or "").strip(), "center"), ("C", str(it.get("ten_sp") or "").strip(), "left"),
+                           ("D", it.get("qty", 0), "right")):
+            c = put(f"{col}{r}", None, v, 12, h=al)
+            c.border = box
+            if col == "D":
+                c.number_format = "#,##0"
+    r = last + 2
+    put(f"A{r}", f"A{r}:D{r}", f"Khai tại văn bản này được sản xuất tại Công ty chúng tôi có địa chỉ tại {ADDR_HT.rstrip('.')}, có xuất xứ việt nam và đáp ứng "
+        "tiêu chí xuất xứ “CTH” theo quy định tại phụ lục I- quy tắc cụ thể mặt hàng ban hành kèm theo thông tư 03/2023/TT-BCT ngày 14 tháng 02 năm 2023")
+    put(f"A{r + 1}", f"A{r + 1}:D{r + 1}", "Công ty cam kết thông tin khai báo trên là đúng và chịu trách nhiệm trước pháp luật về thông tin đã khai.")
+    put(f"B{r + 3}", f"B{r + 3}:D{r + 3}", f"Bắc Ninh, ngày {d.day} tháng {d.month} năm {d.year}", 12, italic=True, h="right")
+    put(f"B{r + 4}", f"B{r + 4}:D{r + 4}", "Người đại diện theo pháp luật của thương nhân", 12, True, h="right")
+    put(f"B{r + 5}", f"B{r + 5}:D{r + 5}", "(Ký, đóng dấu, ghi rõ họ, tên)", 12, italic=True, h="right")
+    ws.row_dimensions[r + 6].height = 70
+    _fit_page(ws, landscape=False)
+    return ws
+
+
 def build_plx_sheet(wb, rec, sheet_name="PLX"):
+    if is_arizon_plx(PROFILES.get(rec.get("customer"), {})):
+        return build_plx_arizon_sheet(wb, rec, sheet_name)
     ws = wb.create_sheet(title=sheet_name[:31])
     dt_parts = (rec.get("docDate") or datetime.date.today().strftime("%Y-%m-%d")).split("-")
     dd, mm, yy = (dt_parts[2], dt_parts[1], dt_parts[0]) if len(dt_parts) == 3 else ("30", "10", "2026")
@@ -3215,6 +3293,15 @@ def build_full_bundle(wb, rec, s_key, skip_h=False):
         build_packing_best_sheet(wb, rec, f"DongGoi_{s_key}")
     build_vat_bkav_sheet(wb, rec, f"VAT_BKAV_{s_key}")
     build_pxk_bkav_sheet(wb, rec, f"PXK_{s_key}")
+    if cust not in BUILTIN_CUSTOMERS and not is_best_docset(prof):  # khách đã học: bộ mặc định + chứng từ làm thêm
+        extra = customer_extra_docs(prof)
+        if "B11" in extra:
+            build_customs_b11_sheet(wb, rec, f"ToKhai_B11_{s_key}")
+        if "PLX" in extra:
+            build_plx_sheet(wb, rec, f"PLX_{s_key}")
+        if "DNTT" in extra:
+            build_dntt_sheet(wb, rec, "DNTT")
+        return wb
     if cust == "tesa":
         build_customs_b11_sheet(wb, rec, f"ToKhai_B11_{s_key}")
         build_plx_sheet(wb, rec, f"PLX_{s_key}")
@@ -4154,10 +4241,13 @@ LOT_MODE_LABELS = {
 
 
 def lot_bundle_modes(rec):
-    """Các chứng từ thuộc 'trọn bộ' của khách (cùng thành phần với build_full_bundle), theo thứ tự làm việc."""
+    """Các chứng từ thuộc 'trọn bộ' của khách (cùng thành phần với build_full_bundle), theo thứ tự làm việc.
+    Khách đã học (không phải Best): mặc định chỉ Invoice + Hóa đơn VAT + Phiếu xuất kho, thêm gì theo mục 'Chứng từ làm thêm' của khách."""
     cust = rec["customer"]
     prof = PROFILES.get(cust, PROFILES["shirai"])
     best = is_best_docset(prof)
+    if cust not in BUILTIN_CUSTOMERS and not best:
+        return ["PKL", "VAT", "PXK"] + customer_extra_docs(prof)
     modes = ["SO"] if cust == "shirai" else []
     modes.append("PKL")
     if best:

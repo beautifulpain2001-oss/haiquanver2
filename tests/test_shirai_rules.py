@@ -241,3 +241,24 @@ def test_best_vat_and_pxk_follow_customer_sample(store):
     assert v.cell(7, 14).value == "Nguyễn Giả" and v.cell(7, 19).value is None and v.cell(7, 13).value is None
     assert v.cell(6, 10).value is None
     assert p.cell(3, 21).value == "Ô tô tải: 99H-000.00" and p.cell(4, 21).value is None
+
+
+def test_learned_customer_default_bundle_and_arizon_plx(store, tmp_path):
+    """Khách đã học: mặc định Invoice + VAT + PXK; Arizon thêm Phụ lục X theo mẫu Arizon; khách cũ giữ nguyên."""
+    import openpyxl
+    store.import_learned({"khach_moi": {"key": "khgia", "profile": {"name": "CÔNG TY GIẢ", "addr": "Địa chỉ giả", "label": "Giả"}, "items": []}})
+    store.import_learned({"khach_moi": {"key": "arz", "profile": {"name": "CÔNG TY TNHH CÔNG NGHỆ ARIZON (VIỆT NAM)", "addr": "Địa chỉ", "label": "Arizon", "unit": "chiếc"}, "items": []}})
+    items = [{"po": "VN-3501-1", "ma_sp": "3609100570001", "ten_sp": "Ống giấy phi 76.2( 3inch) x 5 x 57 mm", "qty": 1000, "price": 2716, "amount": 2716000, "unit": "chiếc"},
+             {"po": "VN-3501-1", "ma_sp": "3609100620001", "ten_sp": "Ống giấy phi 76.2( 3inch) x 5 x62 mm", "qty": 1050, "price": 2954, "amount": 3101700, "unit": "chiếc"}]
+    base = {"docDate": "2026-10-16", "hdNo": "00004113", "pxkNo": "00000292", "items": items, "poNumber": "VN-3501-1", "poDates": {}}
+    assert app.lot_bundle_modes(dict(base, customer="khgia")) == ["PKL", "VAT", "PXK"]
+    assert app.lot_bundle_modes(dict(base, customer="arz")) == ["PKL", "VAT", "PXK", "PLX"]
+    assert "DNTT" in app.lot_bundle_modes(dict(base, customer="kodi")) and "CHECK" in app.lot_bundle_modes(dict(base, customer="tesa"))  # khách cũ giữ nguyên
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    ws = app.build_plx_sheet(wb, dict(base, customer="arz"))
+    cells = {c.coordinate: c.value for row in ws.iter_rows() for c in row if c.value is not None}
+    assert cells["A1"] == "PHỤ LỤC X" and cells["A8"] == "Hóa đơn giá trị gia tăng: 00004113 Ngày 16/10/2026"
+    assert [cells[f"{c}11"] for c in "ABCD"] == [1, "3609100570001", "Ống giấy phi 76.2( 3inch) x 5 x 57 mm", 1000]
+    assert cells["C6"] == "=SUM(D11:D12)" and cells["C7"] == 5817700 and cells["D6"] == "(Chiếc)"
+    assert any("Bắc Ninh, ngày 16 tháng 10 năm 2026" == v for v in cells.values())
