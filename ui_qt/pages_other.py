@@ -90,7 +90,8 @@ class DeclarationsPage(_Page):
         _fill(self.table, rows)
         self.table.setColumnWidth(6, 150)
         for i, o in enumerate(self.shown):
-            tip = "Chứng từ do phần mềm làm: " + (", ".join(o.get("prepared", [])) or "(chưa có)") + "\nFile khác: " + (", ".join(o.get("other", [])) or "(chưa có)")
+            tip = ("Do phần mềm tạo: " + (", ".join(o.get("prepared", [])) or "(chưa có)") + "\nFile bên ngoài: " + (", ".join(o.get("other", [])) or "(chưa có)")
+                   + ("\nCòn thiếu: " + ", ".join(o["missing"]) if o.get("missing") else ""))
             self.table.item(i, 4).setToolTip(tip)
         for i, o in enumerate(self.shown):
             btn = QPushButton("📁  Mở thư mục")
@@ -105,6 +106,164 @@ class DeclarationsPage(_Page):
         rows = self.table.selectionModel().selectedRows()
         if rows and os.path.isdir(self.shown[rows[0].row()]["path"]):
             widgets.open_folder(self.shown[rows[0].row()]["path"])
+
+
+class DataTongPage(_Page):
+    """Data tổng: tên sản phẩm, kg/chiếc, SL/kiện của mọi khách. Lưu ở HAI_QUAN/DATA_TONG.json để mọi máy dùng chung."""
+
+    COLS = ["Khách", "Tên sản phẩm", "Mã hàng", "Mã ERP", "kg/chiếc", "Nguồn kg", "SL/kiện", "Nguồn kiện", "Cập nhật", "Người/máy"]
+    SRC = {"erp": "file ERP", "invoice": "invoice cũ", "tay": "đã xác nhận", "": ""}
+    LIMIT = 3000
+
+    def __init__(self, core, store):
+        super().__init__()
+        self.core, self.store, self.shown, self._loading = core, store, [], False
+        self.lay.addWidget(_head("Data tổng", "")[0])
+        self.info = _head("", "")[1]
+        self.lay.addWidget(self.info)
+        row = QHBoxLayout()
+        b1 = QPushButton("📥  Nạp file ERP (Excel)…")
+        b1.clicked.connect(self.import_erp)
+        b2 = QPushButton("🧾  Học từ invoice cũ…")
+        b2.clicked.connect(self.import_invoices)
+        b3 = QPushButton("📊  Xuất ra Excel…")
+        b3.setObjectName("sec")
+        b3.clicked.connect(self.export_excel)
+        b4 = QPushButton("📁  Mở thư mục chứa file")
+        b4.setObjectName("sec")
+        b4.clicked.connect(lambda: widgets.open_folder(os.path.dirname(self.store.dt_path())))
+        for b in (b1, b2, b3, b4):
+            row.addWidget(b)
+        row.addStretch(1)
+        self.lay.addLayout(row)
+        frow = QHBoxLayout()
+        self.cust = QComboBox()
+        self.cust.currentIndexChanged.connect(lambda _i: self.refresh(keep_combo=True))
+        frow.addWidget(QLabel("Khách:"))
+        frow.addWidget(self.cust)
+        self.search = self.search_box("🔍  Tìm theo tên sản phẩm, mã…", lambda _t: self.refresh(keep_combo=True))
+        frow.addWidget(self.search, 1)
+        self.lay.addLayout(frow)
+        self.msg = QLabel("")
+        self.msg.setObjectName("hint")
+        self.msg.setWordWrap(True)
+        self.lay.addWidget(self.msg)
+        self.table = _table(self.COLS, 1)
+        self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
+        self.table.itemChanged.connect(self.on_edit)
+        self.lay.addWidget(self.table, 1)
+
+    def refresh(self, keep_combo=False):
+        self._loading = True
+        if not keep_combo:
+            cur = self.cust.currentText()
+            names = sorted({str(x.get("khach") or "") for x in self.store.data_tong if x.get("khach")}, key=str.casefold)
+            self.cust.blockSignals(True)
+            self.cust.clear()
+            self.cust.addItem("Tất cả")
+            self.cust.addItems(names)
+            if cur in ["Tất cả"] + names:
+                self.cust.setCurrentText(cur)
+            self.cust.blockSignals(False)
+        q = self.search.text().lower().strip()
+        want = self.cust.currentText()
+        items = [x for x in self.store.data_tong if (want in ("", "Tất cả") or x.get("khach") == want)
+                 and (not q or q in f"{x.get('ten', '')} {x.get('ma_hang', '')} {x.get('ma_erp', '')}".lower())]
+        total = len(items)
+        self.shown = items[:self.LIMIT]
+        self.table.setRowCount(len(self.shown))
+        for r, x in enumerate(self.shown):
+            vals = [x.get("khach", ""), x.get("ten", ""), x.get("ma_hang", ""), x.get("ma_erp", ""), x.get("kg") or "", self.SRC.get(x.get("kg_nguon", ""), ""),
+                    x.get("kien") or "", self.SRC.get(x.get("kien_nguon", ""), ""), x.get("cap_nhat", ""), x.get("may", "")]
+            for c, v in enumerate(vals):
+                cell = QTableWidgetItem("" if v is None else str(v))
+                if c not in (4, 6):
+                    cell.setFlags(cell.flags() & ~Qt.ItemIsEditable)
+                if c in (4, 6):
+                    cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.table.setItem(r, c, cell)
+        self.info.setText(f"File dùng chung: {self.store.dt_path()}\nCó {len(self.store.data_tong):,} sản phẩm. kg/chiếc đọc từ file ERP hoặc invoice cũ; SL/kiện đọc từ invoice cũ. "
+                          "Sửa trực tiếp ô kg/chiếc hoặc SL/kiện (bấm đúp) để cập nhật; mọi máy cùng dùng.")
+        if total > self.LIMIT:
+            self.msg.setText(f"Hiện {self.LIMIT:,} / {total:,} dòng đầu. Chọn khách hoặc gõ ô tìm để thu hẹp.")
+        elif not self.msg.text().startswith("✅"):
+            self.msg.setText("")
+        self._loading = False
+
+    def on_edit(self, cell):
+        if self._loading or cell.column() not in (4, 6) or cell.row() >= len(self.shown):
+            return
+        x = self.shown[cell.row()]
+        try:
+            val = float(cell.text().replace(",", ".") or 0)
+        except ValueError:
+            widgets.warn(self, "Giá trị không đúng", "Hãy nhập một số.")
+            self.refresh(keep_combo=True)
+            return
+        if cell.column() == 4:
+            x["kg"], x["kg_nguon"] = val, "tay"
+        else:
+            x["kien"], x["kien_nguon"] = int(round(val)), "tay"
+        now = datetime.datetime.now()
+        x["ts"], x["cap_nhat"], x["may"] = now.strftime("%Y-%m-%d %H:%M:%S"), now.strftime("%d/%m/%Y %H:%M"), self.store.user_name()
+        self.store.dt_save()
+        self.refresh(keep_combo=True)
+
+    def _busy(self, text, fn, done):
+        self.msg.setText("⏳  " + text)
+        widgets.run_job(self, fn, done, lambda m: (self.msg.setText(""), widgets.warn(self, "Chưa nạp được", str(m))))
+
+    def import_erp(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Chọn file ERP (Excel)", "", "Excel (*.xlsx *.xlsm)")
+        if not path:
+            return
+
+        def done(res):
+            self.msg.setText(f"✅  Nạp xong: thêm {res['them']:,} sản phẩm, cập nhật {res['cap_nhat']:,}, bỏ qua {res['bo_qua']:,} dòng (không có khách hoặc cân nặng).")
+            self.refresh()
+        self._busy("Đang nạp file ERP (khoảng vài giây)…", lambda: self.store.dt_import_erp(path), done)
+
+    def import_invoices(self):
+        keys = [k for k in self.core.PROFILES]
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Học từ invoice cũ")
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(QLabel("Chọn khách của các invoice sẽ nạp:"))
+        combo = QComboBox()
+        for k in keys:
+            combo.addItem(str(self.core.PROFILES[k].get("label") or k), k)
+        lay.addWidget(combo)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        lay.addWidget(bb)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        key = combo.currentData()
+        paths, _ = QFileDialog.getOpenFileNames(self, "Chọn các invoice cũ (Excel)", "", "Excel (*.xlsx *.xlsm)")
+        if not paths:
+            return
+
+        def done(res):
+            err = ("  Lỗi: " + "; ".join(res["loi"])) if res["loi"] else ""
+            self.msg.setText(f"✅  Đã đọc {res['file']} file: thêm {res['them']} sản phẩm, cập nhật {res['cap_nhat']}.{err}")
+            self.refresh()
+        self._busy("Đang đọc invoice…", lambda: self.store.dt_import_invoices(paths, key), done)
+
+    def export_excel(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Lưu data tổng ra Excel", "DATA_TONG.xlsx", "Excel (*.xlsx)")
+        if not path:
+            return
+        import openpyxl
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Data tổng"
+        ws.append(self.COLS)
+        for x in self.shown:
+            ws.append([x.get("khach"), x.get("ten"), x.get("ma_hang"), x.get("ma_erp"), x.get("kg"), self.SRC.get(x.get("kg_nguon", ""), ""), x.get("kien"),
+                       self.SRC.get(x.get("kien_nguon", ""), ""), x.get("cap_nhat"), x.get("may")])
+        wb.save(path)
+        self.msg.setText(f"✅  Đã lưu {len(self.shown):,} dòng ra {path}")
 
 
 class RecordsPage(_Page):

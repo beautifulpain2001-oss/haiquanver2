@@ -20,6 +20,7 @@ class Lot:
         self.schedules = None  # Shirai: các ngày giao của PO {ngày: {dateStr, items}}
         self.selected_dates = []  # ngày giao được chọn để khai; chọn nhiều ngày = một invoice, một tờ khai
         self.record_id = None  # mã hồ sơ đang sửa (None = hồ sơ mới)
+        self.po_files = []  # file PO gốc đã nạp (được lưu cùng chứng từ)
         self.exported = {}  # ô chứng từ của hồ sơ (vat, pxk, pkl, tk) -> file
         self.files = []  # mọi file đã xuất trong lô này, để hiển thị
         self.saved = False
@@ -60,7 +61,9 @@ class Lot:
     # ---- nạp PO ----------------------------------------------------------------
     def read_po(self, path, append=False):
         """Đọc PO (chạy được ở luồng nền: không đụng trạng thái). Trả kết quả để `apply_po` áp dụng."""
-        return self.core.lot_load_po(self.store, path, self.customer, self.form.get("tare", ""), self.items, append, self.po_dates)
+        res = self.core.lot_load_po(self.store, path, self.customer, self.form.get("tare", ""), self.items, append, self.po_dates)
+        res["path"], res["append"] = path, append
+        return res
 
     def apply_po(self, res):
         if not res["ok"]:
@@ -68,6 +71,8 @@ class Lot:
         if res["customer"] != self.customer:  # app tự nhận ra khách theo nội dung file
             self.customer = res["customer"]
             self.apply_defaults()
+        if res.get("path"):
+            self.po_files = (self.po_files if res.get("append") else []) + [res["path"]]
         self.items = res["items"]
         self.po_dates = res["po_dates"]
         self.form["po"] = res["po"] or self.form["po"]
@@ -134,7 +139,7 @@ class Lot:
     # ---- hồ sơ, kiểm tra, xuất, lưu -------------------------------------------
     def record(self):
         self.normalize()
-        form = dict(self.form, customer=self.customer, schedule="", po_dates=self.po_dates, record_id=self.record_id)
+        form = dict(self.form, customer=self.customer, schedule="", po_dates=self.po_dates, record_id=self.record_id, po_files=self.po_files)
         return self.core.lot_build_record(self.store, form, self.items)
 
     def totals(self):

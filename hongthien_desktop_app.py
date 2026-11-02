@@ -115,6 +115,8 @@ def best_template(prof, doc):
 
 
 CUSTOMS_ROOT = "HAI_QUAN"
+DT_FILE = "DATA_TONG.json"
+GENERATED_DIR = "DO_PHAN_MEM_TAO"  # thư mục con của hồ sơ: chứng từ do phần mềm tạo (Excel) + PO gốc; bên ngoài là scan, PDF Bkav, file hải quan
 
 _OCR_OK = None
 
@@ -558,6 +560,7 @@ class DedicatedDataStore:
         self.profile_overrides = {}  # chỗ người dùng đã sửa trên 3 khách có sẵn (mục Khách hàng)
         self.records = []
         self._sigs, self._loaded_ids = {}, set()
+        self.data_tong, self._dt_cache, self._dt_idx, self._dt_cust = [], {}, None, {}
         self.load_all()
 
     # ---- người dùng của máy này (lưu ở file cấu hình cạnh phần mềm, KHÔNG nằm trong thư mục dùng chung) ----------
@@ -645,6 +648,7 @@ class DedicatedDataStore:
             except Exception:
                 self.records = []
         self._loaded_ids = {r.get("id") for r in self.records}
+        self.dt_load()
         self._note_sigs()
         if not self.records:
             self.records = self.default_seed_records()
@@ -810,6 +814,230 @@ class DedicatedDataStore:
             n += 1
         return n
 
+    # ---- DATA TỔNG: danh mục sản phẩm dùng chung (tên, kg/chiếc, SL/kiện) nằm trong thư mục HAI_QUAN ----------------
+    # Một file HAI_QUAN/DATA_TONG.json cho mọi máy. Nguồn: file ERP (kg), invoice cũ (kg + SL/kiện), người dùng xác nhận khi xuất.
+    # Ưu tiên khi trùng: tay (đã xác nhận) > invoice cũ > ERP.
+    DT_RANK = {"tay": 3, "invoice": 2, "erp": 1, "": 0}
+
+    def dt_path(self):
+        return os.path.join(self.base_dir, CUSTOMS_ROOT, DT_FILE)
+
+    def dt_load(self):
+        data = self._read_json(self.dt_path(), {})
+        self.data_tong = list(data.get("items") or []) if isinstance(data, dict) else []
+        self._dt_cache, self._dt_idx, self._dt_cust = {}, None, {}
+
+    def dt_save(self):
+        try:
+            os.makedirs(os.path.dirname(self.dt_path()), exist_ok=True)
+            with self._lock():
+                if self._sig(self.dt_path()) != self._sigs.get(self.dt_path()):  # máy khác vừa ghi: gộp
+                    disk = (self._read_json(self.dt_path(), {}) or {}).get("items") or []
+                    mine = {self._dt_key(x): x for x in self.data_tong}
+                    for d in disk:
+                        k = self._dt_key(d)
+                        if k not in mine:
+                            mine[k] = d
+                        elif str(d.get("ts") or "") > str(mine[k].get("ts") or ""):
+                            mine[k] = d
+                    self.data_tong = list(mine.values())
+                self._write_json(self.dt_path(), {"version": 1, "cap_nhat": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"), "items": self.data_tong})
+                self._sigs[self.dt_path()] = self._sig(self.dt_path())
+            self._dt_cache, self._dt_idx = {}, None
+        except Exception as e:
+            print("Warning saving data tong:", e)
+
+    def _dt_index(self):
+        if self._dt_idx is None:
+            self._dt_idx = {self._dt_key(x): x for x in self.data_tong}
+        return self._dt_idx
+
+    @staticmethod
+    def _dt_key(it):
+        return f"{clean_str(it.get('khach'))}|{clean_str(it.get('ten'))}"
+
+    @staticmethod
+    def _dims_key(name):
+        try:
+            dims = _name_dims(name)[0]
+            return tuple(int(round(float(d))) for d in dims) if len(dims) >= 3 else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _khach_match(prof, khach):
+        k = clean_str(khach)
+        if not k:
+            return False
+        names = {clean_str(prof.get("label")), clean_str(prof.get("key"))}
+        full = clean_str(prof.get("name"))
+        return k in names or (len(k) >= 3 and k in full) or (bool(full) and full in k)
+
+    def dt_items_for(self, cust_key):
+        """Mục data tổng của một khách (đã nạp vào bộ nhớ đệm, xóa khi dữ liệu đổi)."""
+        if cust_key not in self._dt_cache:
+            prof = PROFILES.get(cust_key) or {}
+            self._dt_cache[cust_key] = [x for x in self.data_tong if self._khach_match(prof, x.get("khach"))]
+        return self._dt_cache[cust_key]
+
+    def dt_lookup(self, cust_key, name="", code=""):
+        cands = self.dt_items_for(cust_key)
+        code = str(code or "").strip()
+        if code:
+            hit = [x for x in cands if code and code in (str(x.get("ma_hang") or "").strip(), str(x.get("ma_erp") or "").strip())]
+            if hit:
+                return max(hit, key=lambda x: (bool(x.get("kg")) + bool(x.get("kien")), self.DT_RANK.get(x.get("kg_nguon", ""), 0)))
+        nk = clean_str(name)
+        hit = [x for x in cands if nk and clean_str(x.get("ten")) == nk]
+        if not hit:
+            dk = self._dims_key(name)
+            hit = [x for x in cands if dk and self._dims_key(x.get("ten")) == dk]
+            if len({(x.get("kg"), x.get("kien")) for x in hit}) > 1:
+                hit = []  # nhiều sản phẩm cùng quy cách mà khác số liệu: không đoán
+        return max(hit, key=lambda x: (bool(x.get("kg")) + bool(x.get("kien")), self.DT_RANK.get(x.get("kg_nguon", ""), 0))) if hit else None
+
+    def _dt_upsert(self, khach, ten, ma_hang="", ma_erp="", kg=0.0, kg_nguon="", kien=0, kien_nguon="", hs="", exact=False):
+        """Thêm/sửa một sản phẩm. Số liệu nguồn yếu hơn không đè nguồn mạnh hơn. Trả True nếu có thay đổi."""
+        cust = self._dt_cust.get(khach)
+        if khach not in self._dt_cust:
+            cust = self._dt_cust[khach] = next((k for k, p in PROFILES.items() if self._khach_match(p, khach)), None)
+        key = f"{clean_str(khach)}|{clean_str(ten)}"
+        it = self._dt_index().get(key) or (self.dt_lookup(cust, ten, ma_hang or ma_erp) if cust and not exact else None)
+        now = datetime.datetime.now()
+        user = self.user_name()
+        changed = False
+        if it is None:
+            it = {"khach": khach, "ten": ten, "ma_hang": ma_hang, "ma_erp": ma_erp, "kg": 0, "kg_nguon": "", "kien": 0, "kien_nguon": "", "hs": hs}
+            self.data_tong.append(it)
+            self._dt_idx[key] = it
+            self._dt_cache.pop(cust, None)
+            changed = True
+        for field, val in (("ma_hang", ma_hang), ("ma_erp", ma_erp), ("hs", hs)):
+            if val and it.get(field) != val and not it.get(field):
+                it[field] = val
+                changed = True
+        if kg and (self.DT_RANK.get(kg_nguon, 0) >= self.DT_RANK.get(it.get("kg_nguon", ""), 0)) and abs(float(it.get("kg") or 0) - float(kg)) > 1e-9:
+            it["kg"], it["kg_nguon"] = round(float(kg), 6), kg_nguon
+            changed = True
+        elif kg and not it.get("kg"):
+            it["kg"], it["kg_nguon"] = round(float(kg), 6), kg_nguon
+            changed = True
+        if kien and (self.DT_RANK.get(kien_nguon, 0) >= self.DT_RANK.get(it.get("kien_nguon", ""), 0)) and float(it.get("kien") or 0) != float(kien):
+            it["kien"], it["kien_nguon"] = kien, kien_nguon
+            changed = True
+        if ten and kg_nguon in ("invoice", "tay") and it.get("ten") != ten:
+            it.setdefault("ten_erp", it.get("ten"))
+            it["ten"] = ten  # tên dùng trên chứng từ
+            changed = True
+        if changed:
+            it["ts"] = now.strftime("%Y-%m-%d %H:%M:%S")
+            it["cap_nhat"] = now.strftime("%d/%m/%Y %H:%M")
+            it["may"] = user
+        return changed
+
+    def dt_import_erp(self, path):
+        """Nạp file ERP (Excel): Tên tắt khách hàng | Mã cũ | Mã số | Tên (vn) | Cân nặng (g). Trả {"them", "cap_nhat", "bo_qua"}."""
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        res = {"them": 0, "cap_nhat": 0, "bo_qua": 0}
+        for ws in wb.worksheets:
+            cols = None
+            for row in ws.iter_rows(values_only=True):
+                if cols is None:
+                    heads = [strip_accents_upper(v or "") for v in row]
+                    if any(h.startswith("TEN TAT KHACH") for h in heads) and any(h.startswith("CAN NANG") for h in heads):
+                        cols = {"khach": next(i for i, h in enumerate(heads) if h.startswith("TEN TAT KHACH")),
+                                "ma_cu": next((i for i, h in enumerate(heads) if h.startswith("MA CU")), None),
+                                "ma": next((i for i, h in enumerate(heads) if h == "MA SO"), None),
+                                "ten": next((i for i, h in enumerate(heads) if h.startswith("TEN (VN)") or h.startswith("TEN VN")), None),
+                                "g": next(i for i, h in enumerate(heads) if h.startswith("CAN NANG"))}
+                    continue
+                get = lambda k: (row[cols[k]] if cols.get(k) is not None and cols[k] < len(row) else None)
+                khach, ten, g = str(get("khach") or "").strip(), str(get("ten") or "").strip(), get("g")
+                if not khach or khach.lower() == "none" or not ten or not isinstance(g, (int, float)) or g <= 0:
+                    res["bo_qua"] += 1
+                    continue
+                before = len(self.data_tong)
+                ch = self._dt_upsert(khach, ten, ma_hang=str(get("ma_cu") or "").strip(), ma_erp=str(get("ma") or "").strip(), kg=g / 1000.0, kg_nguon="erp", exact=True)
+                if len(self.data_tong) > before:
+                    res["them"] += 1
+                elif ch:
+                    res["cap_nhat"] += 1
+        wb.close()
+        self._dt_cache = {}
+        self.dt_save()
+        return res
+
+    def dt_import_invoices(self, paths, cust_key):
+        """Học kg/chiếc và SL/kiện từ invoice cũ của khách `cust_key` (SL/kiện = SL / số kiện ghi trên invoice)."""
+        prof = PROFILES[cust_key]
+        khach = prof.get("label") or cust_key
+        res = {"them": 0, "cap_nhat": 0, "file": 0, "loi": []}
+        for p in paths:
+            try:
+                d = learn_from_invoice_excel(p, ignore_norms=True)
+            except Exception as e:
+                res["loi"].append(f"{os.path.basename(p)}: {e}")
+                continue
+            res["file"] += 1
+            merged = {}
+            for it in d["items"]:  # mỗi sản phẩm: lấy giá trị đầu tiên có số liệu (sheet mới nhất đứng trước; sheet thiếu kg/kiện bị bù từ sheet khác)
+                m = merged.setdefault(clean_str(it.get("name")), {"name": it["name"]})
+                for f in ("code", "kg", "div", "hs"):
+                    if it.get(f) and not m.get(f):
+                        m[f] = it[f]
+            for m in merged.values():
+                before = len(self.data_tong)
+                div = m.get("div") or 0
+                ch = self._dt_upsert(khach, m["name"], ma_hang=str(m.get("code") or "").strip(), kg=m.get("kg") or 0, kg_nguon="invoice",
+                                     kien=int(round(div)) if div else 0, kien_nguon="invoice", hs=str(m.get("hs") or ""))
+                if len(self.data_tong) > before:
+                    res["them"] += 1
+                elif ch:
+                    res["cap_nhat"] += 1
+        self._dt_cache = {}
+        self.dt_save()
+        return res
+
+    def dt_learn_items(self, cust_key, items):
+        """Mỗi lần xuất chứng từ: nhớ kg/chiếc và SL/kiện người dùng đã xác nhận (nguồn 'tay') vào data tổng dùng chung."""
+        prof = PROFILES.get(cust_key)
+        if not prof:
+            return 0
+        khach = prof.get("label") or cust_key
+        n = 0
+        for it in items:
+            kg, div = float(it.get("kg") or 0), float(it.get("div") or 0)
+            if kg > 0 or div > 0:
+                if self._dt_upsert(khach, str(it.get("ten_sp") or ""), ma_hang=str(it.get("ma_sp") or "").strip(), kg=kg, kg_nguon="tay",
+                                   kien=int(round(div)) if div else 0, kien_nguon="tay", hs=str(it.get("hs") or "")):
+                    n += 1
+        if n:
+            self._dt_cache = {}
+            self.dt_save()
+        return n
+
+    def dt_fill_lines(self, cust_key, lines):
+        """Dòng hàng còn thiếu kg/chiếc hoặc SL/kiện thì lấy từ data tổng rồi tính lại kiện, tịnh, cả bì. Trả số dòng được điền."""
+        n = 0
+        for ln in lines:
+            if float(ln.get("kg") or 0) > 0 and float(ln.get("div") or 0) > 0:
+                continue
+            it = self.dt_lookup(cust_key, ln.get("ten_sp"), ln.get("ma_sp"))
+            if not it:
+                continue
+            changed = False
+            if not float(ln.get("kg") or 0) and it.get("kg"):
+                ln["kg"], changed = float(it["kg"]), True
+            if not float(ln.get("div") or 0) and it.get("kien"):
+                ln["div"], changed = float(it["kien"]), True
+            if changed:
+                qty, kg, div, tare = float(ln.get("qty") or 0), float(ln.get("kg") or 0), float(ln.get("div") or 0), float(ln.get("tare") or 0)
+                ln["kien"] = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
+                ln["net"] = round_half_up(qty * kg, 2) if kg > 0 else 0.0
+                ln["gross"] = round_half_up(ln["net"] + tare, 2) if ln["net"] > 0 else 0.0
+                n += 1
+        return n
+
     def update_customer(self, key, fields):
         """Sửa thông tin khách (tên, MST, địa chỉ…). Khách có sẵn: lưu phần sửa; khách đã học: sửa trong hồ sơ khách."""
         if key not in PROFILES:
@@ -860,11 +1088,11 @@ class DedicatedDataStore:
             return None
 
     def _note_sigs(self):
-        self._sigs = {p: self._sig(p) for p in (self.catalog_file, self.records_file)}
+        self._sigs = {p: self._sig(p) for p in (self.catalog_file, self.records_file, self.dt_path())}
 
     def changed_on_disk(self):
         """True nếu máy khác đã ghi file dữ liệu kể từ lần đọc/ghi gần nhất của máy này."""
-        return any(self._sig(p) != self._sigs.get(p) for p in (self.catalog_file, self.records_file))
+        return any(self._sig(p) != self._sigs.get(p) for p in (self.catalog_file, self.records_file, self.dt_path()))
 
     def sync(self):
         """Đọc lại dữ liệu nếu máy khác vừa thay đổi. Trả True nếu có đọc lại."""
@@ -1007,40 +1235,96 @@ class DedicatedDataStore:
         except Exception:
             pass
 
-    # Tên file do phần mềm này làm ra (chuẩn bị cho khai hải quan). File khác trong thư mục là do máy làm hải quan thêm vào.
-    PREPARED_PREFIXES = (("invoice_", "Invoice"), ("DongGoi_", "Đóng gói"), ("Hoa_Don_VAT", "Hóa đơn VAT"), ("PXK_", "Phiếu xuất kho"),
-                         ("ToKhai_B11", "Dữ liệu tờ khai B11"), ("PhieuGiaoHang", "Phiếu giao hàng"), ("DoiChieuCongNo", "Đối chiếu công nợ"),
-                         ("DNTT", "Đề nghị thanh toán"), ("dsh_", "Danh sách hàng ECUS"), ("KiemTraCheo", "Kiểm tra chéo"),
-                         ("Bo_Ho_So_Xuat_Hang", "Bộ hồ sơ"), ("00_HO_SO_", "Hồ sơ lưu"), ("PhuLucX", "Phụ lục X"), ("SO_", "Đơn đặt hàng"))
+    # Thư mục tờ khai: bên trong DO_PHAN_MEM_TAO là file do phần mềm tạo (Excel) + PO gốc; bên ngoài là file khác
+    # (scan, PDF Bkav, file hải quan). Tên file dùng để biết bộ hồ sơ đã có gì.
+    MADE_PREFIXES = (("invoice_", "Invoice (Excel)"), ("DongGoi_", "Đóng gói (Excel)"), ("Hoa_Don_VAT", "Hóa đơn Bkav (Excel)"), ("PXK_", "PXK Bkav (Excel)"),
+                     ("ToKhai_B11", "Dữ liệu tờ khai B11"), ("PhieuGiaoHang", "Phiếu giao hàng"), ("DoiChieuCongNo", "Đối chiếu công nợ"),
+                     ("DNTT", "Đề nghị thanh toán"), ("dsh_", "Danh sách hàng ECUS (Excel)"), ("KiemTraCheo", "Kiểm tra chéo"),
+                     ("Bo_Ho_So_Xuat_Hang", "Bộ hồ sơ"), ("00_HO_SO_", "Hồ sơ lưu"), ("PLX_", "PLX (Excel)"), ("SO_", "Đơn đặt hàng"), ("PO_goc_", "PO gốc"))
+    MODE_TO_MADE = {"PKL": "Invoice (Excel)", "PACK": "Đóng gói (Excel)", "VAT": "Hóa đơn Bkav (Excel)", "PXK": "PXK Bkav (Excel)", "B11": "Dữ liệu tờ khai B11",
+                    "PGH": "Phiếu giao hàng", "DCCN": "Đối chiếu công nợ", "DNTT": "Đề nghị thanh toán", "PLX": "PLX (Excel)", "SO": "Đơn đặt hàng",
+                    "DSH": "Danh sách hàng ECUS (Excel)"}
+    PREPARED_PREFIXES = MADE_PREFIXES  # tên cũ
 
     @classmethod
-    def folder_activity(cls, path):
-        """Đọc thư mục tờ khai, đoán đã làm gì chỉ bằng tên file:
-        prepared = chứng từ do phần mềm này làm; other = file máy khác thêm vào; tk = số tờ khai (12 chữ số) trong tên file nếu có."""
-        prepared, other, tk = [], [], ""
-        try:
-            names = sorted(n for n in os.listdir(path) if not n.startswith((".", "~$")) and os.path.isfile(os.path.join(path, n)))
-        except OSError:
-            names = []
-        for n in names:
-            hit = next((lbl for pre, lbl in cls.PREPARED_PREFIXES if n.lower().startswith(pre.lower())), "")
-            if hit:
+    def _classify_outside(cls, name):
+        """Nhận biết file bên ngoài (không do phần mềm tạo) chỉ bằng tên: trả nhãn hoặc ''."""
+        n = name.lower()
+        base, ext = os.path.splitext(n)
+        pdfish = ext in (".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff")
+        if pdfish and re.search(r"c\d{2}n[a-z]{2}", base):
+            return "PXK Bkav (PDF)"
+        if pdfish and re.search(r"c\d{2}t[a-z]{2}", base):
+            return "Hóa đơn Bkav (PDF)"
+        if base.startswith("dsh"):
+            return "DSH hải quan"
+        if re.search(r"(?<!\d)\d{12}(?!\d)", base) or "tokhai" in base.replace("_", "").replace(" ", ""):
+            return "Tờ khai"
+        if pdfish and "plx" in base:
+            return "PLX (scan)"
+        if pdfish and re.match(r"(iv|inv|invoice)", base):
+            return "Invoice (scan)"
+        if pdfish and re.match(r"po", base):
+            return "PO (scan)"
+        return ""
+
+    @classmethod
+    def folder_checklist(cls, modes):
+        """Bộ hồ sơ đầy đủ của một khách theo các chứng từ `modes` của khách đó: (phần phần mềm tạo, phần bên ngoài)."""
+        made = ["PO gốc"] + [cls.MODE_TO_MADE[m] for m in modes if m in cls.MODE_TO_MADE and m != "DSH"]
+        out = ["PO (scan)"]
+        for m, lbl in (("PKL", "Invoice (scan)"), ("PLX", "PLX (scan)"), ("VAT", "Hóa đơn Bkav (PDF)"), ("PXK", "PXK Bkav (PDF)")):
+            if m in modes:
+                out.append(lbl)
+        return made, out + ["DSH hải quan", "Tờ khai"]
+
+    @classmethod
+    def folder_activity(cls, path, modes=None):
+        """Đọc thư mục tờ khai, biết đã làm gì chỉ bằng tên file.
+        prepared = file do phần mềm tạo (trong DO_PHAN_MEM_TAO hoặc cùng thư mục kiểu cũ); other = file bên ngoài;
+        have = nhãn các chứng từ đã có; missing = còn thiếu theo bộ của khách (nếu biết `modes`); tk = số tờ khai 12 số trong tên file."""
+        def names_in(d):
+            try:
+                return sorted(n for n in os.listdir(d) if not n.startswith((".", "~$")) and os.path.isfile(os.path.join(d, n)))
+            except OSError:
+                return []
+        prepared, other, have, tk = [], [], set(), ""
+        for n in names_in(os.path.join(path, GENERATED_DIR)):
+            hit = next((lbl for pre, lbl in cls.MADE_PREFIXES if n.lower().startswith(pre.lower())), "Khác")
+            have.add(hit)
+            if hit not in prepared:
+                prepared.append(hit)
+        for n in names_in(path):
+            hit = next((lbl for pre, lbl in cls.MADE_PREFIXES if n.lower().startswith(pre.lower())), "")
+            if hit:  # hồ sơ kiểu cũ: file do phần mềm tạo nằm cùng thư mục
+                have.add(hit)
                 if hit not in prepared:
                     prepared.append(hit)
                 continue
             other.append(n)
+            lbl = cls._classify_outside(n)
+            if lbl:
+                have.add(lbl)
             m = re.search(r"(?<!\d)(\d{12})(?!\d)", n)
             if m and not tk:
                 tk = m.group(1)
-        if tk:
-            status = f"Đã khai · số tờ khai {tk}"
-        elif other:
-            status = "Máy khác đã thêm file: " + ", ".join(other[:3]) + ("…" if len(other) > 3 else "")
-        elif prepared:
-            status = f"Đã chuẩn bị {len(prepared)} chứng từ · chờ khai"
-        else:
+        missing = []
+        if modes:
+            made, out = cls.folder_checklist(modes)
+            missing = [x for x in made + out if x not in have]
+        if not prepared and not other:
             status = "Thư mục trống"
-        return {"prepared": prepared, "other": other, "tk": tk, "status": status}
+        else:
+            head = f"Đã khai · số tờ khai {tk} · " if tk else ""
+            status = head + ("Đủ bộ hồ sơ" if modes and not missing else (f"Thiếu: {', '.join(missing[:4])}{'…' if len(missing) > 4 else ''}" if missing else f"Đã chuẩn bị {len(prepared)} chứng từ"))
+        return {"prepared": prepared, "other": other, "have": sorted(have), "missing": missing, "tk": tk, "status": status}
+
+    def _modes_for_folder(self, cust_label, rec):
+        """Các chứng từ thuộc bộ của khách (theo hồ sơ nếu có, không thì theo tên thư mục khách); None nếu không nhận ra khách."""
+        key = (rec or {}).get("customer")
+        if not key:
+            key = next((k for k, p in PROFILES.items() if self._khach_match(p, cust_label)), None)
+        return lot_bundle_modes({"customer": key}) if key in PROFILES else None
 
     def declaration_folders(self):
         """Các thư mục tờ khai đang có trong HAI_QUAN (quét thật trên ổ đĩa/OneDrive) ghép với thông tin hồ sơ nếu có.
@@ -1069,7 +1353,7 @@ class DedicatedDataStore:
                     key = os.path.normcase(os.path.normpath(path))
                     seen.add(key)
                     files = [f for f in os.listdir(path) if not f.startswith(".")]
-                    out.append({"customer": cust, "label": cust, "day": day, "path": path, "record": by_path.get(key), "files": len(files), **self.folder_activity(path)})
+                    out.append({"customer": cust, "label": cust, "day": day, "path": path, "record": by_path.get(key), "files": len(files), **self.folder_activity(path, self._modes_for_folder(cust, by_path.get(key)))})
         for key, r in by_path.items():  # hồ sơ đã lưu nhưng chưa có thư mục (chưa xuất file nào)
             if key not in seen:
                 out.append({"customer": r.get("customer", ""), "label": PROFILES.get(r.get("customer", ""), {}).get("label", r.get("customer", "")),
@@ -3596,7 +3880,7 @@ def _learn_party_from_sheet(rows):
     return prof
 
 
-def learn_from_invoice_excel(file_path):
+def learn_from_invoice_excel(file_path, ignore_norms=False):
     """Đọc Invoice / Bảng kê PKL Excel của khách (mọi sheet): mã, tên, đơn giá, kg/chiếc, SL/kiện, số PO, bì.
     Cùng một mặt hàng xuất hiện ở nhiều sheet thì sheet có ngày mới nhất được ưu tiên."""
     wb = openpyxl.load_workbook(file_path, data_only=True)
@@ -3681,7 +3965,7 @@ def learn_from_invoice_excel(file_path):
     items = [it for _, _, its in sheets for it in its]
     for it in items:
         code = it.get("code", "")
-        if code in norms:
+        if code in norms and not ignore_norms:
             it["div"] = norms[code]
     # SL/kiện: ưu tiên số nguyên (sheet mới nhất có số nguyên) hơn số lẻ do làm tròn số kiện
     by_name = {}
@@ -4298,6 +4582,7 @@ def lot_build_record(store, form, items):
         "totalGross": round(tot_gross, 2),
         "totalKien": tot_kien,
         "updatedAt": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
+        "poFiles": [str(x) for x in (form.get("po_files") or []) if x],
         "workedBy": store.user_name(),  # người làm hồ sơ (tên đặt ở Cài đặt của từng máy)
         "items": [dict(x) for x in items],
         "files": {"po": None, "pxk": None, "vat": None, "pkl": None, "tk": None, "scan": None},
@@ -4316,14 +4601,26 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
     """
     if not rec.get("items"):
         raise ValueError("Chưa có dòng hàng nào để xuất file Excel.")
+    try:
+        store.dt_learn_items(rec["customer"], rec["items"])  # nhớ kg/chiếc, SL/kiện đã xác nhận vào data tổng dùng chung
+    except Exception:
+        pass
     if mode in ("BEST", "PACK", "PGH", "DCCN") and not is_best_docset(rec):
         raise ValueError("Khách này chưa đặt bộ mẫu 'best'. Thêm khách bằng nút 'Thêm Khách Mới' và chọn bộ mẫu best.")
     if mode == "SO" and rec["customer"] != "shirai":
         raise ValueError("Phiếu SO chỉ dùng cho khách Shirai.")
     if mode == "B11" and not (rec["customer"] == "tesa" or PROFILES.get(rec["customer"], {}).get("customs")):
         raise ValueError("Khách này chưa có thông tin tờ khai B11.")
-    work_dir = store.get_record_folder_path(rec)
+    folder = store.get_record_folder_path(rec)
+    work_dir = os.path.join(folder, GENERATED_DIR)
     os.makedirs(work_dir, exist_ok=True)
+    for src in rec.get("poFiles") or []:  # PO gốc khách gửi: lưu cùng chứng từ đã tạo
+        try:
+            dst = os.path.join(work_dir, "PO_goc_" + os.path.basename(src))
+            if os.path.isfile(src) and not os.path.exists(dst):
+                shutil.copy2(src, dst)
+        except OSError:
+            pass
     clean_po = re.sub(r"[^a-zA-Z0-9_-]", "", rec["poNumber"])[:24]
     s_key = rec.get("scheduleKey", "30.10")
     problems = []
@@ -4664,6 +4961,8 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
             lines = lines_from_erp_rows(erp_rows, po_no, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
         elif lines and ext == ".pdf" and "inquiry" in (prof.get("lineRefs") or {}) and not _pdf_has_text(path):
             lines = best_scan_lines(path, prof, store, po_no, po_date, tare_v) or (fix_inquiries_from_scan(path, lines) or lines)
+        if lines:
+            store.dt_fill_lines(customer, lines)  # thiếu kg/chiếc hoặc SL/kiện: lấy từ data tổng dùng chung
         if not lines:
             res["msg"] = "Không tìm thấy dòng hàng nào khớp mã/tên hàng đã học. Hãy thêm dòng trực tiếp, hoặc nạp thêm chứng từ mẫu cho khách này."
             return res

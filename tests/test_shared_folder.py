@@ -77,17 +77,20 @@ def test_declaration_folders_scan_disk_and_match_records(data_dir, tmp_path):
     assert days.index("2026-11-02") < days.index("2026-10-29")  # mới nhất trước
 
 
-def test_folder_activity_reads_status_from_file_names(tmp_path):
+def test_folder_activity_reads_status_and_checklist_from_file_names(tmp_path):
     f = tmp_path / "d"
-    f.mkdir()
+    (f / "DO_PHAN_MEM_TAO").mkdir(parents=True)
     S = app.DedicatedDataStore
-    assert S.folder_activity(str(f))["status"] == "Thư mục trống"
-    for n in ("invoice_best_00000300_26.10.xlsx", "DongGoi_best_26.10.xlsx", "00_HO_SO_abc.json"):
+    modes = ["PKL", "VAT", "PXK", "PLX"]  # bộ của khách kiểu Arizon
+    assert S.folder_activity(str(f), modes)["status"] == "Thư mục trống"
+    for n in ("invoice_arz_00000243_21.09.xlsx", "Hoa_Don_VAT_BKAV_arz.xlsx", "PXK_KVCNB_BKAV_arz.xlsx", "PLX_arz.xlsx", "PO_goc_poarz243.pdf", "00_HO_SO_abc.json"):
+        (f / "DO_PHAN_MEM_TAO" / n).write_text("x")
+    a = S.folder_activity(str(f), modes)
+    assert a["status"].startswith("Thiếu: PO (scan), Invoice (scan), PLX (scan), Hóa đơn Bkav (PDF)") and not a["other"]
+    for n in ("poarz243.pdf", "ivarz.pdf", "PLXarizon243.pdf", "C26TAA-00003505-LXGEO7ZJ06E-DPH.pdf", "C26NAA-00000243-TXGELS33KO6-DPH.pdf", "dsh 243.xls"):
         (f / n).write_text("x")
-    a = S.folder_activity(str(f))
-    assert a["status"] == "Đã chuẩn bị 3 chứng từ · chờ khai" and not a["other"]
-    (f / "ghi chu.txt").write_text("x")
-    assert S.folder_activity(str(f))["status"].startswith("Máy khác đã thêm file: ghi chu.txt")
-    (f / "ToKhai_306891234560_Xanh.pdf").write_text("x")  # tờ khai do máy làm hải quan thêm
-    a = S.folder_activity(str(f))
-    assert a["tk"] == "306891234560" and a["status"] == "Đã khai · số tờ khai 306891234560"
+    a = S.folder_activity(str(f), modes)
+    assert a["missing"] == ["Tờ khai"] and a["status"] == "Thiếu: Tờ khai"
+    (f / "ToKhaiHQ7N_QDTQ_108648746030.xlsx").write_text("x")  # tờ khai do máy làm hải quan thêm
+    a = S.folder_activity(str(f), modes)
+    assert a["tk"] == "108648746030" and a["status"] == "Đã khai · số tờ khai 108648746030 · Đủ bộ hồ sơ"

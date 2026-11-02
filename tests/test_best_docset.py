@@ -308,7 +308,7 @@ def test_gui_best_two_pos_one_lot(store, best_invoice, monkeypatch):
 
         ui.export_step1_excel("ALL")
         assert shown[-1][0] == "showinfo" and "Kiểm tra chéo: ĐẠT" in shown[-1][1]
-        out_dir = store.get_record_folder_path(rec)
+        out_dir = os.path.join(store.get_record_folder_path(rec), app.GENERATED_DIR)  # file do phần mềm tạo nằm trong thư mục con
         files = os.listdir(out_dir)
         assert "dsh_00000999.xlsx" in files
         full = next(f for f in files if f.startswith("Bo_Ho_So_Xuat_Hang_"))

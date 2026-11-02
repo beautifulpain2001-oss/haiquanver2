@@ -42,7 +42,7 @@ def test_export_all_and_transfer_to_step2(gui, store, customer):
 
     gui.export_step1_excel("ALL")
     assert gui.shown and gui.shown[-1][0] == "showinfo"
-    out_dir = store.get_record_folder_path(rec)
+    out_dir = __import__("os").path.join(store.get_record_folder_path(rec), "DO_PHAN_MEM_TAO")
     files = __import__("os").listdir(out_dir)
     assert any(f.startswith("Bo_Ho_So_Xuat_Hang_") for f in files), files
 
