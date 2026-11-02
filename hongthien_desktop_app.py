@@ -5459,14 +5459,12 @@ def read_best_po_table(path, catalog_items):
     if pdfium is None or pytesseract is None:
         return []
     try:
-        import numpy as np
         img = auto_rotate_scan(pdfium.PdfDocument(path)[0].render(scale=4.5).to_pil()).convert("L")
-        arr = np.array(img)
     except Exception:
         return []
-    H, W = arr.shape
+    W, H = img.size
     x0, x1 = int(W * 0.04), int(W * 0.93)
-    ys = _runs((arr[:, x0:x1] < 140).mean(axis=1) > 0.3)  # đường kẻ ngang
+    ys = _runs([v > 0.3 for v in po_scan.dark_profile(img, 0, 140, (x0, 0, x1, H))])  # đường kẻ ngang (Pillow, không cần numpy: bản .exe bỏ numpy)
     if len(ys) < 3:
         return []
     diffs = sorted(b - a for a, b in zip(ys, ys[1:]))
@@ -5481,8 +5479,7 @@ def read_best_po_table(path, catalog_items):
             run = [y]
     if len(run) < 3:
         return []
-    band = arr[run[1] + 10:run[2] - 10, :]
-    xs = _runs((band < 140).mean(axis=0) > 0.8)  # đường kẻ dọc
+    xs = _runs([v > 0.8 for v in po_scan.dark_profile(img, 1, 140, (0, run[1] + 10, W, run[2] - 10))])  # đường kẻ dọc
     if len(xs) < 10:
         xs = [int(W * f) for f in (0.036, 0.059, 0.117, 0.23, 0.349, 0.393, 0.427, 0.475, 0.532, 0.608)]
     col = {"spec": (xs[3], xs[4]), "qty": (xs[4], xs[5]), "price": (xs[6], xs[7]), "amount": (xs[7], xs[8]), "inquiry": (xs[8], xs[9])}
