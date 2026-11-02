@@ -1473,6 +1473,23 @@ class DedicatedDataStore:
         out.sort(key=lambda o: (str((o["record"] or {}).get("docDate") or o["day"])[:10], o["path"]), reverse=True)
         return out
 
+    def declaration_entries(self):
+        """Mọi tờ khai đang có trên ổ đĩa dưới dạng hồ sơ để hiển thị (Danh mục theo tháng / theo khách dùng chung nguồn với 'Tờ khai đang có').
+        Có hồ sơ đã lưu khớp thư mục thì lấy thông tin hồ sơ; không thì dựng từ tên thư mục/file. Mỗi mục có '_path' (thư mục thật),
+        'customer' (mã khách nếu nhận ra, ngược lại '') và '_label' (tên hiện)."""
+        out = []
+        for o in self.declaration_folders():
+            rec = dict(o["record"]) if o["record"] else {}
+            key = rec.get("customer") or next((k for k, p in PROFILES.items() if self._khach_match(p, o["customer"])), "")
+            parts = os.path.normpath(o["path"]).split(os.sep)
+            mon = next((re.match(r"(\d{4})_Thang_(\d{2})", x) for x in parts if re.match(r"\d{4}_Thang_\d{2}", x)), None)
+            day = rec.get("docDate") or self.guess_date(o["day"], mon.group(1) if mon else None) or (f"{mon.group(1)}-{mon.group(2)}-01" if mon else "")
+            rec.update({"customer": key, "_label": PROFILES[key].get("label", key) if key in PROFILES else o["customer"], "_dir": o["customer"],
+                        "docDate": day, "tkNo": rec.get("tkNo") or o.get("tk") or "", "_path": o["path"], "_status": o.get("status", "")})
+            out.append(rec)
+        out.sort(key=lambda r: (str(r.get("docDate") or ""), r["_path"]), reverse=True)
+        return out
+
     # ---- Sắp xếp lại thư mục cũ theo kiểu thống nhất: <Khách>/<yyyy>_Thang_<mm>/<yyyy-mm-dd> -------------------------
     @staticmethod
     def guess_date(text, default_year=None):

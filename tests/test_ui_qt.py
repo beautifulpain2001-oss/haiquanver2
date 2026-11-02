@@ -293,7 +293,7 @@ def test_customers_add_new_appears_as_card(win, store):
 
 
 # --------------------------------------------------------------------------- Danh mục: theo tháng / theo khách hàng
-def add_record(store, customer, doc_date, tk="", po="PO-X", folder_files=False):
+def add_record(store, customer, doc_date, tk="", po="PO-X", folder_files=True):
     base = next(r for r in store.records if r["customer"] == customer)
     rec = dict(base, id=f"HS-{doc_date}-{po}", docDate=doc_date, tkNo=tk, poNumber=po, zone="WORKING", files=dict(base.get("files") or {}))
     store.records.append(rec)
@@ -363,14 +363,21 @@ def test_customer_view_lists_declared_customs_and_folder_link(win, store, monkey
     assert "PO-CHUA-KHAI" in [cv.table.item(i, 4).text() for i in range(cv.table.rowCount())]
 
 
-def test_folder_button_disabled_when_folder_missing(win, store):
-    add_record(store, "kodi", "2026-09-11", tk="306222222222", po="PO-CHUA-XUAT")
+def test_catalog_lists_only_real_folders_like_declarations_page(win, store):
+    """Danh mục và 'Tờ khai đang có' dùng chung nguồn là thư mục thật: hồ sơ chưa có thư mục không hiện, thư mục chưa có hồ sơ vẫn hiện."""
+    add_record(store, "kodi", "2026-09-11", tk="306222222222", po="PO-CHUA-XUAT", folder_files=False)
+    d = os.path.join(store.customs_root(), "Arizon", "2026_Thang_11", "2026-11-02")
+    os.makedirs(d)
+    open(os.path.join(d, "308389024810_tokhai.pdf"), "w").write("x")
     win.nav.setCurrentRow(3)
     win.catalog.tabs.setCurrentIndex(1)
     cv = win.catalog.by_customer
+    cv.list.setCurrentRow(next(i for i in range(cv.list.count()) if cv.list.item(i).text().startswith("Arizon")))
+    assert "308389024810" in [cv.table.item(r, 2).text() for r in range(cv.table.rowCount())]
+    assert cv.table.cellWidget(0, 10).isEnabled()
     cv.list.setCurrentRow(cv.keys.index("kodi"))
-    r = [cv.table.item(i, 4).text() for i in range(cv.table.rowCount())].index("PO-CHUA-XUAT")
-    assert not cv.table.cellWidget(r, 10).isEnabled()
+    cv.all_box.setChecked(True)
+    assert "PO-CHUA-XUAT" not in [cv.table.item(i, 4).text() for i in range(cv.table.rowCount())]
 
 
 def test_catalog_and_customer_pages_list_data(win):

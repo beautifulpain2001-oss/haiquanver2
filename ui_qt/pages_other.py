@@ -584,14 +584,14 @@ class RecordTable(QTableWidget):
             self.setColumnHidden(c, True)
 
     def folder_of(self, rec):
-        return self.store.get_record_folder_path(rec)
+        return rec.get("_path") or self.store.get_record_folder_path(rec)
 
     def set_records(self, recs):
         self.recs = list(recs)
         self.setRowCount(len(self.recs))
         for r, rec in enumerate(self.recs):
             folder = self.folder_of(rec)
-            label = self.core.PROFILES.get(rec.get("customer", ""), {}).get("label", rec.get("customer", ""))
+            label = rec.get("_label") or self.core.PROFILES.get(rec.get("customer", ""), {}).get("label", rec.get("customer", ""))
             vals = [label, rec.get("docDate", ""), rec.get("tkNo") or "Chưa khai", rec.get("luong", ""), rec.get("poNumber", ""),
                     rec.get("pxkNo") or "Chờ cấp", rec.get("hdNo") or "Chờ ký", widgets.fmt_num(rec.get("totalAmount")), rec.get("workedBy") or "", folder]
             for c, v in enumerate(vals):
@@ -624,7 +624,7 @@ class CustomerView(QWidget):
 
     def __init__(self, core, store):
         super().__init__()
-        self.core, self.store, self.keys = core, store, []
+        self.core, self.store, self.keys, self.entries = core, store, [], []
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 10, 0, 0)
         self.list = QListWidget()
@@ -648,19 +648,24 @@ class CustomerView(QWidget):
         lay.addLayout(right, 1)
 
     def records_of(self, key):
-        recs = [r for r in self.store.records if r.get("customer") == key]
-        return sorted(recs, key=lambda r: str(r.get("docDate") or ""), reverse=True)
+        return [r for r in self.entries if (r.get("customer") or "dir:" + r.get("_dir", "")) == key]
 
     def refresh(self):
         keep = self.keys[self.list.currentRow()] if 0 <= self.list.currentRow() < len(self.keys) else None
-        self.keys = list(self.core.PROFILES)
+        self.entries = self.store.declaration_entries()  # cùng nguồn với trang 'Tờ khai đang có': quét thư mục thật
+        self.keys = list(self.core.PROFILES) + sorted({"dir:" + r["_dir"] for r in self.entries if not r.get("customer")})
         self.list.blockSignals(True)
         self.list.clear()
         for k in self.keys:
             n = sum(1 for r in self.records_of(k) if _declared(r))
-            self.list.addItem(f"{self.core.PROFILES[k].get('label') or k}  ·  {n} tờ khai đã khai")
+            self.list.addItem(f"{self.label_of(k)}  ·  {n} tờ khai đã khai")
         self.list.blockSignals(False)
         self.list.setCurrentRow(self.keys.index(keep) if keep in self.keys else 0)
+
+    def label_of(self, key):
+        if key.startswith("dir:"):
+            return key[4:]
+        return self.core.PROFILES[key].get("label") or key
 
     def show_customer(self, row):
         if not (0 <= row < len(self.keys)):
@@ -668,8 +673,8 @@ class CustomerView(QWidget):
         key = self.keys[row]
         recs = self.records_of(key)
         shown = recs if self.all_box.isChecked() else [r for r in recs if _declared(r)]
-        label = self.core.PROFILES[key].get("label") or key
-        self.title.setText(f"{label} — {sum(1 for r in recs if _declared(r))} tờ khai đã khai" + (f" · {len(recs)} hồ sơ" if self.all_box.isChecked() else ""))
+        label = self.label_of(key)
+        self.title.setText(f"{label} — {sum(1 for r in recs if _declared(r))} tờ khai đã khai" + (f" · {len(recs)} thư mục" if self.all_box.isChecked() else ""))
         self.table.set_records(shown)
         self.empty.setText("" if shown else (f"Khách {label} chưa có tờ khai nào được ghi nhận." + ("" if self.all_box.isChecked() else " Tích “Hiện cả hồ sơ chưa khai tờ khai” để xem các hồ sơ khác.")))
 
@@ -679,7 +684,7 @@ class MonthView(QWidget):
 
     def __init__(self, core, store):
         super().__init__()
-        self.core, self.store = core, store
+        self.core, self.store, self.entries = core, store, []
         self.current = datetime.date.today().strftime("%Y-%m")
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 10, 0, 0)
@@ -708,12 +713,13 @@ class MonthView(QWidget):
         lay.addWidget(self.empty)
 
     def months(self):
-        found = {_month_of(r) for r in self.store.records} - {""}
+        found = {_month_of(r) for r in self.entries} - {""}
         found.add(datetime.date.today().strftime("%Y-%m"))
         return sorted(found, reverse=True)
 
     def refresh(self, month=None):
         keep = month or self.combo.currentData() or self.current  # lần đầu: tháng hiện tại
+        self.entries = self.store.declaration_entries()  # quét thư mục thật, cùng nguồn với 'Tờ khai đang có'
         months = self.months()
         self.combo.blockSignals(True)
         self.combo.clear()
@@ -730,7 +736,7 @@ class MonthView(QWidget):
 
     def show_month(self, _i=None):
         m = self.combo.currentData()
-        recs = sorted((r for r in self.store.records if _month_of(r) == m), key=lambda r: str(r.get("docDate") or ""), reverse=True)
+        recs = sorted((r for r in self.entries if _month_of(r) == m), key=lambda r: str(r.get("docDate") or ""), reverse=True)
         self.prev.setEnabled(self.combo.currentIndex() < self.combo.count() - 1)
         self.next.setEnabled(self.combo.currentIndex() > 0)
         total = sum(float(r.get("totalAmount") or 0) for r in recs)
