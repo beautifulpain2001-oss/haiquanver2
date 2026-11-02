@@ -21,6 +21,7 @@ class Lot:
         self.selected_dates = []  # ngày giao được chọn để khai; chọn nhiều ngày = một invoice, một tờ khai
         self.record_id = None  # mã hồ sơ đang sửa (None = hồ sơ mới)
         self.po_files = []  # file PO gốc đã nạp (được lưu cùng chứng từ)
+        self.read_text = ""  # câu tóm tắt kết quả đọc PO (hiện ở đầu bước ③)
         self.exported = {}  # ô chứng từ của hồ sơ (vat, pxk, pkl, tk) -> file
         self.files = []  # mọi file đã xuất trong lô này, để hiển thị
         self.saved = False
@@ -74,6 +75,7 @@ class Lot:
         if res.get("path"):
             self.po_files = (self.po_files if res.get("append") else []) + [res["path"]]
         self.items = res["items"]
+        self.read_text = (res.get("read_report") or {}).get("text", "")
         self.po_dates = res["po_dates"]
         self.form["po"] = res["po"] or self.form["po"]
         if res["po_date"]:
@@ -103,6 +105,10 @@ class Lot:
     def save_item(self, vals, idx=None):
         base = self.items[idx] if idx is not None else None
         item = self.core.lot_item_from_values(self.store, self.customer, vals, self.form.get("tare", ""), base)
+        if base is None:
+            item["read"] = "tay"  # dòng thêm bằng tay
+        elif base.get("read") in ("loi", "suy_ra"):
+            item["read"], item["read_note"] = "tay", "Đã nhập/sửa tay"  # người dùng đã xác nhận dòng máy không đọc chắc
         if idx is None:
             self.items.append(item)
         else:
@@ -123,6 +129,41 @@ class Lot:
         for i, it in enumerate(self.items, 1):
             it["stt"] = i
             it["amount"] = round(float(it.get("qty", 0)) * float(it.get("price", 0)))
+
+    # ---- trạng thái đọc PO theo từng dòng -------------------------------------
+    def row_status(self, it):
+        """(mã, nhãn, ghi chú): mã ok/check/bad/hand hoặc '' khi dòng không có thông tin đọc (PO đọc theo cách cũ)."""
+        r = it.get("read")
+        code = {"ok": "ok", "suy_ra": "check", "loi": "bad", "tay": "hand"}.get(r, "")
+        return code, self.core.READ_LABELS.get(r, ""), str(it.get("read_note") or "")
+
+    def has_read_info(self):
+        return any(it.get("read") for it in self.items)
+
+    def read_counts(self):
+        n = {"ok": 0, "check": 0, "bad": 0, "hand": 0}
+        for it in self.items:
+            c = self.row_status(it)[0]
+            if c:
+                n[c] += 1
+        return n
+
+    def attention_rows(self):
+        """Chỉ số các dòng cần xem: chưa đọc được trước, rồi dòng phải suy ra."""
+        bad = [i for i, it in enumerate(self.items) if it.get("read") == "loi"]
+        chk = [i for i, it in enumerate(self.items) if it.get("read") == "suy_ra"]
+        return bad + chk
+
+    # ---- tra mặt hàng để thêm dòng ---------------------------------------------
+    def search_items(self, query, limit=60):
+        return self.core.lot_search_items(self.store, self.customer, query, limit) if self.customer else []
+
+    def add_from_catalog(self, hit, qty, po=""):
+        item = self.core.lot_item_from_catalog(self.store, self.customer, hit, qty, po or str(self.form.get("po", "")).split(" + ")[-1], self.form.get("tare", ""))
+        item["read"] = "tay"
+        self.items.append(item)
+        self.saved = False
+        return item
 
     def row_issues(self, it):
         out = []
@@ -152,6 +193,13 @@ class Lot:
             return ["Chưa chọn khách hàng."], warns
         if not self.items:
             return ["Chưa có dòng hàng nào. Hãy nạp file PO ở bước ② hoặc thêm dòng ở bước ③."], warns
+        bad = [i for i, it in enumerate(self.items, 1) if it.get("read") == "loi"]
+        if bad:
+            errors.append(f"Còn {len(bad)} dòng chưa đọc được từ PO (dòng {', '.join(map(str, bad))}). Hãy nhập tay (bấm đúp vào dòng) hoặc xóa dòng đó.")
+            return errors, warns
+        chk = [i for i, it in enumerate(self.items, 1) if it.get("read") == "suy_ra"]
+        if chk:
+            warns.append(f"Dòng {', '.join(map(str, chk))} máy phải suy ra từ ô khác của PO: hãy so lại với PO.")
         if not str(self.form.get("po", "")).strip():
             warns.append("Chưa nhập số PO.")
         if not str(self.form.get("pxk", "")).strip():

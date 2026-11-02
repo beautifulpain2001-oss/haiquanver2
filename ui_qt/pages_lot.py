@@ -4,7 +4,7 @@ import html
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from shiboken6 import isValid
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame, QGridLayout, QGroupBox,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QProgressBar, QPushButton, QScrollArea, QStackedWidget,
@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import theme, widgets
-from .dialogs import ItemDialog
+from .dialogs import ItemDialog, LookupDialog
 from .state import Lot
 
 STEPS = ["① Chọn khách hàng", "② Nạp file PO", "③ Kiểm tra dòng hàng", "④ Thông tin chuyến hàng", "⑤ Xuất & lưu hồ sơ"]
@@ -273,8 +273,11 @@ class PoStep(QWidget):
 
 
 # --------------------------------------------------------------------------- ② dòng hàng
-COLS = ["STT", "Số PO", "Mã hàng", "Tên hàng hóa & quy cách", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền", "SL/kiện",
+COLS = ["STT", "Đọc PO", "Số PO", "Mã hàng", "Tên hàng hóa & quy cách", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền", "SL/kiện",
         "kg/chiếc", "Số kiện", "KL tịnh", "KL cả bì", "Lưu ý"]
+C_STT, C_READ, C_PO, C_CODE, C_NAME, C_UNIT, C_QTY, C_NOTE = 0, 1, 2, 3, 4, 5, 6, 14
+STATUS_BG = {"bad": "#FDE8E8", "check": "#FDF6B2", "hand": "#E1EFFE"}
+STATUS_FG = {"ok": "#03543F", "check": "#92400E", "bad": "#9B1C1C", "hand": "#1E429F"}
 
 
 class ItemsStep(QWidget):
@@ -284,17 +287,47 @@ class ItemsStep(QWidget):
         super().__init__()
         self.setObjectName("inner")
         self.lot = lot
+        self.filter = "all"
         lay = QVBoxLayout(self)
         lay.setContentsMargins(20, 16, 20, 16)
         lay.setSpacing(10)
+        # Kết quả đọc PO: một câu rõ ràng ngay đầu bước, màu + biểu tượng + chữ (không chỉ dựa vào màu)
+        self.banner = QLabel("")
+        self.banner.setWordWrap(True)
+        self.banner.hide()
+        lay.addWidget(self.banner)
         bar = QHBoxLayout()
-        for text, fn in (("➕  Thêm dòng", self.add), ("✏  Sửa dòng", self.edit), ("🗑  Xóa dòng", self.delete), ("🔄  Tính lại bì / trọng lượng", self.recalc)):
+        self.lookup_btn = QPushButton("🔎  Tra mã để thêm dòng")
+        self.lookup_btn.setToolTip("Gõ mã, tên hoặc quy cách (VD 467 250g) rồi chọn mặt hàng và nhập số lượng. Ctrl+F")
+        self.lookup_btn.clicked.connect(self.lookup)
+        bar.addWidget(self.lookup_btn)
+        for text, fn in (("➕  Thêm dòng trống", self.add), ("✏  Sửa dòng", self.edit), ("🗑  Xóa dòng", self.delete), ("🔄  Tính lại bì / trọng lượng", self.recalc)):
             b = QPushButton(text)
             b.setObjectName("sec")
             b.clicked.connect(fn)
             bar.addWidget(b)
         bar.addStretch(1)
+        self.next_btn = QPushButton("⏭  Dòng cần xem tiếp")
+        self.next_btn.setObjectName("sec")
+        self.next_btn.setToolTip("Nhảy tới dòng chưa đọc được / phải suy ra. F3")
+        self.next_btn.clicked.connect(self.goto_next)
+        bar.addWidget(self.next_btn)
         lay.addLayout(bar)
+        # lọc nhanh theo trạng thái đọc
+        self.chips = QHBoxLayout()
+        self.chip_btns = {}
+        for key, text in (("all", "Tất cả"), ("bad", "❌ Chưa đọc được"), ("check", "🟡 Cần kiểm tra"), ("ok", "✅ Đọc đủ")):
+            b = QPushButton(text)
+            b.setObjectName("chip")
+            b.setCheckable(True)
+            b.clicked.connect(lambda _=False, k=key: self.set_filter(k))
+            self.chips.addWidget(b)
+            self.chip_btns[key] = b
+        self.chips.addStretch(1)
+        self.chip_wrap = QWidget()
+        self.chip_wrap.setLayout(self.chips)
+        self.chips.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self.chip_wrap)
         self.table = QTableWidget(0, len(COLS))
         self.table.setHorizontalHeaderLabels(COLS)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -304,15 +337,31 @@ class ItemsStep(QWidget):
         self.table.setAlternatingRowColors(True)
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.ResizeToContents)
-        hh.setSectionResizeMode(3, QHeaderView.Interactive)
-        self.table.setColumnWidth(3, 210)
-        self.table.setColumnHidden(0, True)  # STT: không cần để soát số liệu
+        hh.setSectionResizeMode(C_NAME, QHeaderView.Interactive)
+        self.table.setColumnWidth(C_NAME, 260)
+        hh.setStretchLastSection(True)
+        self.table.setColumnHidden(C_STT, True)  # STT: không cần để soát số liệu
         self.table.doubleClicked.connect(lambda _i: self.edit())
         lay.addWidget(self.table, 1)
-        self.empty = _label("Chưa có dòng hàng. Quay lại bước ② để nạp file PO, hoặc bấm “Thêm dòng”.", "hint", wrap=True)
+        self.empty = _label("Chưa có dòng hàng. Quay lại bước ② để nạp file PO, hoặc bấm “Tra mã để thêm dòng”.", "hint", wrap=True)
         lay.addWidget(self.empty)
         self.summary = _label("", "h2")
         lay.addWidget(self.summary)
+        for key, fn in (("F3", self.goto_next), ("Ctrl+F", self.lookup)):
+            sc = QShortcut(QKeySequence(key), self)
+            sc.setContext(Qt.WidgetWithChildrenShortcut)
+            sc.activated.connect(fn)
+
+    def set_filter(self, key):
+        self.filter = key
+        self.apply_filter()
+
+    def apply_filter(self):
+        for k, b in self.chip_btns.items():
+            b.setChecked(k == self.filter)
+        for r, it in enumerate(self.lot.items):
+            code = self.lot.row_status(it)[0]
+            self.table.setRowHidden(r, not (self.filter == "all" or code == self.filter or (self.filter == "check" and code == "hand" and False)))
 
     def refresh(self):
         lot, core = self.lot, self.lot.core
@@ -321,29 +370,99 @@ class ItemsStep(QWidget):
         warn_rows = 0
         for r, it in enumerate(lot.items):
             issues = lot.row_issues(it)
-            warn_rows += bool(issues)
-            vals = [it.get("stt"), it.get("po", ""), it.get("ma_sp", ""), it.get("ten_sp", ""), it.get("unit", ""),
+            code, label, note = lot.row_status(it)
+            if code in ("bad", "check", "hand") and code != "hand":
+                issues = ([note] if note else []) + [x for x in issues if code != "bad"]
+            warn_rows += bool(issues) or code in ("bad", "check")
+            vals = [it.get("stt"), label, it.get("po", ""), it.get("ma_sp", ""), it.get("ten_sp", ""), it.get("unit", ""),
                     widgets.fmt_num(it.get("qty")), widgets.fmt_num(it.get("price")), widgets.fmt_num(it.get("amount")),
                     f"{float(it.get('div') or 0):g}", f"{float(it.get('kg') or 0):g}", f"{float(it.get('kien') or 0):g}",
                     widgets.fmt_num(it.get("net"), 2), widgets.fmt_num(it.get("gross"), 2), "; ".join(issues)]
             for c, v in enumerate(vals):
                 cell = QTableWidgetItem("" if v is None else str(v))
-                if c in (5, 6, 7, 8, 9, 10, 11, 12):
+                if 6 <= c <= 13:
                     cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                if issues:
+                if code in STATUS_BG:
+                    cell.setBackground(QColor(STATUS_BG[code]))
+                elif issues:
                     cell.setBackground(QColor("#FEF3C7"))
+                if c == C_READ and code:
+                    cell.setForeground(QColor(STATUS_FG[code]))
+                    f = cell.font()
+                    f.setBold(True)
+                    cell.setFont(f)
+                    if note:
+                        cell.setToolTip(note)
+                if c == C_NOTE and issues:
+                    cell.setToolTip("; ".join(issues))
                 self.table.setItem(r, c, cell)
-        # Cột Số PO chỉ cần khi lô có nhiều PO; ĐVT ít khi cần soát: ẩn để bảng vừa màn hình
-        self.table.setColumnHidden(1, len({str(x.get("po") or "") for x in lot.items}) <= 1)
-        self.table.setColumnHidden(4, True)
+        # Cột Số PO chỉ cần khi lô có nhiều PO; ĐVT ít khi cần soát; cột "Đọc PO" chỉ khi PO được đọc có kiểm tra từng dòng
+        self.table.setColumnHidden(C_PO, len({str(x.get("po") or "") for x in lot.items}) <= 1)
+        self.table.setColumnHidden(C_UNIT, True)
+        has_read = lot.has_read_info()
+        self.table.setColumnHidden(C_READ, not has_read)
+        self.chip_wrap.setVisible(has_read)
+        if has_read:
+            n = lot.read_counts()
+            self.chip_btns["bad"].setText(f"❌ Chưa đọc được ({n['bad']})")
+            self.chip_btns["check"].setText(f"🟡 Cần kiểm tra ({n['check']})")
+            self.chip_btns["ok"].setText(f"✅ Đọc đủ ({n['ok'] + n['hand']})")
+            self.chip_btns["all"].setText(f"Tất cả ({len(lot.items)})")
+        else:
+            self.filter = "all"
+        self.next_btn.setVisible(has_read)
+        self.next_btn.setEnabled(bool(lot.attention_rows()))
+        self.apply_filter()
+        self.show_banner()
         self.empty.setVisible(not lot.items)
         if lot.items:
             t = core.lot_totals(lot.record())
             self.summary.setText(f"{len(lot.items)} dòng · SL {widgets.fmt_num(t['qty'])} · Thành tiền {widgets.fmt_num(t['amount'])} VNĐ · "
                                  f"Tịnh {widgets.fmt_num(t['net'], 2)} kg · Cả bì {widgets.fmt_num(t['gross'], 2)} kg"
-                                 + (f"   ⚠ {warn_rows} dòng cần xem (tô vàng)" if warn_rows else "   ✅ Các dòng đều đủ thông tin"))
+                                 + (f"   ⚠ {warn_rows} dòng cần xem (có nền màu)" if warn_rows else "   ✅ Các dòng đều đủ thông tin"))
         else:
             self.summary.setText("")
+
+    def show_banner(self):
+        lot = self.lot
+        if not lot.has_read_info():
+            self.banner.hide()
+            return
+        n = lot.read_counts()
+        rep = getattr(lot, "read_text", "") or ""
+        if n["bad"]:
+            bad = [str(i) for i, it in enumerate(lot.items, 1) if it.get("read") == "loi"]
+            self.banner.setObjectName("banner_bad")
+            self.banner.setText(f"❌  Chưa đọc được {n['bad']}/{len(lot.items)} dòng (dòng {', '.join(bad)}). Bấm đúp vào dòng tô đỏ để nhập tay, hoặc ⏭ để nhảy tới dòng đó.")
+        elif n["check"]:
+            chk = [str(i) for i, it in enumerate(lot.items, 1) if it.get("read") == "suy_ra"]
+            self.banner.setObjectName("banner_warn")
+            self.banner.setText(f"🟡  Đọc đủ {len(lot.items)} dòng nhưng dòng {', '.join(chk)} máy phải suy ra từ ô khác của PO: hãy so lại với PO." + (f"  {rep}" if rep else ""))
+        else:
+            self.banner.setObjectName("banner_ok")
+            self.banner.setText(f"✅  Đã đọc đủ {len(lot.items)}/{len(lot.items)} dòng." + (f"  {rep}" if rep else ""))
+        self.banner.style().unpolish(self.banner)
+        self.banner.style().polish(self.banner)
+        self.banner.show()
+
+    def goto_next(self):
+        rows = self.lot.attention_rows()
+        if not rows:
+            return
+        cur = self.selected()
+        nxt = next((r for r in rows if cur is None or r > cur), rows[0])
+        if self.table.isRowHidden(nxt):
+            self.set_filter("all")
+        self.table.selectRow(nxt)
+        self.table.scrollToItem(self.table.item(nxt, C_NAME))
+        self.table.setFocus()
+
+    def lookup(self):
+        dlg = LookupDialog(self.lot, self)
+        dlg.exec()
+        if dlg.added:
+            self.refresh()
+            self.changed.emit()
 
     def selected(self):
         rows = self.table.selectionModel().selectedRows()

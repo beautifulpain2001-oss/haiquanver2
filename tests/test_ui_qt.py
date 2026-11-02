@@ -139,7 +139,7 @@ def test_item_dialog_adds_and_flags_missing_norm(win, tmp_path):
     dlg.save()
     win.lot.go(2)
     assert win.lot.step3.table.rowCount() == 3
-    assert "Thiếu kg/chiếc" in win.lot.step3.table.item(2, 13).text()
+    assert "Thiếu kg/chiếc" in win.lot.step3.table.item(2, 14).text()
     assert "1 dòng cần xem" in win.lot.step3.summary.text()
 
 
@@ -509,3 +509,57 @@ def test_add_files_dialog_builds_plan_and_copies(win, tmp_path):
     dlg.add()
     day = os.path.join(win.store.customs_root(), "Able", "2026_Thang_04", "2026-04-01")
     assert os.path.isfile(os.path.join(day, "HĐ 113.pdf")) and os.path.isfile(os.path.join(day, "DO_PHAN_MEM_TAO", "invoice_IV PK.xlsx")) and dlg.added == 4
+
+
+def _read_lot(win, store):
+    """Lô giả có PO được đọc theo từng dòng: 1 đọc đủ, 1 suy ra, 1 chưa đọc được."""
+    from PySide6.QtCore import Qt as _Qt  # noqa: F401
+    win.lot.step1.cards["kodi"].click()
+    base = dict(win.lot.lot.new_item_values(), ten_sp="Hàng A", qty=100, price=1000, kg=0.1, div=10)
+    lot = win.lot.lot
+    lot.items = [dict(lot.core.lot_item_from_values(store, "kodi", base, "1.0"), read="ok"),
+                 dict(lot.core.lot_item_from_values(store, "kodi", dict(base, ten_sp="Hàng B"), "1.0"), read="suy_ra", read_note="suy ra từ thành tiền"),
+                 {"stt": 3, "po": "P", "hs": "", "ma_sp": "", "ten_sp": "", "unit": "cái", "qty": 0, "price": 0, "amount": 0, "div": 0, "kg": 0, "kien": 0, "net": 0.0,
+                  "gross": 0.0, "tare": 0.0, "read": "loi", "read_note": "Không đọc được dòng này, hãy nhập tay"}]
+    return lot
+
+
+def test_items_step_shows_read_status_per_line_and_blocks_export(win, store):
+    lot = _read_lot(win, store)
+    st = win.lot.step3
+    st.refresh()
+    assert not st.table.isColumnHidden(1)
+    assert [st.table.item(r, 1).text() for r in range(3)] == ["✅ Đọc đủ", "🟡 Suy ra, kiểm tra", "❌ Chưa đọc được"]
+    assert "Chưa đọc được 1/3 dòng" in st.banner.text() and "dòng 3" in st.banner.text() and st.banner.objectName() == "banner_bad"
+    st.set_filter("bad")
+    assert [st.table.isRowHidden(r) for r in range(3)] == [True, True, False]
+    st.set_filter("all")
+    st.table.selectRow(0)
+    st.goto_next()
+    assert st.selected() == 2  # nhảy tới dòng chưa đọc được trước
+    errors, warns = lot.validate()
+    assert errors and "dòng 3" in errors[0]
+    lot.save_item({"po": "P", "ma_sp": "X", "ten_sp": "Hàng C", "hs": "48229090", "unit": "cái", "qty": "5", "price": "10", "div": "1", "kg": "1"}, 2)
+    assert lot.items[2]["read"] == "tay"
+    errors, warns = lot.validate()
+    assert not errors and any("Dòng 2" in w for w in warns)
+
+
+def test_lookup_dialog_searches_and_adds_lines(win, store):
+    from ui_qt.dialogs import LookupDialog
+    win.lot.step1.cards["kodi"].click()
+    lot = win.lot.lot
+    lot.items = []
+    dlg = LookupDialog(lot)
+    first = dlg.hits[0]
+    dlg.search.setText(first["ma_sp"] or first["ten_sp"][:6])
+    dlg.run_search()
+    assert dlg.table.rowCount() >= 1
+    dlg.add()  # chưa nhập số lượng: báo ngay cạnh ô, không thêm
+    assert "số lượng" in dlg.msg.text() and not lot.items
+    dlg.qty.setText("250")
+    dlg.add()
+    assert len(lot.items) == 1 and lot.items[0]["qty"] == 250 and lot.items[0]["read"] == "tay" and "Đã thêm" in dlg.msg.text()
+    dlg.search.setText("khong-co-mat-hang-nay")
+    dlg.run_search()
+    assert dlg.table.rowCount() == 0 and "Không thấy" in dlg.empty.text()

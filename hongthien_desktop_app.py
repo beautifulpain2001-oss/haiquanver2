@@ -102,6 +102,10 @@ if pytesseract is not None and os.name == "nt":
 
 # Thư mục gốc chứa toàn bộ hồ sơ hải quan trong kho dữ liệu: HAI_QUAN/<Khách>/<Năm>_Thang_<mm>/<Ngày>/
 try:
+    import po_scan
+except ImportError:
+    po_scan = None
+try:
     import mau_chung_tu
 except ImportError:  # thiếu module: dùng mẫu dựng sẵn trong phần mềm
     mau_chung_tu = None
@@ -4851,6 +4855,88 @@ def apply_add_files(plan):
     return done
 
 
+READ_LABELS = {"ok": "✅ Đọc đủ", "suy_ra": "🟡 Suy ra, kiểm tra", "loi": "❌ Chưa đọc được", "tay": "✍ Nhập tay"}
+
+
+def read_report(lines, check=""):
+    """Tóm tắt kết quả đọc PO theo từng dòng: {ok, suy_ra, loi, total, bad_rows, text}. Dòng chưa đọc được nằm sẵn trong bảng (tô đỏ) để nhập tay."""
+    n = {k: sum(1 for x in lines if x.get("read") == k) for k in ("ok", "suy_ra", "loi")}
+    total = len(lines)
+    bad = [i for i, x in enumerate(lines, 1) if x.get("read") == "loi"]
+    warn = [i for i, x in enumerate(lines, 1) if x.get("read") == "suy_ra"]
+    if not bad and not warn:
+        text = f"✅ Đã đọc đủ {total}/{total} dòng."
+    else:
+        text = f"Đọc được {total - len(bad)}/{total} dòng."
+        if bad:
+            text += f" ❌ Chưa đọc được dòng {', '.join(map(str, bad))}: đã thêm sẵn ở bảng, hãy nhập tay."
+        if warn:
+            text += f" 🟡 Dòng {', '.join(map(str, warn))} phải suy ra từ ô khác: hãy so với PO."
+    if check:
+        text += " " + check
+    return {**n, "total": total, "bad_rows": bad, "warn_rows": warn, "text": text}
+
+
+def lines_from_able_scan(rows, prof, catalog, store, tare_val=0.0):
+    """Dòng hàng từ po_scan.read_able_pdf: dòng đọc được dựng như dòng PO thường; dòng chưa đọc được thành dòng trống để nhập tay.
+    Mỗi dòng mang read (ok/suy_ra/loi), read_note và ref (mã tham chiếu cột ghi chú của PO)."""
+    lines = []
+    for r in rows:
+        if r["read"] == "loi":
+            lines.append({"stt": len(lines) + 1, "po": r.get("po", ""), "hs": (prof.get("customs") or {}).get("hs", "") or "48229090", "ma_sp": "", "ten_sp": "", "ten_hq": "",
+                          "unit": prof.get("unit", "cái"), "qty": 0, "price": 0, "amount": 0, "div": 0, "kg": 0, "kien": 0, "net": 0.0, "gross": 0.0,
+                          "tare": tare_val, "read": "loi", "read_note": r["read_note"], "ref": r.get("ref", "")})
+            continue
+        one = lines_from_erp_rows([{"code": r["code"], "desc": r["name"], "qty": r["qty"], "price": r["price"]}], r.get("po", ""), prof, catalog,
+                                  data_store=store, tare_val=tare_val)[0]
+        one.update({"stt": len(lines) + 1, "read": r["read"], "read_note": r["read_note"], "ref": r.get("ref", "")})
+        lines.append(one)
+    return lines
+
+
+def lot_search_items(store, customer, query, limit=60):
+    """Tra mặt hàng của khách để thêm dòng: gõ mã, tên, quy cách (38 x 5 x 467, 38*5*467) hoặc gam (250g). Mọi từ gõ vào đều phải có trong mã/tên.
+    Trả [{ma_sp, ten_sp, price, unit, div, kg, hs}] gộp danh mục khách và data tổng, không trùng."""
+    def norm(t):
+        t = strip_accents_upper(str(t or "")).lower()
+        t = re.sub(r"(?<=\d)\s*[x×*]\s*(?=\d)", "*", t)  # 38 x 5 x 467 -> 38*5*467
+        t = re.sub(r"(?<=\d)\s+(?=g\b)", "", t)  # '250 g' -> '250g'
+        return t.replace(",", ".")
+    toks = [x for x in norm(query).split() if x]
+    seen, out = set(), []
+    cat = list(store.items_for_customer(customer) or [])
+    for it in cat:
+        mem = store.get_item_norm(it.get("name")) or {}
+        out_item = {"ma_sp": str(it.get("code") or ""), "ten_sp": it.get("name", ""), "price": it.get("price", 0), "unit": it.get("unit", ""),
+                    "div": mem.get("div") or it.get("div", 0), "kg": mem.get("kg") or it.get("kg", 0), "hs": mem.get("hs") or it.get("hs", "")}
+        hay = norm(out_item["ma_sp"] + " " + out_item["ten_sp"])
+        if all(t in hay for t in toks):
+            key = (out_item["ma_sp"], out_item["ten_sp"])
+            if key not in seen:
+                seen.add(key)
+                out.append(out_item)
+    try:
+        for x in store.dt_items_for(customer):
+            name = x.get("ten") or ""
+            hay = norm(str(x.get("ma_hang") or "") + " " + name + " " + str(x.get("ma_kh") or ""))
+            key = (str(x.get("ma_kh") or x.get("ma_hang") or ""), name)
+            if name and all(t in hay for t in toks) and key not in seen and not any(o["ten_sp"] == name for o in out):
+                seen.add(key)
+                out.append({"ma_sp": key[0], "ten_sp": name, "price": 0, "unit": (PROFILES.get(customer) or {}).get("unit", ""), "div": x.get("kien") or 0,
+                            "kg": x.get("kg") or 0, "hs": x.get("hs") or ""})
+    except Exception:
+        pass
+    return out[:limit]
+
+
+def lot_item_from_catalog(store, customer, hit, qty, po="", tare_text="1.0"):
+    """Dòng hàng mới từ một kết quả tra mặt hàng + số lượng nhập."""
+    prof = PROFILES[customer]
+    vals = {"po": po, "ma_sp": hit.get("ma_sp", ""), "ten_sp": hit.get("ten_sp", ""), "hs": hit.get("hs") or "48229090", "unit": hit.get("unit") or prof.get("unit", "cái"),
+            "qty": qty, "price": hit.get("price") or 0, "div": hit.get("div") or 0, "kg": hit.get("kg") or 0}
+    return lot_item_from_values(store, customer, vals, tare_text)
+
+
 def is_able(prof):
     """Khách Able (nhận theo tên công ty): PO chữ Hán, mã hàng = quy cách + gam (VD 38*5*460*250g), bản in/không in."""
     return (prof or {}).get("poStyle") == "able" or bool(re.search(r"\bABLE\b", str((prof or {}).get("name") or "").upper()))
@@ -5509,17 +5595,27 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
             tare_v = float(tare_text or 0.0)
         except Exception:
             tare_v = 0.0
-        raw_text = read_document_text(path)
+        scan_rep = None
+        if is_able(prof) and ext == ".pdf" and po_scan is not None and not _pdf_has_text(path):
+            scan_rep = po_scan.read_able_pdf(sys.modules[__name__], path, store.items_for_customer(customer))  # PO scan: đọc từng ô của bảng, mỗi trang một PO
+        raw_text = "" if (scan_rep and scan_rep["rows"]) else read_document_text(path)  # đọc được theo ô rồi thì khỏi OCR cả trang
         po_no, po_date, lines = parse_generic_po_text(raw_text, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
         pcs_rows = parse_pcs_note_rows(raw_text)
         able_rows = [] if pcs_rows or not is_able(prof) else parse_able_po_rows(raw_text, store.items_for_customer(customer))
         erp_rows = pcs_rows or able_rows or erp_rows_repaired(raw_text, store.items_for_customer(customer))
         if pcs_rows:  # PO kiểu Quang Ích: dòng hàng kèm ngày giao và đơn giá ở cột ghi chú
             pass
-        if erp_rows:  # PO in từ ERP có lớp chữ: đọc đúng từng cột, không đoán SL/giá từ cả dòng
+        if scan_rep and scan_rep["rows"]:
+            lines = lines_from_able_scan(scan_rep["rows"], prof, store.items_for_customer(customer), store, tare_v)
+            po_no = lines[0].get("po") or po_no
+            res["read_report"] = read_report(lines, scan_rep.get("check", ""))
+        elif erp_rows:  # PO in từ ERP có lớp chữ: đọc đúng từng cột, không đoán SL/giá từ cả dòng
             lines = lines_from_erp_rows(erp_rows, po_no, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
         elif lines and ext == ".pdf" and "inquiry" in (prof.get("lineRefs") or {}) and not _pdf_has_text(path):
             lines = best_scan_lines(path, prof, store, po_no, po_date, tare_v) or (fix_inquiries_from_scan(path, lines) or lines)
+        if able_rows and lines and not (scan_rep and scan_rep["rows"]):
+            for ln in lines:
+                ln.setdefault("read", "ok")  # PO có lớp chữ: SL x giá đã đối chiếu thành tiền khi đọc
         if lines:
             store.dt_fill_lines(customer, lines)  # thiếu kg/chiếc hoặc SL/kiện: lấy từ data tổng dùng chung
         if not lines:
@@ -5544,6 +5640,8 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
         res.update(ok=True, items=items, po_dates=po_dates, po=" + ".join(pos) if pos else po_no)
         res["msg"] = (f"Đã gộp PO {po_no} ({len(lines)} dòng) vào lô: {len(pos)} PO, {len(items)} dòng."
                       if append else f"Đã đọc PO {po_no or '(chưa rõ số)'} gồm {len(lines)} dòng hàng.")
+        if res.get("read_report"):
+            res["msg"] = res["read_report"]["text"]
         return res
 
     if ext in (".xlsx", ".xls"):

@@ -45,6 +45,14 @@ QPushButton#big:hover {{ background: #276749; }}
 QPushButton#big:disabled {{ background: {LINE}; }}
 QGroupBox {{ border: 1px solid {LINE}; border-radius: 8px; margin-top: 12px; padding: 14px 12px 10px 12px; font-weight: 600; color: {NAVY}; }}
 QGroupBox::title {{ subcontrol-origin: margin; left: 12px; padding: 0 6px; }}
+QLabel#banner_ok {{ background: #DEF7EC; color: {OK}; border-left: 5px solid #0E9F6E; border-radius: 4px; padding: 8px 12px; font-weight: 600; }}
+QLabel#banner_warn {{ background: #FDF6B2; color: {WARN}; border-left: 5px solid #C27803; border-radius: 4px; padding: 8px 12px; font-weight: 600; }}
+QLabel#banner_bad {{ background: #FDE8E8; color: {ERR}; border-left: 5px solid #E02424; border-radius: 4px; padding: 8px 12px; font-weight: 600; }}
+QLabel#banner_info {{ background: #EBF4FF; color: {NAVY}; border-left: 5px solid #3F83F8; border-radius: 4px; padding: 8px 12px; }}
+QPushButton#chip {{ background: #FFFFFF; color: {TEXT}; border: 1px solid {LINE}; border-radius: 14px; padding: 5px 14px; }}
+QPushButton#chip:hover {{ background: #EDF2F7; }}
+QPushButton#chip:checked {{ background: {NAVY}; color: #FFFFFF; border-color: {NAVY}; font-weight: 600; }}
+QPushButton:focus, QPushButton#sec:focus, QPushButton#chip:focus {{ border: 2px solid #3F83F8; }}
 QLineEdit, QComboBox {{ background: #FFFFFF; border: 1px solid {LINE}; border-radius: 6px; padding: 6px 10px; min-height: 24px; font-size: 11pt; }}
 QLineEdit:focus, QComboBox:focus {{ border: 1px solid {NAVY}; }}
 QTableWidget {{ font-size: 10pt; background: #FFFFFF; alternate-background-color: #F7FAFC; border: 1px solid {LINE}; border-radius: 6px; gridline-color: #EDF2F7; }}
