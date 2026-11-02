@@ -111,3 +111,17 @@ def test_bbgh_sheet_lists_items_with_both_parties(data_dir, tmp_path):
     assert cells["A14"] == "Bên nhận: CÔNG TY BBGH GIẢ" and cells["A16"] == "Địa chỉ: Địa chỉ nhận giả"
     assert [cells[f"{c}21"] for c in "ABCDE"] == ["2V01PRK000002 Ống giả 77 x 2.5", "20261001001", "Chiếc", 2500, 11600] and cells["F21"] == "=D21*E21"
     assert "BBGH" in app.customer_extra_docs({"extraDocs": "bbgh, plx"}) and app.DedicatedDataStore.folder_checklist(["PKL", "BBGH"])[0].count("Biên bản bàn giao") == 1
+
+
+def test_data_tong_file_next_to_master_catalog_is_also_found(data_dir, tmp_path):
+    """Người dùng chép DATA_TONG.json ngay thư mục dữ liệu (không vào HAI_QUAN): vẫn đọc được, và ghi lại đúng chỗ đó."""
+    import json
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "DATA_TONG.json").write_text(json.dumps({"version": 1, "items": [{"khach": "K", "ten": "Sản phẩm X", "kg": 0.5, "kg_nguon": "erp"}]}), encoding="utf-8")
+    s = make_store(data_dir, tmp_path)
+    assert s.dt_path() == str(data_dir / "DATA_TONG.json") and len(s.data_tong) == 1
+    s.dt_learn_items  # noqa: B018
+    s._dt_upsert("K", "Sản phẩm Y", kg=0.2, kg_nguon="tay", exact=True)
+    s.dt_save()
+    assert not (data_dir / "HAI_QUAN" / "DATA_TONG.json").exists()
+    assert len(json.loads((data_dir / "DATA_TONG.json").read_text(encoding="utf-8"))["items"]) == 2

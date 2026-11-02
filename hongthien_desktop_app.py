@@ -820,7 +820,10 @@ class DedicatedDataStore:
     DT_RANK = {"tay": 3, "invoice": 2, "erp": 1, "": 0}
 
     def dt_path(self):
-        return os.path.join(self.base_dir, CUSTOMS_ROOT, DT_FILE)
+        """HAI_QUAN/DATA_TONG.json. Nếu người dùng đã để file ngay trong thư mục dữ liệu (cạnh master_catalog.json) mà chưa có bản trong HAI_QUAN thì dùng bản đó."""
+        inner = os.path.join(self.base_dir, CUSTOMS_ROOT, DT_FILE)
+        outer = os.path.join(self.base_dir, DT_FILE)
+        return outer if (not os.path.isfile(inner) and os.path.isfile(outer)) else inner
 
     def dt_load(self):
         data = self._read_json(self.dt_path(), {})
