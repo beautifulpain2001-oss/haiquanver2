@@ -757,9 +757,21 @@ class DedicatedDataStore:
         if not isinstance(data, dict) or not (isinstance(data.get("item_mem"), dict) or isinstance(cust, dict)):
             raise ValueError("File này không phải file dữ liệu học của phần mềm (thiếu mục item_mem).")
         res = {"them": 0, "ghi_de": 0, "bo_qua": 0, "khach": "", "mau": 0}
-        if isinstance(cust, dict):  # khách học sẵn (hồ sơ + danh mục hàng); khách đã có thì giữ nguyên trừ khi chọn ghi đè
+        if isinstance(cust, dict):  # khách học sẵn (hồ sơ + danh mục hàng + file mẫu chứng từ)
             key = re.sub(r"[^a-z0-9_]", "", str(cust.get("key") or "").lower())
-            if key and (overwrite or key not in PROFILES):
+            pname = str((cust.get("profile") or {}).get("name") or "").strip().upper()
+            same = next((k for k, p in PROFILES.items() if k not in BUILTIN_CUSTOMERS and pname and str(p.get("name") or "").strip().upper() == pname), None)
+            if same:  # máy này đã có khách đó (có thể khác mã khách): giữ hồ sơ, chỉ bổ sung mặt hàng mới và file mẫu
+                key = same
+                lst = self.custom_items.setdefault(key, [])
+                for it in cust.get("items") or []:
+                    if it.get("name") and not any(x.get("name") == it["name"] or (it.get("code") and x.get("code") == it["code"]) for x in lst):
+                        self.save_learned_customer(key, dict(PROFILES[key]), [it])
+                res["khach"] = key
+                res["mau"] = self.save_templates(key, cust.get("mau") or {}, overwrite)
+                if overwrite:
+                    self.save_learned_customer(key, {**PROFILES[key], **(cust.get("profile") or {})}, list(cust.get("items") or []))
+            elif key and (overwrite or key not in PROFILES):
                 self.save_learned_customer(key, dict(cust.get("profile") or {}), list(cust.get("items") or []))
                 res["khach"] = key
                 res["mau"] = self.save_templates(key, cust.get("mau") or {}, overwrite)
@@ -1245,17 +1257,38 @@ class DedicatedDataStore:
 # ==============================================================================
 # 3. BỘ QUÉT & PHÂN TÍCH PO OFFLINE 100% TRÊN DESKTOP (GIỮ NGUYÊN LOGIC BẢN GỐC)
 # ==============================================================================
+def _legible_words(img):
+    """Số từ chữ cái (>= 4 ký tự) Tesseract đọc được trên ảnh thu nhỏ: ảnh xoay đúng thì nhiều hơn hẳn ảnh xoay sai."""
+    small = img.copy()
+    small.thumbnail((1500, 1500))
+    try:
+        txt = pytesseract.image_to_string(small, lang="eng", config="--psm 6")
+    except Exception:
+        return 0
+    return len(re.findall(r"[A-Za-z]{4,}", txt))
+
+
 def auto_rotate_scan(img):
     """PO scan bị xoay ngang/ngược (VD trang in khổ ngang đặt dọc): Tesseract OSD đoán góc, xoay lại cho thẳng.
-    Trang đã thẳng hoặc đoán không chắc thì giữ nguyên."""
+    OSD không đoán được thì thử xoay 90/270 độ và chọn hướng đọc được nhiều chữ nhất. Trang đã thẳng thì giữ nguyên."""
     try:
         osd = pytesseract.image_to_osd(img, output_type=pytesseract.Output.DICT)
+        rot = int(osd.get("rotate") or 0) % 360
+        if float(osd.get("orientation_conf") or 0) >= 2.0:
+            return img.rotate(360 - rot, expand=True) if rot else img  # OSD trả góc theo chiều kim đồng hồ, PIL xoay ngược chiều
     except Exception:
-        return img  # thiếu osd.traineddata hoặc trang quá ít chữ
-    rot = int(osd.get("rotate") or 0) % 360
-    if rot and float(osd.get("orientation_conf") or 0) >= 2.0:
-        return img.rotate(360 - rot, expand=True)  # OSD trả góc theo chiều kim đồng hồ, PIL xoay ngược chiều
-    return img
+        pass  # thiếu osd.traineddata hoặc trang quá ít chữ
+    try:
+        base = _legible_words(img)
+        best, best_n = img, base
+        for ang in (90, 270):
+            r = img.rotate(ang, expand=True)
+            n = _legible_words(r)
+            if n > best_n:
+                best, best_n = r, n
+        return best if best_n >= max(base * 1.5, base + 15) else img
+    except Exception:
+        return img
 
 
 def extract_text_from_pdf_or_image_offline(file_path, is_tesa=False, table_mode=False):
@@ -1649,6 +1682,8 @@ def get_vat_and_pxk_ids(rec):
         suf = " pl" if is_pallet else ""
         return f"tesa{d}.{m}{suf}", f"tesa{d}.{m}{suf}"
     if cust not in BUILTIN_CUSTOMERS:
+        if is_arizon(PROFILES.get(cust, {})):  # Arizon: VAT 'HĐ arizon16/10 xk', PXK 'arizon16/10'
+            return f"HĐ arizon{dd}/{mm} xk", f"arizon{dd}/{mm}"
         if is_best_docset(rec):  # Best: 'best 02.11 POS261008053' (nhiều PO thì nối liền các số PO)
             pos = "".join(p for p, _ in rec_po_list(rec))
             return f"{cust} {dd}.{mm} {pos}".strip(), f"{cust} {dd}.{mm} {pos}".strip()
@@ -1728,6 +1763,16 @@ def build_vat_bkav_sheet(wb, rec, sheet_name="VAT_BKAV"):
             23: "Có",
             24: prof.get("emails", "") if idx == 1 else "",
         }
+        if is_arizon(prof) and not is_best_docset(prof):  # Arizon: tên = mã + xuống dòng + tên, không ghi PO, thông tin người mua chỉ ở dòng đầu
+            vals[3] = f"{it.get('ma_sp', '')}\n{it['ten_sp']}".strip() if it.get("ma_sp") else it["ten_sp"]
+            vals[4] = ""
+            vals[10] = None
+            vals[14] = prof.get("buyerPerson", "") or None
+            if idx > 1:
+                for k in (13, 18, 19, 20, 22, 23):
+                    vals.pop(k, None)
+            else:
+                vals[31] = prof.get("province", "") or short_place(prof.get("addr", "")).split(" - ")[-1]
         if is_best_docset(prof):  # Best: thông tin người mua chỉ ghi ở dòng đầu; mọi dòng ghi họ tên người mua; thuế GTGT để trống
             vals[10] = None
             vals[14] = prof.get("buyerPerson", "")
@@ -1821,6 +1866,12 @@ def build_pxk_bkav_sheet(wb, rec, sheet_name="PXK_BKAV"):
             22: ADDR_HT,
             23: prof.get("addrKho") or prof["addr"],
         }
+        if is_arizon(prof) and not is_best_docset(prof):  # Arizon: tên = mã + xuống dòng + tên, không ghi PO, thông tin chuyến chỉ ở dòng đầu
+            vals[4] = ""
+            vals[5] = f"{it.get('ma_sp', '')}\n{it['ten_sp']}".strip() if it.get("ma_sp") else it["ten_sp"]
+            if idx > 1:
+                for k in range(10, 24):
+                    vals.pop(k, None)
         if is_best_docset(prof):  # Best: ghi 'Ô tô tải: <biển số>' (có cách) và chỉ ghi thông tin chuyến ở dòng đầu
             vals[21] = f"Ô tô tải: {xe}"
             if idx > 1:
@@ -2253,6 +2304,11 @@ def build_pkl_shirai_sheet(wb, rec, sheet_name=None):
 def build_invoice_pkl_sheet(wb, rec, sheet_name="Invoice_PKL", skip_h=False):
     if is_best_docset(rec):
         return build_pkl_best_sheet(wb, rec, sheet_name)
+    prof_a = PROFILES.get(rec.get("customer"), {})
+    if rec.get("customer") not in BUILTIN_CUSTOMERS and is_arizon(prof_a):
+        tpl = best_template(prof_a, "pkl")
+        if tpl:  # Invoice theo file mẫu Arizon đã nạp
+            return mau_chung_tu.build_from_template(sys.modules[__name__], "pkl_arizon", wb, rec, prof_a, tpl, sheet_name)
     if rec.get("customer") == "kodi":
         return build_pkl_kodi_sheet(wb, rec, sheet_name, skip_h=skip_h)
     if rec.get("customer") == "shirai":
@@ -2357,8 +2413,12 @@ def customer_extra_docs(prof):
     return codes
 
 
-def is_arizon_plx(prof):
+def is_arizon(prof):
+    """Khách Arizon (nhận theo tên công ty): bộ mặc định + Phụ lục X, hóa đơn/PXK Bkav và Invoice theo mẫu Arizon."""
     return (prof or {}).get("plxStyle") == "arizon" or "ARIZON" in str((prof or {}).get("name") or "").upper()
+
+
+is_arizon_plx = is_arizon
 
 
 def build_plx_arizon_sheet(wb, rec, sheet_name="PLX"):
@@ -2393,7 +2453,7 @@ def build_plx_arizon_sheet(wb, rec, sheet_name="PLX"):
     put("A7", "A7:B7", "Trị giá (FOB):")
     put("C7", None, round(sum(float(x.get("amount") or 0) for x in items)), 13, True, h="left").number_format = "#,##0"
     put("D7", None, "VNĐ", 12, h="left")
-    put("A8", "A8:D8", f"Hóa đơn giá trị gia tăng: {rec.get('hdNo') or ''} Ngày {dmy}")
+    put("A8", "A8:D8", f"Hóa đơn giá trị gia tăng: {rec.get('hdNo') or ''} Ngày {d.day}/{d.month}/{d.year}")
     put("A9", "A9:D9", f"{HT_NAME} xác nhận rằng:")
     thin = Side(style="thin", color="000000")
     box = Border(top=thin, bottom=thin, left=thin, right=thin)
@@ -2412,7 +2472,7 @@ def build_plx_arizon_sheet(wb, rec, sheet_name="PLX"):
     put(f"A{r}", f"A{r}:D{r}", f"Khai tại văn bản này được sản xuất tại Công ty chúng tôi có địa chỉ tại {ADDR_HT.rstrip('.')}, có xuất xứ việt nam và đáp ứng "
         "tiêu chí xuất xứ “CTH” theo quy định tại phụ lục I- quy tắc cụ thể mặt hàng ban hành kèm theo thông tư 03/2023/TT-BCT ngày 14 tháng 02 năm 2023")
     put(f"A{r + 1}", f"A{r + 1}:D{r + 1}", "Công ty cam kết thông tin khai báo trên là đúng và chịu trách nhiệm trước pháp luật về thông tin đã khai.")
-    put(f"B{r + 3}", f"B{r + 3}:D{r + 3}", f"Bắc Ninh, ngày {d.day} tháng {d.month} năm {d.year}", 12, italic=True, h="right")
+    put(f"B{r + 3}", f"B{r + 3}:D{r + 3}", f"Bắc Ninh, ngày {d.day} tháng {d.month:02d} năm {d.year}", 12, italic=True, h="right")
     put(f"B{r + 4}", f"B{r + 4}:D{r + 4}", "Người đại diện theo pháp luật của thương nhân", 12, True, h="right")
     put(f"B{r + 5}", f"B{r + 5}:D{r + 5}", "(Ký, đóng dấu, ghi rõ họ, tên)", 12, italic=True, h="right")
     ws.row_dimensions[r + 6].height = 70
@@ -3932,6 +3992,108 @@ def _loose_po_line(line, catalog_items, skip_spans=()):
     return best[1], (int(qty) if float(qty).is_integer() else qty), best[3]
 
 
+_ERP_PRICE = re.compile(r"(?<![\d.,])(\d[\d,]*\.\d{6})(?!\d)")
+_ERP_QTY = re.compile(r"(?<![\d.,])(\d[\d,]*\.\d{4})(?!\d)")
+
+
+def parse_erp_po_rows(text):
+    """PO in từ ERP (VD Arizon), có lớp chữ hoặc đã OCR: mỗi dòng hàng có mã vật liệu, đơn giá 6 số lẻ, số lượng 4 số lẻ.
+    Đọc theo từng cột nên không nhầm SL với giá. OCR có thể làm rơi đơn giá hoặc ĐVT: khi đó giá lấy theo mặt hàng đã học.
+    Trả [{code, price (0 nếu thiếu), qty, desc}]; không có dòng nào khớp thì trả []."""
+    rows = []
+    t = _normalize_ocr_numbers(text or "")
+    for line in t.splitlines():
+        qm = _ERP_QTY.search(line)
+        if not qm:
+            continue
+        head = line[:qm.start()]
+        code = next((w for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9\-]{7,}", head) if re.search(r"\d", w) and not re.fullmatch(r"20\d{2}-\d{2}-\d{2}", w)), "")
+        if not code:
+            continue
+        pm = _ERP_PRICE.search(head)
+        try:
+            qty = float(qm.group(1).replace(",", ""))
+            price = float(pm.group(1).replace(",", "")) if pm else 0.0
+        except ValueError:
+            continue
+        if qty <= 0:
+            continue
+        desc = re.sub(r"20\d{2}-\d{2}-\d{2}", " ", line[qm.end():])
+        desc = re.sub(r"^\s*(PCS|EA|PC|SET)\b", " ", desc)
+        rows.append({"code": code, "price": price, "qty": qty, "desc": re.sub(r"\s+", " ", desc).strip()})
+    return rows
+
+
+def erp_rows_repaired(text, catalog_items):
+    """parse_erp_po_rows + sửa dòng OCR làm rơi số lượng: dòng có mã hàng đã học mà mất SL thì tính lại từ tổng SL / tổng tiền của PO
+    (một ẩn: lấy từ tổng tiền; hai ẩn khác giá: giải hệ hai phương trình). Không giải được thì để SL = 0 cho người dùng điền."""
+    rows = parse_erp_po_rows(text)
+    have = {r["code"] for r in rows}
+    codes = {str(it.get("code") or "").strip(): it for it in catalog_items if it.get("code")}
+    order = []
+    for line in _normalize_ocr_numbers(text or "").splitlines():
+        m = next((c for c in re.findall(r"\d{10,}", line) if c in codes), None)
+        if m and m not in have and not _ERP_QTY.search(line):
+            order.append(m)
+    if not order:
+        return rows
+    flat = _normalize_ocr_numbers(text or "").replace(" ", "")
+    tq = re.search(r"TotalQuantity/?([\d,]+\.\d{2,4})", flat)
+    ta = re.search(r"TotalAmount/?([\d,]+\.\d{2,4})", flat)
+    tq = float(tq.group(1).replace(",", "")) if tq else 0.0
+    ta = float(ta.group(1).replace(",", "")) if ta else 0.0
+    known_q = sum(r["qty"] for r in rows)
+    known_a = sum(r["qty"] * (r["price"] or float((codes.get(r["code"]) or {}).get("price") or 0)) for r in rows)
+    prices = [float(codes[c].get("price") or 0) for c in order]
+    qtys = [0.0] * len(order)
+    if len(order) == 1 and prices[0] and ta:
+        qtys[0] = round((ta - known_a) / prices[0])
+    elif len(order) == 2 and tq and ta and prices[0] != prices[1] and all(prices):
+        q_sum, a_sum = tq - known_q, ta - known_a
+        q2 = (a_sum - prices[0] * q_sum) / (prices[1] - prices[0])
+        q1 = q_sum - q2
+        if abs(q1 - round(q1)) < 1e-6 and abs(q2 - round(q2)) < 1e-6 and q1 > 0 and q2 > 0:
+            qtys = [round(q1), round(q2)]
+    for c, q, p in zip(order, qtys, prices):
+        rows.append({"code": c, "price": p, "qty": q, "desc": "", "repaired": True})
+    # giữ thứ tự dòng như trên PO (mã sắp theo vị trí xuất hiện trong văn bản)
+    pos = {}
+    for i, line in enumerate(_normalize_ocr_numbers(text or "").splitlines()):
+        for c in re.findall(r"\d{10,}", line):
+            pos.setdefault(c, i)
+    rows.sort(key=lambda r: pos.get(r["code"], 10**6))
+    return rows
+
+
+def lines_from_erp_rows(rows, po_no, profile, catalog_items, data_store=None, tare_val=0.0):
+    """Dòng hàng từ parse_erp_po_rows: mặt hàng đã học (theo mã) lấy tên, kg, định mức đã nhớ; mặt hàng mới lấy tên/giá theo PO
+    (kg, định mức để trống cho người dùng điền ở Bước 3, rồi được nhớ cho lần sau)."""
+    by_code = {str(it.get("code") or "").strip(): it for it in catalog_items if it.get("code")}
+    lines = []
+    for r in rows:
+        known = by_code.get(r["code"]) or {}
+        if not known:  # mã đọc hỏng: nhận mặt hàng theo quy cách trong mô tả (3 số cuối: phi x dày x cao)
+            nums = re.findall(r"\d+(?:\.\d+)?", r["desc"])
+            known = next((it for it in catalog_items if len(nums) >= 3 and _name_dims(it.get("name"))[0] == nums[-3:]), {}) if nums else {}
+        name = known.get("name") or r["desc"] or r["code"]
+        code = known.get("code") or r["code"]
+        mem = data_store.get_item_norm(name) if data_store else None
+        div = (mem or {}).get("div") or known.get("div") or profile.get("defaultDiv") or 0
+        kg = (mem or {}).get("kg") or known.get("kg") or 0
+        qty = int(round(r["qty"])) if abs(r["qty"] - round(r["qty"])) < 1e-9 else r["qty"]
+        rp = r["price"] or float(known.get("price") or 0)
+        price = int(round(rp)) if abs(rp - round(rp)) < 1e-9 else rp
+        net = round_half_up(qty * kg, 2) if kg > 0 else 0.0
+        lines.append({
+            "stt": len(lines) + 1, "po": po_no, "hs": (mem or {}).get("hs") or known.get("hs", "") or (profile.get("customs") or {}).get("hs", ""),
+            "ma_sp": code, "ten_sp": name, "ten_hq": known.get("ten_hq") or name,
+            "unit": known.get("unit") or profile.get("unit", "cái"), "qty": qty, "price": price, "amount": round(qty * price),
+            "div": div, "kg": kg, "kien": math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0, "net": net,
+            "gross": round_half_up(net + tare_val, 2) if net > 0 else 0.0, "tare": tare_val,
+        })
+    return lines
+
+
 def parse_generic_po_text(text, profile, catalog_items, data_store=None, tare_val=0.0):
     """Đọc PO của khách mới: số PO theo mẫu đã học, dòng hàng = dòng có mã / tên / quy cách hàng đã học."""
     pat = profile.get("po_pattern") or ""
@@ -4495,8 +4657,12 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
             tare_v = float(tare_text or 0.0)
         except Exception:
             tare_v = 0.0
-        po_no, po_date, lines = parse_generic_po_text(read_document_text(path), prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
-        if lines and ext == ".pdf" and "inquiry" in (prof.get("lineRefs") or {}) and not _pdf_has_text(path):
+        raw_text = read_document_text(path)
+        po_no, po_date, lines = parse_generic_po_text(raw_text, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
+        erp_rows = erp_rows_repaired(raw_text, store.items_for_customer(customer))
+        if erp_rows:  # PO in từ ERP có lớp chữ: đọc đúng từng cột, không đoán SL/giá từ cả dòng
+            lines = lines_from_erp_rows(erp_rows, po_no, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
+        elif lines and ext == ".pdf" and "inquiry" in (prof.get("lineRefs") or {}) and not _pdf_has_text(path):
             lines = best_scan_lines(path, prof, store, po_no, po_date, tare_v) or (fix_inquiries_from_scan(path, lines) or lines)
         if not lines:
             res["msg"] = "Không tìm thấy dòng hàng nào khớp mã/tên hàng đã học. Hãy thêm dòng trực tiếp, hoặc nạp thêm chứng từ mẫu cho khách này."

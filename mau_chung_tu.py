@@ -80,7 +80,7 @@ def _print_end_row(tws):
     return int(m.group(1)) if m else tws.max_row
 
 
-def clone_sheet(wb, tws, title, regions):
+def clone_sheet(wb, tws, title, regions, max_col=None):
     """Sao chép sheet mẫu `tws` sang sổ `wb` (tên `title`), nhân các vùng lặp. Trả (ws mới, Plan)."""
     end_row = _print_end_row(tws)
     plan = Plan([(a, b, n) for a, b, n in regions if b <= end_row], end_row)
@@ -91,13 +91,14 @@ def clone_sheet(wb, tws, title, regions):
         if dim.min and dim.max and dim.max > dim.min:  # nhóm cột cùng độ rộng
             for c in range(dim.min, dim.max + 1):
                 ws.column_dimensions[get_column_letter(c)].width = dim.width
-    max_col = tws.max_column
+    max_col = max_col or tws.max_column
     for new_r, tr in plan.rows:
         in_region = plan.region_of(tr) is not None
         rd = tws.row_dimensions[tr]
         if rd.height:
             ws.row_dimensions[new_r].height = rd.height
-        if rd.hidden:
+        a_reg = plan.region_of(tr)
+        if (tws.row_dimensions[a_reg[0]].hidden if a_reg else rd.hidden):  # dòng trong vùng lặp: ẩn hay không theo dòng đầu vùng
             ws.row_dimensions[new_r].hidden = True
         for c in range(1, max_col + 1):
             src = tws.cell(row=tr, column=c)
@@ -297,7 +298,35 @@ def fill_dntt(core, wb, rec, prof, tws, title):
     return ws
 
 
-FILLERS = {"pkl": fill_pkl, "pack": fill_pack, "pgh": fill_pgh, "dccn": fill_dccn, "dntt": fill_dntt}
+
+
+def fill_pkl_arizon(core, wb, rec, prof, tws, title):
+    """Invoice Arizon theo file mẫu (sheet '9.2'): Mã hàng | Tên hàng | PO | ĐVT | SL | kg/chiếc | cả bì | tịnh | số kiện | đơn giá | thành tiền."""
+    items = rec.get("items", [])
+    ws, pl = clone_sheet(wb, tws, title, [(13, 20, max(len(items), 1))], max_col=14)
+    dt = core._dmy(core._iso_to_date(rec.get("docDate")))
+    ws["G2"] = f" Invoice no: {rec.get('pxkNo', '')}"
+    ws["L2"] = f"Ngày:{dt}"
+    ws["A3"] = core.HT_NAME
+    ws["A4"] = core.ADDR_HT
+    ws["A7"] = f"\n{prof['name']}"
+    ws["A8"] = prof["addr"]
+    ws["A10"] = f"Từ:{core.HT_NAME}\nĐến: {prof['name']}"
+    ws[f"F{pl.map(24)}"] = core.HT_NAME
+    r0 = pl.first[13]
+    for i, it in enumerate(items):
+        r = r0 + i
+        tare = float(it.get("tare") or 0)
+        div = float(it.get("div") or 0)
+        u = str(it.get("unit") or prof.get("unit") or "")
+        for col, v in (("A", "=ROW()-12"), ("C", str(it.get("ma_sp") or "").strip()), ("D", "\n" + str(it.get("ten_sp") or "").strip()), ("E", it.get("po", "")),
+                       ("F", u[:1].upper() + u[1:]), ("G", it.get("qty", 0)), ("H", it.get("kg", 0)), ("I", f"=K{r}+{tare:g}"), ("K", f"=G{r}*H{r}"),
+                       ("L", f"=ROUND(G{r}/{div:g},0)" if div > 0 else 0), ("M", it.get("price", 0)), ("N", f"=M{r}*G{r}")):
+            ws[f"{col}{r}"] = v
+    return ws
+
+
+FILLERS = {"pkl": fill_pkl, "pkl_arizon": fill_pkl_arizon, "pack": fill_pack, "pgh": fill_pgh, "dccn": fill_dccn, "dntt": fill_dntt}
 
 
 def build_from_template(core, doc, wb, rec, prof, path, title):

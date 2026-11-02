@@ -228,7 +228,7 @@ def test_import_learned_adds_customer_with_items(store, data_dir):
 def test_best_vat_and_pxk_follow_customer_sample(store):
     """Khách docSet 'best': mã chứng từ 'khách dd.mm PO', thông tin người mua chỉ ở dòng đầu, 'Ô tô tải: biển số'."""
     import openpyxl
-    prof = {"docSet": "best", "name": "CÔNG TY GIẢ", "addr": "Địa chỉ giả", "mst": "0123456789", "buyerPerson": "Nguyễn Giả",
+    prof = {"docSet": "best", "name": "CÔNG TY GIẢ BEST", "addr": "Địa chỉ giả", "mst": "0123456789", "buyerPerson": "Nguyễn Giả",
             "province": "Tỉnh Giả", "emails": "a@b.vn", "label": "Giả"}
     store.import_learned({"khach_moi": {"key": "bgia", "profile": prof, "items": []}})
     items = [{"po": "POGIA001", "ten_sp": f"Ống giả {i}", "qty": 10 * i, "price": 100, "amount": 1000 * i, "unit": "ống"} for i in (1, 2)]
@@ -262,3 +262,43 @@ def test_learned_customer_default_bundle_and_arizon_plx(store, tmp_path):
     assert [cells[f"{c}11"] for c in "ABCD"] == [1, "3609100570001", "Ống giấy phi 76.2( 3inch) x 5 x 57 mm", 1000]
     assert cells["C6"] == "=SUM(D11:D12)" and cells["C7"] == 5817700 and cells["D6"] == "(Chiếc)"
     assert any("Bắc Ninh, ngày 16 tháng 10 năm 2026" == v for v in cells.values())
+
+
+ERP_PO_FAKE = """
+PO NO./Đơn mua hàng:                VN-9999-000000000001
+PO Date/Ngày xuống đơn:             2026-10-22
+    1          3609100570001        3060910057001@纸芯管       高57mm,厚5mm,内径3inch      2,716.000000        1,500.0000    PCS     Ống giấy phi 76.2( 3inch) x 5 x 57 mm   2026-11-02
+    2          3609100870001            纸芯管                 高87mm,厚5mm,内径3inch      4,026.000000        1,800.0000    PCS     Ống giấy phi 76.2 (3inch) x 5 x 87 mm   2026-11-02
+"""
+
+
+def test_erp_po_rows_read_by_column_not_guessed():
+    rows = app.parse_erp_po_rows(ERP_PO_FAKE)
+    assert [(r["code"], r["qty"], r["price"]) for r in rows] == [("3609100570001", 1500.0, 2716.0), ("3609100870001", 1800.0, 4026.0)]
+    lines = app.lines_from_erp_rows(rows, "VN-9999-000000000001", {"unit": "Chiếc"}, [{"name": "Ống đã học 57", "code": "3609100570001", "kg": 0.06, "div": 40, "price": 2716}], tare_val=0.5)
+    assert (lines[0]["ten_sp"], lines[0]["qty"], lines[0]["net"], lines[0]["gross"], lines[0]["kien"]) == ("Ống đã học 57", 1500, 90.0, 90.5, 38)
+    assert (lines[1]["ten_sp"], lines[1]["kg"], lines[1]["amount"]) == ("Ống giấy phi 76.2 (3inch) x 5 x 87 mm", 0, 1800 * 4026)  # mặt hàng mới: lấy tên/giá theo PO
+
+
+def test_erp_rows_ocr_missing_quantities_are_solved_from_po_totals():
+    text = ("3609100570001 xx 2, 716. 000000\\n3609100620001 yy 2, 954. 000000\\n3609100800001 zz 3, 812. 000000 4, 000. 0000 Ống 80 2026-10-19\\n"
+            "3609100850001 ww 3, 934. 000000 1, 000. 0000 Ống 85 2026-10-17\\nTotal Quantity/ 7, 050. 0000 Total Amount/ 24,999, 700. 0000").replace("\\n", "\n")
+    cat = [{"code": "3609100570001", "price": 2716}, {"code": "3609100620001", "price": 2954}, {"code": "3609100800001", "price": 3812}, {"code": "3609100850001", "price": 3934}]
+    got = {r["code"]: r["qty"] for r in app.erp_rows_repaired(text, cat)}
+    assert got == {"3609100570001": 1000, "3609100620001": 1050, "3609100800001": 4000, "3609100850001": 1000}
+
+
+def test_arizon_ids_vat_and_pxk_follow_customer_sample(store):
+    import openpyxl
+    prof = {"name": "CÔNG TY TNHH CÔNG NGHỆ ARIZON TEST (VIỆT NAM)", "addr": "Địa chỉ", "mst": "0123456789", "label": "Arizon", "unit": "Chiếc", "emails": "a@b.vn",
+            "province": "hưng yên"}
+    store.import_learned({"khach_moi": {"key": "arztest", "profile": prof, "items": []}})
+    items = [{"po": "VN-1", "ma_sp": "3609100570001", "ten_sp": f"Ống {i}", "qty": 10 * i, "price": 100, "amount": 1000 * i, "unit": "Chiếc"} for i in (1, 2)]
+    rec = {"customer": "arztest", "docDate": "2026-10-16", "items": items, "poNumber": "VN-1", "xeNo": "99C-1", "driver": "A", "poDates": {}}
+    assert app.get_vat_and_pxk_ids(rec) == ("HĐ arizon16/10 xk", "arizon16/10")
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    v, p = app.build_vat_bkav_sheet(wb, rec), app.build_pxk_bkav_sheet(wb, rec)
+    assert v.cell(6, 3).value == "3609100570001\nỐng 1" and v.cell(6, 4).value in (None, "") and v.cell(6, 31).value == "hưng yên"
+    assert v.cell(7, 19).value is None and v.cell(7, 13).value is None  # thông tin người mua chỉ ở dòng đầu
+    assert p.cell(3, 5).value == "3609100570001\nỐng 1" and p.cell(3, 21).value == "Ô tô tải:99C-1" and p.cell(4, 21).value is None
