@@ -167,7 +167,7 @@ class DataTongModel(QAbstractTableModel):
 
 
 class DataTongPage(_Page):
-    """Data tổng: tên sản phẩm, kg/chiếc, SL/kiện của mọi khách. Lưu ở DATA_TONG.json trong thư mục dữ liệu (cạnh master_catalog.json), chỉ đọc/ghi ở đó."""
+    """Data tổng: tên sản phẩm, kg/chiếc, SL/kiện của mọi khách. Lưu ở HAI_QUAN/DATA_TONG.json, ngang hàng thư mục tên khách, chỉ đọc/ghi ở đó."""
 
     def __init__(self, core, store):
         super().__init__()

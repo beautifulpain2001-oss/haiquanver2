@@ -58,7 +58,7 @@ PHẦN MỀM HỒ SƠ HẢI QUAN HỒNG THIÊN - BẢN .EXE (KHÔNG CẦN CÀI P
   (Invoice, Hóa đơn Bkav, PXK Bkav, PLX bản Excel…) và bản sao PO gốc (`PO_goc_...`). **Bên ngoài** là file còn lại: PO scan, Invoice scan,
   PLX scan, PDF Bkav (PXK, hóa đơn sau khi đưa vào Bkav), DSH và tờ khai của bên hải quan.
 - Trang **Tờ khai đang có** đọc tên file để biết đã đủ bộ chưa và còn thiếu gì (theo bộ chứng từ của từng khách).
-- Mục **Data tổng**: tên sản phẩm, kg/chiếc (từ file ERP hoặc invoice cũ), SL/kiện (từ invoice cũ). File `DATA_TONG.json` nằm ngay thư mục dữ liệu (cạnh `master_catalog.json`), dùng chung cho mọi máy;
+- Mục **Data tổng**: tên sản phẩm, kg/chiếc (từ file ERP hoặc invoice cũ), SL/kiện (từ invoice cũ). File `DATA_TONG.json` nằm trong thư mục `HAI_QUAN`, ngang hàng thư mục tên khách (Arizon, Best, Tesa...), dùng chung cho mọi máy;
   nạp file ERP hoặc invoice cũ ở chính mục này; mỗi lần xuất chứng từ phần mềm nhớ thêm số liệu đã xác nhận.
 
 ## Cập nhật gọn (không tải lại cả bộ)

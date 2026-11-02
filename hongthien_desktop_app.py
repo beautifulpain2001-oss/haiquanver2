@@ -591,9 +591,23 @@ class DedicatedDataStore:
         owner, me = self.customer_owner(key), self.user_name()
         return owner if owner and me and owner.casefold() != me.casefold() else ""
 
+    def customs_root(self):
+        """Thư mục hồ sơ hải quan (chứa thư mục từng khách). Nếu thư mục dữ liệu chính là HAI_QUAN thì dùng luôn nó."""
+        if os.path.basename(os.path.normpath(self.base_dir)).upper() == CUSTOMS_ROOT:
+            return self.base_dir
+        return os.path.join(self.base_dir, CUSTOMS_ROOT)
+
+    def rel_to_abs(self, rel):
+        """Đường dẫn tương đối kiểu HAI_QUAN/<Khách>/... -> tuyệt đối (không lặp HAI_QUAN khi thư mục dữ liệu đã là HAI_QUAN)."""
+        pre = CUSTOMS_ROOT + os.sep
+        r = str(rel).replace("/", os.sep)
+        if r.startswith(pre) or r.startswith(CUSTOMS_ROOT + "/"):
+            return os.path.join(self.customs_root(), r[len(pre):])
+        return os.path.join(self.base_dir, r)
+
     def ensure_directories(self):
         os.makedirs(self.base_dir, exist_ok=True)
-        os.makedirs(os.path.join(self.base_dir, CUSTOMS_ROOT), exist_ok=True)  # chỉ một thư mục gốc cho toàn bộ hồ sơ hải quan
+        os.makedirs(self.customs_root(), exist_ok=True)  # chỉ một thư mục gốc cho toàn bộ hồ sơ hải quan
         self.catalog_file = os.path.join(self.base_dir, "master_catalog.json")
         self.records_file = os.path.join(self.base_dir, "hongthien_records.json")
         self.sqlite_file = os.path.join(self.base_dir, "hongthien_haiquan.db")
@@ -820,8 +834,8 @@ class DedicatedDataStore:
     DT_RANK = {"tay": 3, "invoice": 2, "erp": 1, "": 0}
 
     def dt_path(self):
-        """DATA_TONG.json nằm ngay trong thư mục dữ liệu dùng chung (cạnh master_catalog.json); chỉ đọc và ghi ở đây."""
-        return os.path.join(self.base_dir, DT_FILE)
+        """DATA_TONG.json nằm trong thư mục HAI_QUAN, ngang hàng với thư mục tên khách; chỉ đọc và ghi ở đây."""
+        return os.path.join(self.customs_root(), DT_FILE)
 
     def dt_load(self):
         data = self._read_json(self.dt_path(), {})
@@ -1382,7 +1396,7 @@ class DedicatedDataStore:
     def declaration_folders(self):
         """Các thư mục tờ khai đang có trong HAI_QUAN (quét thật trên ổ đĩa/OneDrive) ghép với thông tin hồ sơ nếu có.
         Mỗi mục: {customer, label, day, path, record (hoặc None), files}. Mới nhất trước. Thư mục bắt đầu bằng _ bị bỏ qua."""
-        root = os.path.join(self.base_dir, CUSTOMS_ROOT)
+        root = self.customs_root()
         by_path = {}
         for r in self.records:
             try:
@@ -1434,7 +1448,7 @@ class DedicatedDataStore:
                 return self.legacy_folder_path(saved)
             else:
                 rel = self.new_record_folder(rec)
-        return os.path.join(self.base_dir, rel)
+        return self.rel_to_abs(rel)
 
     def find_record(self, rec):
         """Vị trí hồ sơ đã lưu trùng với `rec`: cùng mã hồ sơ, hoặc cùng khách + cùng PO + cùng ngày khai.
@@ -4896,8 +4910,9 @@ def lot_save_new(store, rec, exported_files):
         rec["files"][k] = v
     if not rec.get("folder"):  # nhớ thư mục để mở lại đúng chỗ dù sau này đổi tên gọi khách
         folder = store.get_record_folder_path(rec)
-        if os.path.relpath(folder, store.base_dir).startswith(CUSTOMS_ROOT + os.sep):
-            rec["folder"] = os.path.relpath(folder, store.base_dir)
+        rr = os.path.relpath(folder, store.customs_root())
+        if not rr.startswith(".."):
+            rec["folder"] = os.path.join(CUSTOMS_ROOT, rr)
     idx = store.find_record(rec)
     if idx >= 0:
         for k, v in store.records[idx].get("files", {}).items():
@@ -6577,7 +6592,7 @@ def run_self_test():
             build_customs_b11_sheet(wb, rec, "ToKhai_B11")
             build_plx_sheet(wb, rec, "PLX")
         build_dntt_sheet(wb, rec, "DNTT")
-        out_dir = os.path.join(store.base_dir, CUSTOMS_ROOT, "_KIEM_TRA")
+        out_dir = os.path.join(store.customs_root(), "_KIEM_TRA")
         os.makedirs(out_dir, exist_ok=True)
         out_f = os.path.join(out_dir, f"Test_Full_{rec['customer'].upper()}.xlsx")
         wb.save(out_f)
