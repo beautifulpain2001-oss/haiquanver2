@@ -841,7 +841,7 @@ class DedicatedDataStore:
                         elif str(d.get("ts") or "") > str(mine[k].get("ts") or ""):
                             mine[k] = d
                     self.data_tong = list(mine.values())
-                self._write_json(self.dt_path(), {"version": 1, "cap_nhat": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"), "items": self.data_tong})
+                self._write_json(self.dt_path(), {"version": 1, "cap_nhat": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"), "items": self.data_tong}, compact=True)
                 self._sigs[self.dt_path()] = self._sig(self.dt_path())
             self._dt_cache, self._dt_idx = {}, None
         except Exception as e:
@@ -1180,10 +1180,13 @@ class DedicatedDataStore:
                 except OSError:
                     pass
 
-    def _write_json(self, path, obj):
+    def _write_json(self, path, obj, compact=False):
         tmp = f"{path}.{os.getpid()}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(obj, f, ensure_ascii=False, indent=2)
+            if compact:  # file lớn (data tổng): bỏ thụt dòng cho nhỏ và ghi nhanh
+                json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
+            else:
+                json.dump(obj, f, ensure_ascii=False, indent=2)
         os.replace(tmp, path)
 
     def _read_json(self, path, default):

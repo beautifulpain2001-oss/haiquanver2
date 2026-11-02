@@ -3,10 +3,10 @@
 import datetime
 import os
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QListWidget, QPushButton, QScrollArea, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
+    QLineEdit, QListWidget, QPushButton, QScrollArea, QTableView, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from . import widgets
@@ -108,16 +108,70 @@ class DeclarationsPage(_Page):
             widgets.open_folder(self.shown[rows[0].row()]["path"])
 
 
+class DataTongModel(QAbstractTableModel):
+    """Bảng data tổng (hàng nghìn dòng): model ảo, sửa được ô kg/chiếc và SL/kiện."""
+    COLS = ["Khách", "Tên sản phẩm", "Mã hàng", "Mã ERP", "kg/chiếc", "Nguồn kg", "SL/kiện", "Nguồn kiện", "Cập nhật", "Người/máy"]
+    SRC = {"erp": "file ERP", "invoice": "invoice cũ", "tay": "đã xác nhận", "": ""}
+    EDIT = {4: ("kg", "kg_nguon"), 6: ("kien", "kien_nguon")}
+
+    def __init__(self, on_edit):
+        super().__init__()
+        self.items, self.on_edit = [], on_edit
+
+    def set_items(self, items):
+        self.beginResetModel()
+        self.items = items
+        self.endResetModel()
+
+    def rowCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self.items)
+
+    def columnCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self.COLS)
+
+    def _val(self, x, c):
+        return (x.get("khach"), x.get("ten"), x.get("ma_hang"), x.get("ma_erp"), x.get("kg") or "", self.SRC.get(x.get("kg_nguon", ""), ""),
+                x.get("kien") or "", self.SRC.get(x.get("kien_nguon", ""), ""), x.get("cap_nhat"), x.get("may"))[c]
+
+    def data(self, index, role=Qt.DisplayRole):
+        if not index.isValid():
+            return None
+        if role in (Qt.DisplayRole, Qt.EditRole):
+            v = self._val(self.items[index.row()], index.column())
+            return "" if v is None else str(v)
+        if role == Qt.TextAlignmentRole and index.column() in self.EDIT:
+            return int(Qt.AlignRight | Qt.AlignVCenter)
+        if role == Qt.ToolTipRole and index.column() == 1:
+            return str(self.items[index.row()].get("ten_kh") or "") or None
+        return None
+
+    def flags(self, index):
+        f = super().flags(index)
+        return f | Qt.ItemIsEditable if index.column() in self.EDIT else f
+
+    def setData(self, index, value, role=Qt.EditRole):
+        if role != Qt.EditRole or index.column() not in self.EDIT:
+            return False
+        try:
+            val = float(str(value).replace(",", ".") or 0)
+        except ValueError:
+            self.on_edit(None, None, None)  # báo giá trị sai
+            return False
+        key, _src = self.EDIT[index.column()]
+        self.on_edit(self.items[index.row()], key, val)
+        self.dataChanged.emit(self.index(index.row(), 0), self.index(index.row(), self.columnCount() - 1))
+        return True
+
+    def headerData(self, section, orientation, role=Qt.DisplayRole):
+        return self.COLS[section] if role == Qt.DisplayRole and orientation == Qt.Horizontal else None
+
+
 class DataTongPage(_Page):
     """Data tổng: tên sản phẩm, kg/chiếc, SL/kiện của mọi khách. Lưu ở HAI_QUAN/DATA_TONG.json để mọi máy dùng chung."""
 
-    COLS = ["Khách", "Tên sản phẩm", "Mã hàng", "Mã ERP", "kg/chiếc", "Nguồn kg", "SL/kiện", "Nguồn kiện", "Cập nhật", "Người/máy"]
-    SRC = {"erp": "file ERP", "invoice": "invoice cũ", "tay": "đã xác nhận", "": ""}
-    LIMIT = 3000
-
     def __init__(self, core, store):
         super().__init__()
-        self.core, self.store, self.shown, self._loading = core, store, [], False
+        self.core, self.store, self.shown = core, store, []
         self.lay.addWidget(_head("Data tổng", "")[0])
         self.info = _head("", "")[1]
         self.lay.addWidget(self.info)
@@ -150,13 +204,22 @@ class DataTongPage(_Page):
         self.msg.setObjectName("hint")
         self.msg.setWordWrap(True)
         self.lay.addWidget(self.msg)
-        self.table = _table(self.COLS, 1)
+        self.model = DataTongModel(self.on_cell_edit)
+        self.table = QTableView()
+        self.table.setModel(self.model)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setAlternatingRowColors(True)
         self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
-        self.table.itemChanged.connect(self.on_edit)
+        self.table.verticalHeader().hide()
+        self.table.verticalHeader().setDefaultSectionSize(30)
+        hh = self.table.horizontalHeader()
+        for c, w in enumerate([130, 380, 130, 150, 90, 100, 90, 110, 130, 100]):
+            hh.setSectionResizeMode(c, QHeaderView.Interactive)
+            self.table.setColumnWidth(c, w)
+        hh.setSectionResizeMode(1, QHeaderView.Stretch)
         self.lay.addWidget(self.table, 1)
 
     def refresh(self, keep_combo=False):
-        self._loading = True
         if not keep_combo:
             cur = self.cust.currentText()
             names = sorted({str(x.get("khach") or "") for x in self.store.data_tong if x.get("khach")}, key=str.casefold)
@@ -169,47 +232,23 @@ class DataTongPage(_Page):
             self.cust.blockSignals(False)
         q = self.search.text().lower().strip()
         want = self.cust.currentText()
-        items = [x for x in self.store.data_tong if (want in ("", "Tất cả") or x.get("khach") == want)
-                 and (not q or q in f"{x.get('ten', '')} {x.get('ma_hang', '')} {x.get('ma_erp', '')}".lower())]
-        total = len(items)
-        self.shown = items[:self.LIMIT]
-        self.table.setRowCount(len(self.shown))
-        for r, x in enumerate(self.shown):
-            vals = [x.get("khach", ""), x.get("ten", ""), x.get("ma_hang", ""), x.get("ma_erp", ""), x.get("kg") or "", self.SRC.get(x.get("kg_nguon", ""), ""),
-                    x.get("kien") or "", self.SRC.get(x.get("kien_nguon", ""), ""), x.get("cap_nhat", ""), x.get("may", "")]
-            for c, v in enumerate(vals):
-                cell = QTableWidgetItem("" if v is None else str(v))
-                if c not in (4, 6):
-                    cell.setFlags(cell.flags() & ~Qt.ItemIsEditable)
-                if c in (4, 6):
-                    cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                self.table.setItem(r, c, cell)
-        self.info.setText(f"File dùng chung: {self.store.dt_path()}\nCó {len(self.store.data_tong):,} sản phẩm. kg/chiếc đọc từ file ERP hoặc invoice cũ; SL/kiện đọc từ invoice cũ. "
-                          "Sửa trực tiếp ô kg/chiếc hoặc SL/kiện (bấm đúp) để cập nhật; mọi máy cùng dùng.")
-        if total > self.LIMIT:
-            self.msg.setText(f"Hiện {self.LIMIT:,} / {total:,} dòng đầu. Chọn khách hoặc gõ ô tìm để thu hẹp.")
-        elif not self.msg.text().startswith("✅"):
+        self.shown = [x for x in self.store.data_tong if (want in ("", "Tất cả") or x.get("khach") == want)
+                      and (not q or q in f"{x.get('ten', '')} {x.get('ma_hang', '')} {x.get('ma_erp', '')} {x.get('ma_kh', '')} {x.get('ten_kh', '')}".lower())]
+        self.model.set_items(self.shown)
+        self.info.setText(f"File dùng chung: {self.store.dt_path()}\nCó {len(self.store.data_tong):,} sản phẩm (đang hiện {len(self.shown):,}). kg/chiếc đọc từ file ERP hoặc invoice cũ; "
+                          "SL/kiện đọc từ invoice cũ. Sửa trực tiếp ô kg/chiếc hoặc SL/kiện (bấm đúp) để cập nhật; mọi máy cùng dùng.")
+        if not self.msg.text().startswith("✅"):
             self.msg.setText("")
-        self._loading = False
 
-    def on_edit(self, cell):
-        if self._loading or cell.column() not in (4, 6) or cell.row() >= len(self.shown):
-            return
-        x = self.shown[cell.row()]
-        try:
-            val = float(cell.text().replace(",", ".") or 0)
-        except ValueError:
+    def on_cell_edit(self, x, key, val):
+        if x is None:
             widgets.warn(self, "Giá trị không đúng", "Hãy nhập một số.")
-            self.refresh(keep_combo=True)
             return
-        if cell.column() == 4:
-            x["kg"], x["kg_nguon"] = val, "tay"
-        else:
-            x["kien"], x["kien_nguon"] = int(round(val)), "tay"
+        x[key] = val if key == "kg" else int(round(val))
+        x[key + "_nguon"] = "tay"
         now = datetime.datetime.now()
         x["ts"], x["cap_nhat"], x["may"] = now.strftime("%Y-%m-%d %H:%M:%S"), now.strftime("%d/%m/%Y %H:%M"), self.store.user_name()
         self.store.dt_save()
-        self.refresh(keep_combo=True)
 
     def _busy(self, text, fn, done):
         self.msg.setText("⏳  " + text)
@@ -270,10 +309,10 @@ class DataTongPage(_Page):
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Data tổng"
-        ws.append(self.COLS)
+        ws.append(DataTongModel.COLS)
         for x in self.shown:
-            ws.append([x.get("khach"), x.get("ten"), x.get("ma_hang"), x.get("ma_erp"), x.get("kg"), self.SRC.get(x.get("kg_nguon", ""), ""), x.get("kien"),
-                       self.SRC.get(x.get("kien_nguon", ""), ""), x.get("cap_nhat"), x.get("may")])
+            ws.append([x.get("khach"), x.get("ten"), x.get("ma_hang"), x.get("ma_erp"), x.get("kg"), DataTongModel.SRC.get(x.get("kg_nguon", ""), ""), x.get("kien"),
+                       DataTongModel.SRC.get(x.get("kien_nguon", ""), ""), x.get("cap_nhat"), x.get("may")])
         wb.save(path)
         self.msg.setText(f"✅  Đã lưu {len(self.shown):,} dòng ra {path}")
 
@@ -520,6 +559,58 @@ class MonthView(QWidget):
         self.empty.setText("" if recs else f"Tháng {m[5:7]}/{m[:4]} chưa có hồ sơ nào." + (" Chọn tháng khác ở ô phía trên." if len(self.months()) > 1 else ""))
 
 
+class RowsModel(QAbstractTableModel):
+    """Bảng chỉ đọc nhiều dòng (hàng nghìn): chỉ vẽ dòng đang nhìn thấy nên mở tức thì, khác QTableWidget phải tạo ô cho từng dòng."""
+
+    def __init__(self, headers, right=()):
+        super().__init__()
+        self.headers, self.right, self.rows = list(headers), set(right), []
+
+    def set_rows(self, rows):
+        self.beginResetModel()
+        self.rows = rows
+        self.endResetModel()
+
+    def rowCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self.rows)
+
+    def columnCount(self, parent=QModelIndex()):
+        return 0 if parent.isValid() else len(self.headers)
+
+    def data(self, index, role=Qt.DisplayRole):
+        if not index.isValid():
+            return None
+        if role == Qt.DisplayRole:
+            v = self.rows[index.row()][index.column()]
+            return "" if v is None else str(v)
+        if role == Qt.TextAlignmentRole and index.column() in self.right:
+            return int(Qt.AlignRight | Qt.AlignVCenter)
+        return None
+
+    def headerData(self, section, orientation, role=Qt.DisplayRole):
+        if role == Qt.DisplayRole and orientation == Qt.Horizontal:
+            return self.headers[section]
+        return None
+
+
+def _big_table(headers, widths, stretch_col, right=()):
+    """QTableView + RowsModel với độ rộng cột cố định (không đo nội dung từng ô)."""
+    v = QTableView()
+    v.setModel(RowsModel(headers, right))
+    v.setSelectionBehavior(QAbstractItemView.SelectRows)
+    v.setSelectionMode(QAbstractItemView.SingleSelection)
+    v.setEditTriggers(QAbstractItemView.NoEditTriggers)
+    v.verticalHeader().hide()
+    v.verticalHeader().setDefaultSectionSize(30)
+    v.setAlternatingRowColors(True)
+    hh = v.horizontalHeader()
+    for c, w in enumerate(widths):
+        hh.setSectionResizeMode(c, QHeaderView.Interactive)
+        v.setColumnWidth(c, w)
+    hh.setSectionResizeMode(stretch_col, QHeaderView.Stretch)
+    return v
+
+
 class CatalogPage(_Page):
     """Danh mục: hồ sơ theo tháng, hồ sơ theo khách hàng, thư viện cân nặng, danh mục ERP."""
 
@@ -533,8 +624,8 @@ class CatalogPage(_Page):
         self.tabs = QTabWidget()
         self.by_month = MonthView(core, store)
         self.by_customer = CustomerView(core, store)
-        self.weights = _table(["STT", "Tên hàng hóa & quy cách", "Cân thực tế (g)", "Định mức (kg/cái)"], 1)
-        self.erp = _table(["STT", "Mã SP / TM", "Tên sản phẩm", "Mô tả"], 2)
+        self.weights = _big_table(["STT", "Tên hàng hóa & quy cách", "Cân thực tế (g)", "Định mức (kg/cái)"], [60, 400, 150, 150], 1, right=(2, 3))
+        self.erp = _big_table(["STT", "Mã SP / TM", "Tên sản phẩm", "Mô tả"], [60, 180, 400, 300], 2)
         self.tabs.addTab(self.by_month, "Hồ sơ theo tháng")
         self.tabs.addTab(self.by_customer, "Hồ sơ theo khách hàng")
         self.tabs.addTab(self.weights, "Thư viện cân nặng")
@@ -551,9 +642,9 @@ class CatalogPage(_Page):
     def refresh_tables(self):
         q = self.search.text().lower().strip()
         w = [(n, it) for n, it in self.store.weights_db.items() if not q or q in n.lower()]
-        _fill(self.weights, [[i, n, it.get("g", ""), it.get("kg", "")] for i, (n, it) in enumerate(w, 1)], right=(2, 3))
+        self.weights.model().set_rows([[k, n, it.get("g", ""), it.get("kg", "")] for k, (n, it) in enumerate(w, 1)])
         e = [x for x in self.store.erp_catalog if not q or q in f"{x.get('ma_sp','')} {x.get('ten_sp','')}".lower()]
-        _fill(self.erp, [[i, x.get("ma_sp", ""), x.get("ten_sp", ""), x.get("mota", "")] for i, x in enumerate(e, 1)])
+        self.erp.model().set_rows([[k, x.get("ma_sp", ""), x.get("ten_sp", ""), x.get("mota", "")] for k, x in enumerate(e, 1)])
         self.tabs.setTabText(2, f"Thư viện cân nặng ({len(w)})")
         self.tabs.setTabText(3, f"Danh mục ERP ({len(e)})")
 
@@ -568,7 +659,7 @@ class CatalogPage(_Page):
 
     def refresh(self):
         self.refresh_tabs()
-        self.refresh_tables()  # đủ số lượng trên nhãn tab
+        self.refresh_tables()  # bảng lớn dùng model ảo: cập nhật tức thì, đủ số lượng trên nhãn tab
 
 
 class CustomerForm(QWidget):

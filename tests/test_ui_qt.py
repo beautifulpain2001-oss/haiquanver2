@@ -376,7 +376,7 @@ def test_folder_button_disabled_when_folder_missing(win, store):
 def test_catalog_and_customer_pages_list_data(win):
     win.nav.setCurrentRow(3)
     win.catalog.tabs.setCurrentIndex(2)
-    assert win.catalog.weights.rowCount() > 100 and win.catalog.erp.rowCount() > 1000
+    assert win.catalog.weights.model().rowCount() > 100 and win.catalog.erp.model().rowCount() > 1000
     win.nav.setCurrentRow(4)
     assert {"Shirai", "Kodi", "Tesa"} <= {win.customers.table.item(r, 0).text() for r in range(win.customers.table.rowCount())}
 
@@ -467,3 +467,18 @@ def test_declarations_page_lists_folders_and_opens_link(win, monkeypatch):
     row = [o["path"] for o in page.shown].index(d)
     page.table.cellWidget(row, 6).click()
     assert opened == [d]
+
+
+def test_big_tables_open_instantly_and_data_tong_cells_are_editable(win):
+    """Danh mục (hàng nghìn dòng ERP) và Data tổng dùng model ảo: không lag; sửa ô kg/SL-kiện được lưu."""
+    from PySide6.QtCore import Qt
+    win.store.erp_catalog = [{"ma_sp": f"TM{i}", "ten_sp": f"Sản phẩm {i}", "mota": "m"} for i in range(5000)]
+    win.store.data_tong = [{"khach": "K", "ten": f"Sản phẩm {i}", "kg": 0.1, "kg_nguon": "erp", "kien": 0, "kien_nguon": ""} for i in range(9000)]
+    t = time.time()
+    win.nav.setCurrentRow(3)
+    win.catalog.tabs.setCurrentIndex(3)
+    win.nav.setCurrentRow(5)
+    assert time.time() - t < 3 and win.data_tong.model.rowCount() == 9000
+    idx = win.data_tong.model.index(0, 6)
+    assert win.data_tong.model.setData(idx, "40") and win.store.data_tong[0]["kien"] == 40 and win.store.data_tong[0]["kien_nguon"] == "tay"
+    assert not (win.data_tong.model.flags(win.data_tong.model.index(0, 1)) & Qt.ItemIsEditable)  # chỉ sửa ô kg và SL/kiện
