@@ -26,6 +26,7 @@ NAME = "HongThien_HaiQuan_Desktop"
 DIST = os.path.join(ROOT, "dist")
 EXE = os.path.join(DIST, NAME + (".exe" if os.name == "nt" else ""))
 ZIP = os.path.join(DIST, NAME + "_Windows.zip")
+UPDATE_ZIP = os.path.join(DIST, NAME + "_CapNhat.zip")  # chỉ .exe, nhẹ hơn nhiều so với bản đầy đủ
 GUIDE = os.path.join(ROOT, "HUONG_DAN_BAN_EXE.md")
 OCR_DIR = os.path.join(DIST, "Tesseract-OCR")
 QT_EXCLUDES = (
@@ -167,6 +168,12 @@ def package(with_ocr=True):
                     path = os.path.join(root, f)
                     z.write(path, os.path.relpath(path, DIST))
     print(f"Đã nén: {ZIP} ({os.path.getsize(ZIP) / 1e6:.1f} MB)")
+    # Bản cập nhật gọn: chỉ .exe (không kèm Tesseract-OCR và dữ liệu): chép đè lên .exe cũ, dữ liệu và OCR đã có trên máy giữ nguyên.
+    with zipfile.ZipFile(UPDATE_ZIP, "w", zipfile.ZIP_DEFLATED) as z:
+        z.write(EXE, os.path.basename(EXE))
+        z.writestr("DOC_NGAN.txt", "CAP NHAT: tat phan mem, chep file HongThien_HaiQuan_Desktop.exe trong zip nay de len file cu cung ten.\r\n"
+                   "Giu nguyen thu muc DATA_LUU_TRU_HONG_THIEN va Tesseract-OCR. Khong can tai lai ca bo.\r\n")
+    print(f"Đã nén bản cập nhật: {UPDATE_ZIP} ({os.path.getsize(UPDATE_ZIP) / 1e6:.1f} MB)")
 
 
 def main(argv):

@@ -52,6 +52,11 @@ jobs:
           name: HongThien_HaiQuan_Desktop_Windows
           path: dist/HongThien_HaiQuan_Desktop_Windows.zip
           retention-days: 90
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HongThien_HaiQuan_CapNhat_chi_exe
+          path: dist/HongThien_HaiQuan_Desktop_CapNhat.zip
+          retention-days: 90
       - name: Đăng lên Releases
         if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release)
         uses: softprops/action-gh-release@v2

@@ -60,3 +60,9 @@ PHẦN MỀM HỒ SƠ HẢI QUAN HỒNG THIÊN - BẢN .EXE (KHÔNG CẦN CÀI P
 - Trang **Tờ khai đang có** đọc tên file để biết đã đủ bộ chưa và còn thiếu gì (theo bộ chứng từ của từng khách).
 - Mục **Data tổng**: tên sản phẩm, kg/chiếc (từ file ERP hoặc invoice cũ), SL/kiện (từ invoice cũ). File `HAI_QUAN/DATA_TONG.json` dùng chung cho mọi máy;
   nạp file ERP hoặc invoice cũ ở chính mục này; mỗi lần xuất chứng từ phần mềm nhớ thêm số liệu đã xác nhận.
+
+## Cập nhật gọn (không tải lại cả bộ)
+
+Mỗi lần build có thêm file **HongThien_HaiQuan_Desktop_CapNhat.zip** (chỉ có `.exe`, không kèm Tesseract-OCR). Tắt phần mềm, giải nén và chép
+`HongThien_HaiQuan_Desktop.exe` đè lên file cũ cùng tên. Thư mục `DATA_LUU_TRU_HONG_THIEN` và `Tesseract-OCR` giữ nguyên.
+Lần cài đầu tiên hoặc khi cần OCR trên máy mới thì dùng bản đầy đủ.
