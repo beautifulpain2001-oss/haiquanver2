@@ -1,4 +1,4 @@
-"""Data tổng: danh mục sản phẩm dùng chung (kg/chiếc từ file ERP, SL/kiện từ invoice cũ), nằm trong HAI_QUAN/DATA_TONG.json."""
+"""Data tổng: danh mục sản phẩm dùng chung (kg/chiếc từ file ERP, SL/kiện từ invoice cũ), nằm cạnh master_catalog.json."""
 import openpyxl
 
 import hongthien_desktop_app as app
@@ -28,7 +28,7 @@ def test_erp_import_fills_kg_and_lines_get_missing_values(data_dir, tmp_path):
     erp_file(str(tmp_path / "erp.xlsx"))
     res = s.dt_import_erp(str(tmp_path / "erp.xlsx"))
     assert res == {"them": 2, "cap_nhat": 0, "bo_qua": 2}
-    assert (data_dir / "HAI_QUAN" / "DATA_TONG.json").exists()  # file nằm trong thư mục hải quan dùng chung
+    assert (data_dir / "DATA_TONG.json").exists()  # file nằm ngay thư mục dữ liệu dùng chung, cạnh master_catalog.json
     line = {"ten_sp": "Ống giấy phi 76.2 (3inch) x 5 x 87 mm", "ma_sp": "", "qty": 1000, "kg": 0, "div": 0, "tare": 0.5}
     assert s.dt_fill_lines("dtgia", [line]) == 1 and line["kg"] == 0.091 and line["net"] == 91.0 and line["gross"] == 91.5
     assert line["kien"] == 0  # chưa có SL/kiện: để trống cho người dùng điền
@@ -113,15 +113,15 @@ def test_bbgh_sheet_lists_items_with_both_parties(data_dir, tmp_path):
     assert "BBGH" in app.customer_extra_docs({"extraDocs": "bbgh, plx"}) and app.DedicatedDataStore.folder_checklist(["PKL", "BBGH"])[0].count("Biên bản bàn giao") == 1
 
 
-def test_data_tong_file_next_to_master_catalog_is_also_found(data_dir, tmp_path):
-    """Người dùng chép DATA_TONG.json ngay thư mục dữ liệu (không vào HAI_QUAN): vẫn đọc được, và ghi lại đúng chỗ đó."""
+def test_data_tong_is_read_and_written_only_next_to_master_catalog(data_dir, tmp_path):
+    """DATA_TONG.json chỉ đọc/ghi ở thư mục dữ liệu; bản đặt nơi khác (HAI_QUAN) không được dùng."""
     import json
-    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "HAI_QUAN").mkdir(parents=True, exist_ok=True)
+    (data_dir / "HAI_QUAN" / "DATA_TONG.json").write_text(json.dumps({"items": [{"khach": "K", "ten": "Bản cũ ở HAI_QUAN"}]}), encoding="utf-8")
     (data_dir / "DATA_TONG.json").write_text(json.dumps({"version": 1, "items": [{"khach": "K", "ten": "Sản phẩm X", "kg": 0.5, "kg_nguon": "erp"}]}), encoding="utf-8")
     s = make_store(data_dir, tmp_path)
-    assert s.dt_path() == str(data_dir / "DATA_TONG.json") and len(s.data_tong) == 1
-    s.dt_learn_items  # noqa: B018
+    assert s.dt_path() == str(data_dir / "DATA_TONG.json") and [x["ten"] for x in s.data_tong] == ["Sản phẩm X"]
     s._dt_upsert("K", "Sản phẩm Y", kg=0.2, kg_nguon="tay", exact=True)
     s.dt_save()
-    assert not (data_dir / "HAI_QUAN" / "DATA_TONG.json").exists()
     assert len(json.loads((data_dir / "DATA_TONG.json").read_text(encoding="utf-8"))["items"]) == 2
+    assert [x["ten"] for x in json.loads((data_dir / "HAI_QUAN" / "DATA_TONG.json").read_text(encoding="utf-8"))["items"]] == ["Bản cũ ở HAI_QUAN"]  # không đụng

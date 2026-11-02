@@ -815,15 +815,13 @@ class DedicatedDataStore:
         return n
 
     # ---- DATA TỔNG: danh mục sản phẩm dùng chung (tên, kg/chiếc, SL/kiện) nằm trong thư mục HAI_QUAN ----------------
-    # Một file HAI_QUAN/DATA_TONG.json cho mọi máy. Nguồn: file ERP (kg), invoice cũ (kg + SL/kiện), người dùng xác nhận khi xuất.
+    # Một file DATA_TONG.json (trong thư mục dữ liệu dùng chung) cho mọi máy. Nguồn: file ERP (kg), invoice cũ (kg + SL/kiện), người dùng xác nhận khi xuất.
     # Ưu tiên khi trùng: tay (đã xác nhận) > invoice cũ > ERP.
     DT_RANK = {"tay": 3, "invoice": 2, "erp": 1, "": 0}
 
     def dt_path(self):
-        """HAI_QUAN/DATA_TONG.json. Nếu người dùng đã để file ngay trong thư mục dữ liệu (cạnh master_catalog.json) mà chưa có bản trong HAI_QUAN thì dùng bản đó."""
-        inner = os.path.join(self.base_dir, CUSTOMS_ROOT, DT_FILE)
-        outer = os.path.join(self.base_dir, DT_FILE)
-        return outer if (not os.path.isfile(inner) and os.path.isfile(outer)) else inner
+        """DATA_TONG.json nằm ngay trong thư mục dữ liệu dùng chung (cạnh master_catalog.json); chỉ đọc và ghi ở đây."""
+        return os.path.join(self.base_dir, DT_FILE)
 
     def dt_load(self):
         data = self._read_json(self.dt_path(), {})
