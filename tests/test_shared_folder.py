@@ -94,3 +94,17 @@ def test_folder_activity_reads_status_and_checklist_from_file_names(tmp_path):
     (f / "ToKhaiHQ7N_QDTQ_108648746030.xlsx").write_text("x")  # tờ khai do máy làm hải quan thêm
     a = S.folder_activity(str(f), modes)
     assert a["tk"] == "108648746030" and a["status"] == "Đã khai · số tờ khai 108648746030 · Đủ bộ hồ sơ"
+
+
+def test_declaration_folders_find_legacy_customer_folders_and_nested_hai_quan(data_dir, tmp_path):
+    """Thư mục dữ liệu là HAI_QUAN: thư mục khách cũ (tên tự đặt, không có _Thang_) vẫn được liệt kê; HAI_QUAN lồng bên trong cũng được quét."""
+    hq = tmp_path / "HAI_QUAN"
+    (hq / "Tesa" / "Lo 30.10").mkdir(parents=True)
+    (hq / "Tesa" / "Lo 30.10" / "306891234560_tokhai.pdf").write_text("x")
+    (hq / "HAI_QUAN" / "Arizon" / "2026_Thang_11" / "2026-11-02").mkdir(parents=True)
+    (hq / "MAU_CHUNG_TU" / "x").mkdir(parents=True)
+    (hq / "MAU_CHUNG_TU" / "x" / "m.xlsx").write_text("x")
+    s = make_store(hq, tmp_path / "w")
+    got = {o["customer"]: o for o in s.declaration_folders()}
+    assert got["Tesa"]["day"] == "Lo 30.10" and got["Tesa"]["tk"] == "306891234560"
+    assert "Arizon" in got and "MAU_CHUNG_TU" not in got and "HAI_QUAN" not in got

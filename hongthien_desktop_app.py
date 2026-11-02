@@ -1404,28 +1404,52 @@ class DedicatedDataStore:
             except Exception:
                 pass
         out, seen = [], set()
-        try:
-            custs = sorted(d for d in os.listdir(root) if not d.startswith("_") and os.path.isdir(os.path.join(root, d)))
-        except OSError:
-            custs = []
-        for cust in custs:
-            for month in sorted(os.listdir(os.path.join(root, cust))):
-                mdir = os.path.join(root, cust, month)
-                if not os.path.isdir(mdir) or "_Thang_" not in month:
-                    continue
-                for day in sorted(os.listdir(mdir)):
-                    path = os.path.join(mdir, day)
-                    if not os.path.isdir(path):
-                        continue
-                    key = os.path.normcase(os.path.normpath(path))
-                    seen.add(key)
-                    files = [f for f in os.listdir(path) if not f.startswith(".")]
-                    out.append({"customer": cust, "label": cust, "day": day, "path": path, "record": by_path.get(key), "files": len(files), **self.folder_activity(path, self._modes_for_folder(cust, by_path.get(key)))})
-        for key, r in by_path.items():  # hồ sơ đã lưu nhưng chưa có thư mục (chưa xuất file nào)
-            if key not in seen:
+        skip = {CUSTOMS_ROOT, "MAU_CHUNG_TU", GENERATED_DIR, "_KIEM_TRA"}
+        roots = [root]
+        nested = os.path.join(root, CUSTOMS_ROOT)  # thư mục HAI_QUAN lồng bên trong do bản cũ tạo ra
+        if os.path.isdir(nested):
+            roots.append(nested)
+        def has_files(d):
+            try:
+                return any(not n.startswith((".", "~$")) and os.path.isfile(os.path.join(d, n)) for n in os.listdir(d))
+            except OSError:
+                return False
+        def rec_for(path):
+            norm = os.path.normcase(path)
+            for r in self.records:
+                for key in (r.get("tkNo"), str(r.get("poNumber") or "").split()[0].split("..")[0] if r.get("poNumber") else ""):
+                    if key and len(str(key)) >= 5 and str(key).lower() in norm:
+                        return r
+            return None
+        def add(cust, path, day):
+            key = os.path.normcase(os.path.normpath(path))
+            if key in seen or any(key.startswith(k + os.sep) for k in seen if has_files(k)):
+                return
+            seen.add(key)
+            rec = by_path.get(key) or rec_for(path)
+            files = [f for f in os.listdir(path) if not f.startswith(".")]
+            out.append({"customer": cust, "label": cust, "day": day, "path": path, "record": rec, "files": len(files), **self.folder_activity(path, self._modes_for_folder(cust, rec))})
+        for rt in roots:
+            try:
+                custs = sorted(d for d in os.listdir(rt) if not d.startswith("_") and d.upper() not in skip and os.path.isdir(os.path.join(rt, d)))
+            except OSError:
+                custs = []
+            for cust in custs:
+                cdir = os.path.join(rt, cust)
+                for dirpath, dirs, _files in os.walk(cdir):
+                    dirs[:] = sorted(d for d in dirs if not d.startswith((".", "_")) and d != GENERATED_DIR)
+                    if dirpath != cdir and (has_files(dirpath) or (not dirs and re.match(r"\d{4}-\d{2}-\d{2}", os.path.basename(dirpath)))):
+                        add(cust, dirpath, os.path.basename(dirpath))
+                        dirs[:] = []  # thư mục có file là thư mục tờ khai, không đi sâu thêm
+                    elif dirpath == cdir and has_files(cdir) and not dirs:
+                        add(cust, cdir, os.path.basename(cdir))
+                    if dirpath.count(os.sep) - cdir.count(os.sep) >= 4:
+                        dirs[:] = []
+        for key, r in by_path.items():  # hồ sơ đã lưu có thư mục nhưng chưa có file nào
+            if key not in seen and os.path.isdir(key):
                 out.append({"customer": r.get("customer", ""), "label": PROFILES.get(r.get("customer", ""), {}).get("label", r.get("customer", "")),
                             "day": r.get("docDate", ""), "path": key, "record": r, "files": 0,
-                            "prepared": [], "other": [], "tk": "", "status": "Chưa có thư mục (chưa xuất file nào)"})
+                            "prepared": [], "other": [], "tk": "", "status": "Thư mục trống"})
         for o in out:
             r = o["record"]
             if r:
