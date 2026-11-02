@@ -104,7 +104,7 @@ def test_declaration_folders_find_legacy_customer_folders_and_nested_hai_quan(da
     (hq / "HAI_QUAN" / "Arizon" / "2026_Thang_11" / "2026-11-02").mkdir(parents=True)
     (hq / "MAU_CHUNG_TU" / "x").mkdir(parents=True)
     (hq / "MAU_CHUNG_TU" / "x" / "m.xlsx").write_text("x")
-    s = make_store(hq, tmp_path / "w")
+    s = make_store(hq, tmp_path / "w", "n")
     got = {o["customer"]: o for o in s.declaration_folders()}
     assert got["Tesa"]["day"] == "Lo 30.10" and got["Tesa"]["tk"] == "306891234560"
     assert "Arizon" in got and "MAU_CHUNG_TU" not in got and "HAI_QUAN" not in got
