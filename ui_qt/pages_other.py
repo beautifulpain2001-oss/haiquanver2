@@ -124,6 +124,8 @@ class DataTongPage(_Page):
         row = QHBoxLayout()
         b1 = QPushButton("📥  Nạp file ERP (Excel)…")
         b1.clicked.connect(self.import_erp)
+        b1b = QPushButton("🔗  Nạp mã sản phẩm theo khách…")
+        b1b.clicked.connect(self.import_mapping)
         b2 = QPushButton("🧾  Học từ invoice cũ…")
         b2.clicked.connect(self.import_invoices)
         b3 = QPushButton("📊  Xuất ra Excel…")
@@ -132,7 +134,7 @@ class DataTongPage(_Page):
         b4 = QPushButton("📁  Mở thư mục chứa file")
         b4.setObjectName("sec")
         b4.clicked.connect(lambda: widgets.open_folder(os.path.dirname(self.store.dt_path())))
-        for b in (b1, b2, b3, b4):
+        for b in (b1, b1b, b2, b3, b4):
             row.addWidget(b)
         row.addStretch(1)
         self.lay.addLayout(row)
@@ -222,6 +224,16 @@ class DataTongPage(_Page):
             self.msg.setText(f"✅  Nạp xong: thêm {res['them']:,} sản phẩm, cập nhật {res['cap_nhat']:,}, bỏ qua {res['bo_qua']:,} dòng (không có khách hoặc cân nặng).")
             self.refresh()
         self._busy("Đang nạp file ERP (khoảng vài giây)…", lambda: self.store.dt_import_erp(path), done)
+
+    def import_mapping(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Chọn file mã sản phẩm theo khách hàng (Excel)", "", "Excel (*.xlsx *.xlsm)")
+        if not path:
+            return
+
+        def done(res):
+            self.msg.setText(f"✅  Nạp xong: thêm {res['them']:,} sản phẩm, gắn mã/tên theo khách cho {res['cap_nhat']:,} sản phẩm, bỏ qua {res['bo_qua']:,} dòng.")
+            self.refresh()
+        self._busy("Đang nạp mã sản phẩm theo khách…", lambda: self.store.dt_import_mapping(path), done)
 
     def import_invoices(self):
         keys = [k for k in self.core.PROFILES]

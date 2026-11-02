@@ -877,18 +877,18 @@ class DedicatedDataStore:
         """Mục data tổng của một khách (đã nạp vào bộ nhớ đệm, xóa khi dữ liệu đổi)."""
         if cust_key not in self._dt_cache:
             prof = PROFILES.get(cust_key) or {}
-            self._dt_cache[cust_key] = [x for x in self.data_tong if self._khach_match(prof, x.get("khach"))]
+            self._dt_cache[cust_key] = [x for x in self.data_tong if self._khach_match(prof, x.get("khach")) or self._khach_match(prof, x.get("khach_day_du"))]
         return self._dt_cache[cust_key]
 
     def dt_lookup(self, cust_key, name="", code=""):
         cands = self.dt_items_for(cust_key)
         code = str(code or "").strip()
         if code:
-            hit = [x for x in cands if code and code in (str(x.get("ma_hang") or "").strip(), str(x.get("ma_erp") or "").strip())]
+            hit = [x for x in cands if code and code in (str(x.get("ma_hang") or "").strip(), str(x.get("ma_erp") or "").strip(), str(x.get("ma_kh") or "").strip())]
             if hit:
                 return max(hit, key=lambda x: (bool(x.get("kg")) + bool(x.get("kien")), self.DT_RANK.get(x.get("kg_nguon", ""), 0)))
         nk = clean_str(name)
-        hit = [x for x in cands if nk and clean_str(x.get("ten")) == nk]
+        hit = [x for x in cands if nk and nk in (clean_str(x.get("ten")), clean_str(x.get("ten_kh")))]
         if not hit:
             dk = self._dims_key(name)
             hit = [x for x in cands if dk and self._dims_key(x.get("ten")) == dk]
@@ -964,6 +964,55 @@ class DedicatedDataStore:
                     res["cap_nhat"] += 1
         wb.close()
         self._dt_cache = {}
+        self.dt_save()
+        return res
+
+    def dt_import_mapping(self, path):
+        """Nạp file 'mã sản phẩm theo khách hàng': Mã sản phẩm gốc | Tên gốc | Mã KH | Tên khách hàng | Mã SP theo KH | Tên SP theo KH.
+        Gắn mã và tên sản phẩm theo khách vào sản phẩm ERP cùng mã (kg đã có từ file ERP). Trả {"them", "cap_nhat", "bo_qua"}."""
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        res = {"them": 0, "cap_nhat": 0, "bo_qua": 0}
+        by_erp = {}
+        for x in self.data_tong:
+            if x.get("ma_erp"):
+                by_erp.setdefault(x["ma_erp"], []).append(x)
+        for ws in wb.worksheets:
+            cols = None
+            for row in ws.iter_rows(values_only=True):
+                if cols is None:
+                    heads = [strip_accents_upper(v or "") for v in row]
+                    if any(h.startswith("MA SAN PHAM GOC") for h in heads) and any("THEO KH" in h for h in heads):
+                        cols = {"erp": next(i for i, h in enumerate(heads) if h.startswith("MA SAN PHAM GOC")),
+                                "ten_goc": next((i for i, h in enumerate(heads) if h.startswith("TEN SAN PHAM GOC")), None),
+                                "khach": next(i for i, h in enumerate(heads) if h.startswith("TEN KHACH HANG")),
+                                "ma_kh": next((i for i, h in enumerate(heads) if h.startswith("MA SAN PHAM THEO")), None),
+                                "ten_kh": next(i for i, h in enumerate(heads) if h.startswith("TEN SAN PHAM THEO"))}
+                    continue
+                get = lambda k: (row[cols[k]] if cols.get(k) is not None and cols[k] < len(row) else None)
+                erp, khach, ten_kh = str(get("erp") or "").strip(), str(get("khach") or "").strip(), str(get("ten_kh") or "").strip()
+                if not erp or not khach or not ten_kh:
+                    res["bo_qua"] += 1
+                    continue
+                m = re.search(r"(?<![A-Za-z0-9])(\d[A-Z0-9]{9,})(?![A-Za-z0-9])", ten_kh)
+                ma_kh = m.group(1) if m else ""
+                ten_sach = re.sub(r"\s+", " ", re.sub(r"\(?\s*" + re.escape(ma_kh) + r"\s*\)?", " ", ten_kh)).strip() if ma_kh else ten_kh
+                targets = by_erp.get(erp) or []
+                created = False
+                if not targets:
+                    it = {"khach": khach, "ten": str(get("ten_goc") or ten_kh).strip(), "ma_hang": "", "ma_erp": erp, "kg": 0, "kg_nguon": "", "kien": 0, "kien_nguon": "", "hs": ""}
+                    self.data_tong.append(it)
+                    by_erp[erp] = targets = [it]
+                    created = True
+                changed = False
+                for it in targets:
+                    for k, v in (("ma_kh", ma_kh), ("ten_kh", ten_sach), ("khach_day_du", khach)):
+                        if v and it.get(k) != v:
+                            it[k], changed = v, True
+                    if changed:
+                        it["ts"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                res["them" if created else "cap_nhat"] += 1 if (created or changed) else 0
+        wb.close()
+        self._dt_cache, self._dt_idx = {}, None
         self.dt_save()
         return res
 
@@ -4300,7 +4349,7 @@ def parse_erp_po_rows(text):
             price = float(pm.group(1).replace(",", "")) if pm else 0.0
         except ValueError:
             continue
-        if qty <= 0:
+        if qty <= 0 or qty >= 5_000_000:
             continue
         desc = re.sub(r"20\d{2}-\d{2}-\d{2}", " ", line[qm.end():])
         desc = re.sub(r"^\s*(PCS|EA|PC|SET)\b", " ", desc)
@@ -4308,10 +4357,34 @@ def parse_erp_po_rows(text):
     return rows
 
 
+_PCS_ROW = re.compile(
+    r"(?P<code>(?<![A-Za-z0-9])\d[A-Z0-9]{9,}(?![A-Za-z0-9]))(?P<mid>.{0,220}?)(?P<qty>(?<![\d,.])\d[\d,]*)\s*(?P<unit>PCS|EA|PC|SET)\s+(?P<amt>\d[\d,]*\.\d{2})\s+(?P<date>\d{2}/\d{2}/\d{4})\s*(?P<price>\d[\d,]*\.\d{2,4})",
+    re.S,
+)
+
+
+def parse_pcs_note_rows(text):
+    """PO kiểu 'Mã SP | Mô tả | SL PCS | Thành tiền | Ngày giao + Đơn giá' (VD Quang Ích). Mỗi dòng: mã, SL, thành tiền, ngày giao, đơn giá.
+    Chỉ nhận dòng có SL x đơn giá = thành tiền. Trả [{code, qty, price, desc, ship}]."""
+    rows = []
+    for m in _PCS_ROW.finditer(text or ""):
+        try:
+            qty, amt, price = (float(m.group(k).replace(",", "")) for k in ("qty", "amt", "price"))
+        except ValueError:
+            continue
+        if qty <= 0 or price <= 0 or abs(qty * price - amt) > 1:
+            continue
+        rows.append({"code": m.group("code"), "qty": qty, "price": price, "ship": m.group("date"),
+                     "desc": re.sub(r"\s+", " ", re.sub(r"[^\x20-\x7E\u00C0-\u1EF9]", " ", m.group("mid"))).strip()})
+    return rows
+
+
 def erp_rows_repaired(text, catalog_items):
     """parse_erp_po_rows + sửa dòng OCR làm rơi số lượng: dòng có mã hàng đã học mà mất SL thì tính lại từ tổng SL / tổng tiền của PO
     (một ẩn: lấy từ tổng tiền; hai ẩn khác giá: giải hệ hai phương trình). Không giải được thì để SL = 0 cho người dùng điền."""
     rows = parse_erp_po_rows(text)
+    if not rows:  # không phải PO ERP kiểu này: không "sửa" gì cả
+        return rows
     have = {r["code"] for r in rows}
     codes = {str(it.get("code") or "").strip(): it for it in catalog_items if it.get("code")}
     order = []
@@ -4374,6 +4447,7 @@ def lines_from_erp_rows(rows, po_no, profile, catalog_items, data_store=None, ta
             "unit": known.get("unit") or profile.get("unit", "cái"), "qty": qty, "price": price, "amount": round(qty * price),
             "div": div, "kg": kg, "kien": math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0, "net": net,
             "gross": round_half_up(net + tare_val, 2) if net > 0 else 0.0, "tare": tare_val,
+            **({"shipDate": r["ship"]} if r.get("ship") else {}),
         })
     return lines
 
@@ -4956,7 +5030,10 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
             tare_v = 0.0
         raw_text = read_document_text(path)
         po_no, po_date, lines = parse_generic_po_text(raw_text, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
-        erp_rows = erp_rows_repaired(raw_text, store.items_for_customer(customer))
+        pcs_rows = parse_pcs_note_rows(raw_text)
+        erp_rows = pcs_rows or erp_rows_repaired(raw_text, store.items_for_customer(customer))
+        if pcs_rows:  # PO kiểu Quang Ích: dòng hàng kèm ngày giao và đơn giá ở cột ghi chú
+            pass
         if erp_rows:  # PO in từ ERP có lớp chữ: đọc đúng từng cột, không đoán SL/giá từ cả dòng
             lines = lines_from_erp_rows(erp_rows, po_no, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
         elif lines and ext == ".pdf" and "inquiry" in (prof.get("lineRefs") or {}) and not _pdf_has_text(path):
