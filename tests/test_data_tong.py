@@ -130,3 +130,23 @@ def test_data_tong_sits_in_customs_folder_level_with_customers(data_dir, tmp_pat
     (hq / "Arizon").mkdir(parents=True)
     s2 = make_store(hq, tmp_path / "x")
     assert s2.customs_root() == str(hq) and s2.dt_path() == str(hq / "DATA_TONG.json")
+
+
+def test_export_learned_roundtrip_to_other_machine(data_dir, tmp_path):
+    """Xuất file học của khách ở máy A rồi nạp ở máy B: có đủ khách, mặt hàng, định mức, file mẫu."""
+    import base64, json
+    a = make_store(data_dir, tmp_path)
+    a.save_learned_customer("xuathoc", {"name": "CTY XUAT HOC", "mst": "0100000001", "addr": "HN"}, [{"name": "Ống 38 x 5", "code": "X1", "div": 20, "kg": 0.3}])
+    tdir = data_dir / "MAU_CHUNG_TU" / "xuathoc"
+    tdir.mkdir(parents=True)
+    (tdir / "pkl.xlsx").write_bytes(b"abc")
+    d = json.loads(json.dumps(a.export_learned("xuathoc")))
+    assert d["khach_moi"]["key"] == "xuathoc" and d["khach_moi"]["items"][0]["name"] == "Ống 38 x 5" and base64.b64decode(d["khach_moi"]["mau"]["pkl"]) == b"abc"
+    import pytest
+    with pytest.raises(ValueError):
+        a.export_learned("kodi")
+    b_dir = tmp_path / "may_b"
+    b_dir.mkdir()
+    b = make_store(b_dir, tmp_path / "wb")
+    res = b.import_learned(d)
+    assert res["khach"] == "xuathoc" and b.custom_items["xuathoc"][0]["name"] == "Ống 38 x 5" and (b_dir / "MAU_CHUNG_TU" / "xuathoc" / "pkl.xlsx").read_bytes() == b"abc"

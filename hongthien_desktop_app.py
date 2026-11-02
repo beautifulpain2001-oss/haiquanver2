@@ -811,6 +811,22 @@ class DedicatedDataStore:
         self.save_catalog()
         return res
 
+    def export_learned(self, key):
+        """Dữ liệu học của một khách đã học/thêm mới (hồ sơ + danh mục hàng + định mức + file mẫu chứng từ) để máy khác nạp bằng "Nạp dữ liệu học"."""
+        import base64
+        if key in BUILTIN_CUSTOMERS or key not in self.custom_profiles:
+            raise ValueError("Chỉ xuất được dữ liệu học của khách đã học / thêm mới (khách có sẵn đã nằm sẵn trong phần mềm).")
+        items = [dict(x) for x in self.custom_items.get(key, [])]
+        mau = {}
+        folder = os.path.join(TEMPLATE_DIR or os.path.join(self.base_dir, "MAU_CHUNG_TU"), key)
+        for doc in ("pkl", "pack", "pgh", "dccn", "dntt", "bbgh"):
+            path = os.path.join(folder, doc + ".xlsx")
+            if os.path.isfile(path):
+                with open(path, "rb") as f:
+                    mau[doc] = base64.b64encode(f.read()).decode("ascii")
+        mem = {it["name"]: self.item_mem[it["name"]] for it in items if it.get("name") in self.item_mem}
+        return {"version": "hongthien-hoc-v1", "khach_moi": {"key": key, "profile": dict(self.custom_profiles[key]), "items": items, "mau": mau}, "item_mem": mem}
+
     def save_templates(self, key, mau, overwrite=False):
         """Lưu file mẫu chứng từ của khách (base64 trong file dữ liệu học) vào MAU_CHUNG_TU/<khách>/<doc>.xlsx."""
         import base64

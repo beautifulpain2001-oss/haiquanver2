@@ -744,6 +744,11 @@ class CustomersPage(_Page):
         self.add_btn.clicked.connect(self.add)
         row.addWidget(self.save_btn)
         row.addWidget(self.add_btn)
+        self.export_btn = QPushButton("📤  Xuất file học của khách này")
+        self.export_btn.setObjectName("sec")
+        self.export_btn.setToolTip("Tạo file .json (hồ sơ khách, danh mục hàng, định mức, file mẫu chứng từ) để máy khác nạp ở Cài đặt → Nạp dữ liệu học.")
+        self.export_btn.clicked.connect(self.export_learned)
+        row.addWidget(self.export_btn)
         row.addStretch(1)
         bl.addLayout(row)
         self.msg = QLabel("")
@@ -775,6 +780,7 @@ class CustomersPage(_Page):
         key = self.current_key()
         self.form.set_enabled(bool(key))
         self.save_btn.setEnabled(bool(key))
+        self.export_btn.setEnabled(bool(key) and key not in self.core.BUILTIN_CUSTOMERS)
         self.form.load(self.core.PROFILES.get(key) if key else None)
 
     def save(self):
@@ -789,6 +795,24 @@ class CustomersPage(_Page):
         self.msg.setText("✅  Đã lưu thông tin khách hàng. Các chứng từ xuất từ giờ sẽ dùng thông tin này.")
         self.refresh(select=key)
         self.changed.emit()
+
+    def export_learned(self, path=None):
+        key = self.current_key()
+        if not key:
+            return
+        try:
+            data = self.store.export_learned(key)
+        except ValueError as e:
+            widgets.warn(self, "Chưa xuất được", str(e))
+            return
+        if not path:
+            path, _ = QFileDialog.getSaveFileName(self, "Lưu file dữ liệu học", f"dulieu_hoc_{key}.json", "Dữ liệu học (*.json)")
+        if not path:
+            return
+        import json
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        self.msg.setText(f"✅  Đã xuất {len(data['khach_moi']['items'])} mặt hàng và {len(data['khach_moi']['mau'])} file mẫu ra: {path}. Máy khác: Cài đặt → Nạp dữ liệu học.")
 
     def add(self):
         dlg = NewCustomerDialog(self.core, self.store, self)
