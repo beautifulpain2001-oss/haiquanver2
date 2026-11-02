@@ -13,7 +13,7 @@ import re
 from openpyxl.formula.translate import Translator
 from openpyxl.utils import get_column_letter
 
-DOCS = ("pkl", "pack", "pgh", "dccn", "dntt")  # tên file mẫu: <mã khách>/<doc>.xlsx
+DOCS = ("pkl", "pack", "pgh", "dccn", "dntt", "bbgh")  # tên file mẫu: <mã khách>/<doc>.xlsx
 
 _REF = re.compile(r"(?<![A-Za-z_!'])(\$?[A-Z]{1,3})(\$?)(\d+)(?![\d(])")
 
@@ -326,7 +326,30 @@ def fill_pkl_arizon(core, wb, rec, prof, tws, title):
     return ws
 
 
-FILLERS = {"pkl": fill_pkl, "pkl_arizon": fill_pkl_arizon, "pack": fill_pack, "pgh": fill_pgh, "dccn": fill_dccn, "dntt": fill_dntt}
+def fill_bbgh(core, wb, rec, prof, tws, title):
+    """Biên bản bàn giao theo file mẫu của khách (sheet 'BBGH'): bên giao, bên nhận, bảng hàng giao nhận, chữ ký."""
+    items = rec.get("items", [])
+    ws, pl = clone_sheet(wb, tws, title, [(21, 25, max(len(items), 1))], max_col=7)
+    d = core._iso_to_date(rec.get("docDate"))
+    ws["A1"] = core.HT_NAME
+    ws["A6"] = f"Hôm nay, ngày {d.day} tháng {d.month} năm {d.year}"
+    ws["A8"] = f"Tại {prof['name']} chúng tôi gồm có: "
+    ws["A10"] = f"Bên giao: {core.HT_NAME}"
+    ws["A12"] = f"Địa chỉ : {core.ADDR_HT}"
+    ws["A14"] = f"Bên nhận: {prof['name']}"
+    ws["A16"] = f"Địa chỉ: {prof.get('addrKho') or prof['addr']}"
+    ws[f"A{pl.map(27)}"] = None  # mẫu lặp lại câu 'Hai bên cùng tiến hành…' sau bảng: bỏ câu thừa
+    r0 = pl.first[21]
+    for i, it in enumerate(items):
+        r = r0 + i
+        u = str(it.get("unit") or prof.get("unit") or "")
+        for col, v in (("A", f"{it.get('ma_sp', '')} {it.get('ten_sp', '')}".strip()), ("B", it.get("po", "")), ("C", u[:1].upper() + u[1:]),
+                       ("D", it.get("qty", 0)), ("E", it.get("price", 0)), ("F", f"=D{r}*E{r}")):
+            ws[f"{col}{r}"] = v
+    return ws
+
+
+FILLERS = {"bbgh": fill_bbgh, "pkl": fill_pkl, "pkl_arizon": fill_pkl_arizon, "pack": fill_pack, "pgh": fill_pgh, "dccn": fill_dccn, "dntt": fill_dntt}
 
 
 def build_from_template(core, doc, wb, rec, prof, path, title):

@@ -83,3 +83,31 @@ def test_mapping_import_links_customer_code_and_name_to_erp_product(data_dir, tm
     assert res["cap_nhat"] == 1
     hit = s.dt_lookup("qi", "", "2V01PRK000002")  # mã trên PO của khách tìm ra sản phẩm ERP
     assert hit["ma_erp"] == "FG1-001" and hit["kg"] == 0.696 and hit["ten_kh"] == "Ống giấy trắng 77 x 2.5 x 1265 mm"
+
+
+def test_kien_divisor_is_read_from_formula_in_sheet_without_quantities(tmp_path):
+    """Sheet 'data' của invoice: chưa có SL nên SL/kiện suy ra từ công thức Số kiện (=ROUNDUP(F14/10,0) -> 10, =F19/20 -> 20)."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["STT", "Mã hàng", "Tên Hàng", "PO", "ĐVT", "Số Lượng", "Trọng lượng(kg)", "Số kiện", "Đơn Giá", "Thành Tiền"])
+    ws.append([1, None, "2V01PRB000002 Ống giả A", None, "Chiếc", None, 0.696, "=ROUNDUP((F2/10),0)", 12800, "=I2*F2"])
+    ws.append([2, None, "2V1004P000001 Thanh nẹp giả", None, "Chiếc", None, 0.03, "=F3/20", 5800, "=I3*F3"])
+    wb.save(str(tmp_path / "inv.xlsx"))
+    d = app.learn_from_invoice_excel(str(tmp_path / "inv.xlsx"), ignore_norms=True)
+    got = {x["name"]: (x.get("kg"), x.get("div")) for x in d["items"]}
+    assert got["Ống giả A"] == (0.696, 10) and got["Thanh nẹp giả"] == (0.03, 20)
+
+
+def test_bbgh_sheet_lists_items_with_both_parties(data_dir, tmp_path):
+    s = make_store(data_dir, tmp_path)
+    s.save_learned_customer("bbgia", {"name": "CÔNG TY BBGH GIẢ", "label": "Bbgh Giả", "addr": "Địa chỉ nhận giả", "unit": "Chiếc"}, [])
+    items = [{"po": "20261001001", "ma_sp": "2V01PRK000002", "ten_sp": "Ống giả 77 x 2.5", "qty": 2500, "price": 11600, "amount": 29000000, "unit": "Chiếc"}]
+    rec = {"customer": "bbgia", "docDate": "2026-10-01", "items": items, "poNumber": "20261001001", "poDates": {}}
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    ws = app.build_bbgh_sheet(wb, rec)
+    cells = {c.coordinate: c.value for row in ws.iter_rows() for c in row if c.value is not None}
+    assert cells["A4"] == "BIÊN BẢN BÀN GIAO" and cells["A6"] == "Hôm nay, ngày 1 tháng 10 năm 2026"
+    assert cells["A14"] == "Bên nhận: CÔNG TY BBGH GIẢ" and cells["A16"] == "Địa chỉ: Địa chỉ nhận giả"
+    assert [cells[f"{c}21"] for c in "ABCDE"] == ["2V01PRK000002 Ống giả 77 x 2.5", "20261001001", "Chiếc", 2500, 11600] and cells["F21"] == "=D21*E21"
+    assert "BBGH" in app.customer_extra_docs({"extraDocs": "bbgh, plx"}) and app.DedicatedDataStore.folder_checklist(["PKL", "BBGH"])[0].count("Biên bản bàn giao") == 1

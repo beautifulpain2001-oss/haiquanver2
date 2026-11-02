@@ -428,7 +428,7 @@ class InfoStep(QWidget):
 
 # --------------------------------------------------------------------------- ④ xuất & lưu
 EXPORTS = [("VAT", "Hóa đơn VAT (Bkav)"), ("PKL", "Invoice / Packing List"), ("PXK", "Phiếu xuất kho (Bkav)"),
-           ("DNTT", "Đề nghị thanh toán"), ("PLX", "Phụ lục X"), ("BEST", "Mẫu riêng của Best"), ("DSH", "Danh sách hàng ECUS (dsh)")]
+           ("DNTT", "Đề nghị thanh toán"), ("PLX", "Phụ lục X"), ("BBGH", "Biên bản bàn giao"), ("BEST", "Mẫu riêng của Best"), ("DSH", "Danh sách hàng ECUS (dsh)")]
 
 
 def _lines_html(lines):

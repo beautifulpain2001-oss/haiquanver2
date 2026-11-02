@@ -803,7 +803,7 @@ class DedicatedDataStore:
         folder = os.path.join(TEMPLATE_DIR or os.path.join(self.base_dir, "MAU_CHUNG_TU"), key)
         n = 0
         for doc, b64 in (mau or {}).items():
-            if doc not in ("pkl", "pack", "pgh", "dccn", "dntt"):
+            if doc not in ("pkl", "pack", "pgh", "dccn", "dntt", "bbgh"):
                 continue
             path = os.path.join(folder, doc + ".xlsx")
             if os.path.exists(path) and not overwrite:
@@ -1292,10 +1292,10 @@ class DedicatedDataStore:
     MADE_PREFIXES = (("invoice_", "Invoice (Excel)"), ("DongGoi_", "Đóng gói (Excel)"), ("Hoa_Don_VAT", "Hóa đơn Bkav (Excel)"), ("PXK_", "PXK Bkav (Excel)"),
                      ("ToKhai_B11", "Dữ liệu tờ khai B11"), ("PhieuGiaoHang", "Phiếu giao hàng"), ("DoiChieuCongNo", "Đối chiếu công nợ"),
                      ("DNTT", "Đề nghị thanh toán"), ("dsh_", "Danh sách hàng ECUS (Excel)"), ("KiemTraCheo", "Kiểm tra chéo"),
-                     ("Bo_Ho_So_Xuat_Hang", "Bộ hồ sơ"), ("00_HO_SO_", "Hồ sơ lưu"), ("PLX_", "PLX (Excel)"), ("SO_", "Đơn đặt hàng"), ("PO_goc_", "PO gốc"))
+                     ("Bo_Ho_So_Xuat_Hang", "Bộ hồ sơ"), ("00_HO_SO_", "Hồ sơ lưu"), ("PLX_", "PLX (Excel)"), ("SO_", "Đơn đặt hàng"), ("PO_goc_", "PO gốc"), ("BienBanBanGiao", "Biên bản bàn giao"))
     MODE_TO_MADE = {"PKL": "Invoice (Excel)", "PACK": "Đóng gói (Excel)", "VAT": "Hóa đơn Bkav (Excel)", "PXK": "PXK Bkav (Excel)", "B11": "Dữ liệu tờ khai B11",
                     "PGH": "Phiếu giao hàng", "DCCN": "Đối chiếu công nợ", "DNTT": "Đề nghị thanh toán", "PLX": "PLX (Excel)", "SO": "Đơn đặt hàng",
-                    "DSH": "Danh sách hàng ECUS (Excel)"}
+                    "BBGH": "Biên bản bàn giao", "DSH": "Danh sách hàng ECUS (Excel)"}
     PREPARED_PREFIXES = MADE_PREFIXES  # tên cũ
 
     @classmethod
@@ -2737,7 +2737,7 @@ def build_dntt_sheet(wb, rec, sheet_name="DNTT"):
     return ws
 
 
-EXTRA_DOC_CODES = ("PLX", "DNTT", "B11")
+EXTRA_DOC_CODES = ("PLX", "DNTT", "B11", "BBGH")
 
 
 def customer_extra_docs(prof):
@@ -2812,6 +2812,63 @@ def build_plx_arizon_sheet(wb, rec, sheet_name="PLX"):
     put(f"B{r + 4}", f"B{r + 4}:D{r + 4}", "Người đại diện theo pháp luật của thương nhân", 12, True, h="right")
     put(f"B{r + 5}", f"B{r + 5}:D{r + 5}", "(Ký, đóng dấu, ghi rõ họ, tên)", 12, italic=True, h="right")
     ws.row_dimensions[r + 6].height = 70
+    _fit_page(ws, landscape=False)
+    return ws
+
+
+def build_bbgh_sheet(wb, rec, sheet_name="BBGH"):
+    """Biên bản bàn giao (VD Quang Ích): bên giao, bên nhận, bảng Tên sản phẩm | PO | ĐVT | SL | Đơn giá | Thành tiền, chữ ký hai bên.
+    Có file mẫu của khách (bbgh.xlsx) thì xuất đúng định dạng mẫu; không thì dùng bố cục dựng sẵn giống mẫu Quang Ích."""
+    prof = PROFILES.get(rec["customer"], {})
+    tpl = best_template(prof, "bbgh")
+    if tpl:
+        return mau_chung_tu.build_from_template(sys.modules[__name__], "bbgh", wb, rec, prof, tpl, sheet_name)
+    ws = wb.create_sheet(title=sheet_name[:31])
+    d = _iso_to_date(rec.get("docDate"))
+    items = rec.get("items", [])
+    for col, w in zip("ABCDEF", (44, 18, 11, 12, 13, 16)):
+        ws.column_dimensions[col].width = w
+    thin = Side(style="thin", color="000000")
+    box = Border(top=thin, bottom=thin, left=thin, right=thin)
+
+    def put(addr, rng, val, size=11, bold=False, h="left", wrap=True, border=False):
+        if rng:
+            ws.merge_cells(rng)
+        c = ws[addr]
+        c.value = val
+        c.font = Font(name="Times New Roman", size=size, bold=bold)
+        c.alignment = Alignment(horizontal=h, vertical="center", wrap_text=wrap)
+        if border:
+            c.border = box
+        return c
+
+    put("A1", "A1:B2", HT_NAME, 12, True)
+    put("C1", "C1:F1", "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", 12, h="center")
+    put("C2", "C2:F2", "Độc lập - Tự do - Hạnh phúc", 12, h="center")
+    put("A4", "A4:F4", "BIÊN BẢN BÀN GIAO", 16, True, h="center")
+    put("A6", "A6:F6", f"Hôm nay, ngày {d.day} tháng {d.month} năm {d.year}")
+    put("A8", "A8:F8", f"Tại {prof.get('name', '')} chúng tôi gồm có: ")
+    put("A10", "A10:F10", f"Bên giao: {HT_NAME}")
+    put("A12", "A12:F12", f"Địa chỉ : {ADDR_HT}")
+    put("A14", "A14:F14", f"Bên nhận: {prof.get('name', '')}")
+    put("A16", "A16:F17", f"Địa chỉ: {prof.get('addrKho') or prof.get('addr', '')}")
+    put("A18", "A18:F18", "Hai bên cùng tiến hành giao nhận số lượng giao hàng hóa cụ thể như sau:", 12)
+    for col, h in zip("ABCDEF", ("Tên sản phẩm", "PO Number", "Đơn vị tính", "Số lượng", "Đơn giá", "Thành tiền")):
+        put(f"{col}20", None, h, 11, True, "center", border=True)
+    for i, it in enumerate(items):
+        r = 21 + i
+        u = str(it.get("unit") or prof.get("unit") or "")
+        name = f"{it.get('ma_sp', '')} {it.get('ten_sp', '')}".strip()
+        for col, v, al in (("A", name, "left"), ("B", it.get("po", ""), "center"), ("C", u[:1].upper() + u[1:], "center"), ("D", it.get("qty", 0), "center"),
+                           ("E", it.get("price", 0), "center"), ("F", f"=D{r}*E{r}", "center")):
+            c = put(f"{col}{r}", None, v, 11, False, al, border=True)
+            if col in "DEF":
+                c.number_format = "#,##0"
+    end = 21 + max(len(items), 1)
+    put(f"A{end + 1}", f"A{end + 1}:F{end + 1}", "Biên bản được lập thành hai (02) bản gốc có giá trị pháp lý như nhau. Mỗi Bên giữ một (01) bản gốc.", 12)
+    put(f"A{end + 4}", f"A{end + 4}:C{end + 4}", "ĐẠI DIỆN BÊN GIAO", 10, True, "center")
+    put(f"D{end + 4}", f"D{end + 4}:F{end + 4}", "ĐẠI DIỆN BÊN NHẬN", 10, True, "center")
+    ws.row_dimensions[end + 8].height = 40
     _fit_page(ws, landscape=False)
     return ws
 
@@ -3697,6 +3754,8 @@ def build_full_bundle(wb, rec, s_key, skip_h=False):
             build_plx_sheet(wb, rec, f"PLX_{s_key}")
         if "DNTT" in extra:
             build_dntt_sheet(wb, rec, "DNTT")
+        if "BBGH" in extra:
+            build_bbgh_sheet(wb, rec, f"BBGH_{s_key}")
         return wb
     if cust == "tesa":
         build_customs_b11_sheet(wb, rec, f"ToKhai_B11_{s_key}")
@@ -3936,6 +3995,10 @@ def learn_from_invoice_excel(file_path, ignore_norms=False):
     """Đọc Invoice / Bảng kê PKL Excel của khách (mọi sheet): mã, tên, đơn giá, kg/chiếc, SL/kiện, số PO, bì.
     Cùng một mặt hàng xuất hiện ở nhiều sheet thì sheet có ngày mới nhất được ưu tiên."""
     wb = openpyxl.load_workbook(file_path, data_only=True)
+    try:
+        wbf = openpyxl.load_workbook(file_path)  # bản công thức: lấy 'số cái mỗi kiện' từ công thức Số kiện (=ROUNDUP(F14/10,0) -> 10)
+    except Exception:
+        wbf = None
     sheets, norms, profile, ddh = [], {}, {}, []
     for ws in wb.worksheets:
         rows = [tuple(r) for r in ws.iter_rows(values_only=True)]
@@ -3959,7 +4022,8 @@ def learn_from_invoice_excel(file_path, ignore_norms=False):
         if not cols:
             continue
         items, blank = [], 0
-        for r in rows[h_idx + 1:]:
+        frows = [tuple(x) for x in wbf[ws.title].iter_rows(values_only=True)] if wbf is not None and ws.title in wbf.sheetnames else []
+        for r_i, r in enumerate(rows[h_idx + 1:], h_idx + 1):
             def get(f):
                 # Cột 'Mã hàng' hay bị gộp ô: tiêu đề ở cột này, mã nằm ở cột bên phải
                 extra = [c + 1 for c in cols.get(f, []) if f == "code"]
@@ -3990,8 +4054,12 @@ def learn_from_invoice_excel(file_path, ignore_norms=False):
             gross = _num_or_zero(get("gross"))
             kien = _num_or_zero(get("kien"))
             kg = _num_or_zero(get("kg"))
+            code_cell = str(get("code") or "").strip()
+            mcode = re.match(r"^(\d[A-Z0-9]{9,})\s+(\S.*)$", name) if not code_cell else None
+            if mcode:  # mã hàng ghi chung ô với tên ('2V01PRB000002 Ống giấy…'): tách ra
+                code_cell, name = mcode.group(1), mcode.group(2).strip()
             it = {
-                "code": str(get("code") or "").strip(),
+                "code": code_cell,
                 "name": name,
                 "unit": str(get("unit") or "").strip(),
                 "qty": qty,
@@ -4008,6 +4076,11 @@ def learn_from_invoice_excel(file_path, ignore_norms=False):
             if qty > 0 and isinstance(kien, (int, float)) and kien > 0:
                 div = qty / kien
                 it["div"] = int(round(div)) if abs(div - round(div)) < 1e-6 else round(div, 3)
+            elif r_i < len(frows) and cols.get("kien"):
+                fcell = frows[r_i][cols["kien"][0]] if cols["kien"][0] < len(frows[r_i]) else None
+                m = re.search(r"/\s*\(?\s*(\d+(?:\.\d+)?)\s*\)?", str(fcell)) if isinstance(fcell, str) and fcell.startswith("=") else None
+                if m and float(m.group(1)) > 0:
+                    it["div"] = int(float(m.group(1))) if float(m.group(1)).is_integer() else float(m.group(1))
             items.append(it)
         if items:
             sheets.append((_sheet_date(rows), ws.title, items))
@@ -4720,6 +4793,9 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
     elif mode == "PLX":
         build_plx_sheet(wb, rec, f"PLX_{s_key}")
         fname = f"PLX_{rec['customer']}_{s_key}.xlsx"
+    elif mode == "BBGH":
+        build_bbgh_sheet(wb, rec, f"BBGH_{s_key}")
+        fname = f"BienBanBanGiao_{rec['customer']}_{s_key}.xlsx"
     elif mode == "BEST":
         build_packing_best_sheet(wb, rec, f"DongGoi_{s_key}")
         build_pgh_best_sheet(wb, rec, f"PGH_{s_key}")
@@ -4772,7 +4848,7 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
 LOT_MODE_LABELS = {
     "SO": "Phiếu SO", "PKL": "Invoice / Packing List", "PACK": "Chi tiết đóng gói", "VAT": "Hóa đơn VAT", "PXK": "Phiếu xuất kho",
     "B11": "Tờ khai B11", "PLX": "Phụ lục X", "PGH": "Phiếu giao hàng", "DCCN": "Đối chiếu công nợ", "DNTT": "Đề nghị thanh toán",
-    "DSH": "Danh sách hàng ECUS", "CHECK": "Kiểm tra chéo",
+    "DSH": "Danh sách hàng ECUS", "CHECK": "Kiểm tra chéo", "BBGH": "Biên bản bàn giao",
 }
 
 
