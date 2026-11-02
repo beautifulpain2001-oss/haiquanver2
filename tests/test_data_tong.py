@@ -150,3 +150,29 @@ def test_export_learned_roundtrip_to_other_machine(data_dir, tmp_path):
     b = make_store(b_dir, tmp_path / "wb")
     res = b.import_learned(d)
     assert res["khach"] == "xuathoc" and b.custom_items["xuathoc"][0]["name"] == "Ống 38 x 5" and (b_dir / "MAU_CHUNG_TU" / "xuathoc" / "pkl.xlsx").read_bytes() == b"abc"
+
+
+def test_able_import_po_rows_and_dccn_template(data_dir, tmp_path):
+    """Able: nạp file học (kèm mẫu DCCN3), đọc PO theo gam + quy cách + SL, xuất đối chiếu công nợ theo mẫu của khách."""
+    import json, base64, io, os, openpyxl
+    d = {"khach_moi": {"key": "ablex", "profile": {"name": "CONG TY ABLE TEST", "label": "AbleX", "unit": "Chiếc", "addr": "HP", "mst": "0202226426", "extraDocs": "DCCN", "poStyle": "able"},
+                       "items": [{"code": "38*5*460*250g", "name": "Ống 38x5x460 250g in", "unit": "Chiếc", "price": 4725, "div": 75, "kg": 0.25, "hs": "48229090"},
+                                 {"code": "38*5*460*250g-ko-in", "name": "Ống 38x5x460 250g", "unit": "Chiếc", "price": 4725, "div": 75, "kg": 0.25, "hs": "48229090"}],
+                       "mau": {}}, "item_mem": {}}
+    tpl = "/root/.claude/uploads/60e0f727-02f2-5c49-8a4c-929e37443d6a/b3c71436-DCCN3.xlsx"
+    if os.path.exists(tpl):
+        d["khach_moi"]["mau"]["dccn"] = base64.b64encode(open(tpl, "rb").read()).decode()
+    s = make_store(data_dir, tmp_path)
+    s.import_learned(d)
+    prof = app.PROFILES["ablex"]
+    assert app.is_able(prof) and "DCCN" in app.customer_extra_docs(prof) and "DCCN" in app.lot_bundle_modes({"customer": "ablex"})
+    cat = s.items_for_customer("ablex")
+    rows = app.parse_able_po_rows("1 印刷纸管 250g 38*5*460 1728 4,725.00 d 8,164,800.00 d 2026-2350-020\n2 纸管 250g 38*5*460 100 4,725.00 d 472,500.00 d 2026-2350-027", cat)
+    assert [(r["code"], r["qty"], r["price"]) for r in rows] == [("38*5*460*250g", 1728, 4725), ("38*5*460*250g-ko-in", 100, 4725)]
+    if os.path.exists(tpl):
+        lines = app.lines_from_erp_rows(rows, "20260821-00231", prof, cat, data_store=s)
+        rec = {"customer": "ablex", "docDate": "2026-03-31", "items": lines, "poNumber": "20260821-00231", "scheduleKey": "31.03", "pxkNo": "0000113"}
+        res = app.lot_export(s, rec, "DCCN")
+        ws = openpyxl.load_workbook(res["path"]).worksheets[0]
+        assert ws["I12"].value == 1728 and ws["J12"].value == 4725 and ws["K12"].value == "=I12*J12" and ws["D12"].value == "20260821-00231"
+        assert ws["I13"].value == 100 and ws["B7"].value.endswith("CONG TY ABLE TEST")

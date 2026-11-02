@@ -1323,7 +1323,7 @@ class DedicatedDataStore:
     MADE_PREFIXES = (("invoice_", "Invoice (Excel)"), ("DongGoi_", "Đóng gói (Excel)"), ("Hoa_Don_VAT", "Hóa đơn Bkav (Excel)"), ("PXK_", "PXK Bkav (Excel)"),
                      ("ToKhai_B11", "Dữ liệu tờ khai B11"), ("PhieuGiaoHang", "Phiếu giao hàng"), ("DoiChieuCongNo", "Đối chiếu công nợ"),
                      ("DNTT", "Đề nghị thanh toán"), ("dsh_", "Danh sách hàng ECUS (Excel)"), ("KiemTraCheo", "Kiểm tra chéo"),
-                     ("Bo_Ho_So_Xuat_Hang", "Bộ hồ sơ"), ("00_HO_SO_", "Hồ sơ lưu"), ("PLX_", "PLX (Excel)"), ("SO_", "Đơn đặt hàng"), ("PO_goc_", "PO gốc"), ("BienBanBanGiao", "Biên bản bàn giao"))
+                     ("Bo_Ho_So_Xuat_Hang", "Bộ hồ sơ"), ("00_HO_SO_", "Hồ sơ lưu"), ("PLX_", "PLX (Excel)"), ("SO_", "Đơn đặt hàng"), ("PO_goc_", "PO gốc"), ("BienBanBanGiao", "Biên bản bàn giao"), ("dccn", "Đối chiếu công nợ"))
     MODE_TO_MADE = {"PKL": "Invoice (Excel)", "PACK": "Đóng gói (Excel)", "VAT": "Hóa đơn Bkav (Excel)", "PXK": "PXK Bkav (Excel)", "B11": "Dữ liệu tờ khai B11",
                     "PGH": "Phiếu giao hàng", "DCCN": "Đối chiếu công nợ", "DNTT": "Đề nghị thanh toán", "PLX": "PLX (Excel)", "SO": "Đơn đặt hàng",
                     "BBGH": "Biên bản bàn giao", "DSH": "Danh sách hàng ECUS (Excel)"}
@@ -1335,9 +1335,9 @@ class DedicatedDataStore:
         n = name.lower()
         base, ext = os.path.splitext(n)
         pdfish = ext in (".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff")
-        if pdfish and re.search(r"c\d{2}n[a-z]{2}", base):
+        if pdfish and (re.search(r"c\d{2}n[a-z]{2}", base) or re.match(r"pxk\s*\d", base)):
             return "PXK Bkav (PDF)"
-        if pdfish and re.search(r"c\d{2}t[a-z]{2}", base):
+        if pdfish and (re.search(r"c\d{2}t[a-z]{2}", base) or re.match(r"h[đd]\s*\d", base)):
             return "Hóa đơn Bkav (PDF)"
         if base.startswith("dsh"):
             return "DSH hải quan"
@@ -2961,7 +2961,7 @@ def build_dntt_sheet(wb, rec, sheet_name="DNTT"):
     return ws
 
 
-EXTRA_DOC_CODES = ("PLX", "DNTT", "B11", "BBGH")
+EXTRA_DOC_CODES = ("PLX", "DNTT", "B11", "BBGH", "DCCN")
 
 
 def customer_extra_docs(prof):
@@ -3980,6 +3980,8 @@ def build_full_bundle(wb, rec, s_key, skip_h=False):
             build_dntt_sheet(wb, rec, "DNTT")
         if "BBGH" in extra:
             build_bbgh_sheet(wb, rec, f"BBGH_{s_key}")
+        if "DCCN" in extra:
+            build_dccn_best_sheet(wb, rec, f"DCCN_{s_key}")
         return wb
     if cust == "tesa":
         build_customs_b11_sheet(wb, rec, f"ToKhai_B11_{s_key}")
@@ -4722,6 +4724,162 @@ def erp_rows_repaired(text, catalog_items):
     return rows
 
 
+def pdf_text_head(path, pages=2):
+    """Chữ của vài trang đầu PDF (chỉ lớp chữ có sẵn, không OCR); '' nếu là ảnh scan."""
+    try:
+        r = pypdf.PdfReader(path)
+        return "\n".join((r.pages[i].extract_text() or "") for i in range(min(pages, len(r.pages))))
+    except Exception:
+        return ""
+
+
+def classify_dropped(path):
+    """Nhận biết file người dùng thả vào hồ sơ: (loại, số). Loại: PXK, HD (hóa đơn Bkav), IV (invoice), PO, DSH, TK (tờ khai),
+    XLS_IV (invoice Excel), XLS_DCCN, XLS (Excel khác), '' (không rõ). Số = số phiếu xuất kho nếu đọc được (bỏ số 0 đầu).
+    PDF Bkav có lớp chữ thì đọc nội dung; file scan chỉ nhận theo tên."""
+    name = os.path.basename(path)
+    base, ext = os.path.splitext(name.lower())
+    pdfish = ext in (".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff")
+    if base.startswith("dsh"):
+        return "DSH", ""
+    m = re.match(r"0*(\d{3,9})[_ -]+\d{12}", base)
+    if m:
+        return "TK", m.group(1)  # tờ khai đặt tên '<số PXK>_<số tờ khai>'
+    if re.search(r"(?<!\d)\d{12}(?!\d)", base) or "tokhai" in base.replace("_", "").replace(" ", ""):
+        return "TK", ""
+    if pdfish and ext == ".pdf":
+        head = strip_accents_upper(pdf_text_head(path))
+        if "PHIEU XUAT KHO" in head:
+            m = re.search(r"(?:PXK|SO|NO)\D{0,8}(\d{5,10})", head) or re.search(r"(?<!\d)(\d{6,10})(?!\d)", head)
+            return "PXK", (m.group(1).lstrip("0") or "0") if m else ""
+        if "HOA DON GIA TRI GIA TANG" in head or "HOA DON" in head and "KY HIEU" in head:
+            return "HD", ""
+    if pdfish:
+        if re.search(r"c\d{2}n[a-z]{2}", base) or re.match(r"pxk", base):
+            m = re.search(r"(?<!\d)0*(\d{2,9})(?!\d)", base)
+            return "PXK", m.group(1) if m else ""
+        if re.search(r"c\d{2}t[a-z]{2}", base) or re.match(r"h[đd]\s*\d", base):
+            return "HD", ""
+        if re.match(r"(iv|inv|invoice)", base):
+            m = re.search(r"(?<!\d)0*(\d{2,9})(?!\d)", base)
+            return "IV", m.group(1) if m else ""
+        if re.match(r"po", base):
+            return "PO", ""
+    if ext in (".xlsx", ".xlsm", ".xls"):
+        if re.match(r"(iv|inv|invoice)", base):
+            return "XLS_IV", ""
+        if base.startswith("dccn"):
+            return "XLS_DCCN", ""
+        return "XLS", ""
+    return "", ""
+
+
+def plan_add_files(customs_root, cust_name, day, paths, pxk_no=""):
+    """Kế hoạch thêm file vào hồ sơ <Khách>/<yyyy>_Thang_<mm>/<ngày>: file do phần mềm tạo/Excel/PO gốc vào DO_PHAN_MEM_TAO,
+    PDF Bkav, scan, tờ khai, dsh để bên ngoài. PDF Bkav đặt lại tên theo số phiếu xuất kho: 'PXK 247', 'HĐ 247', 'Invoice 247';
+    tờ khai giữ nguyên tên. Số phiếu xuất kho lấy từ ô nhập, hoặc file PXK, hoặc tên tờ khai '<số>_<số tờ khai>', hoặc file đã có trong thư mục.
+    Trả (số PXK dùng, [{src, kind, new_name, area ('ngoai'|'tao'), dst, note}])."""
+    folder = os.path.join(customs_root, cust_name, f"{day[:4]}_Thang_{day[5:7]}", day)
+    cls = [(p, *classify_dropped(p)) for p in paths]
+    no = str(pxk_no or "").strip().lstrip("0")
+    if not no:
+        no = next((n for _p, k, n in cls if k == "PXK" and n), "")
+    if not no:
+        no = next((n for _p, k, n in cls if k == "TK" and n), "")
+    if not no:
+        for n in (os.listdir(folder) if os.path.isdir(folder) else []):
+            m = re.match(r"(?:PXK|H[ĐD]|Invoice)\s+(\d+)(?:_\d+)?\.pdf$", n, re.I) or re.match(r"0*(\d{3,9})_\d{12}", n)
+            if m:
+                no = m.group(1)
+                break
+    out = []
+    for p, kind, _n in cls:
+        name = os.path.basename(p)
+        ext = os.path.splitext(name)[1].lower()
+        area, new, note = "ngoai", name, ""
+        if kind in ("PXK", "HD", "IV") and ext == ".pdf":
+            label = {"PXK": "PXK", "HD": "HĐ", "IV": "Invoice"}[kind]
+            if no:
+                new = f"{label} {no}.pdf"
+            else:
+                note = "Chưa biết số phiếu xuất kho: nhập số vào ô trên để đặt tên"
+        elif kind in ("PXK", "HD", "IV"):
+            new = f"{ {'PXK': 'PXK', 'HD': 'HĐ', 'IV': 'Invoice'}[kind] } {no}{ext}" if no else name
+        elif kind == "PO":
+            area, new = "tao", "PO_goc_" + name
+        elif kind == "XLS_IV":
+            area, new = "tao", "invoice_" + name
+        elif kind == "XLS_DCCN":
+            area, new = "tao", "DoiChieuCongNo_" + name
+        elif kind == "XLS":
+            area = "tao"
+        out.append({"src": p, "kind": kind, "new_name": new, "area": area,
+                    "dst": os.path.join(folder, GENERATED_DIR if area == "tao" else "", new), "note": note})
+    return no, out
+
+
+def apply_add_files(plan):
+    """Sao chép các file theo kế hoạch (không ghi đè: trùng tên thì thêm _2). Trả danh sách đường dẫn đích."""
+    done = []
+    for it in plan:
+        dst = it["dst"]
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        stem, ext = os.path.splitext(dst)
+        n = 2
+        while os.path.exists(dst):
+            dst = f"{stem}_{n}{ext}"
+            n += 1
+        shutil.copy2(it["src"], dst)
+        done.append(dst)
+    return done
+
+
+def is_able(prof):
+    """Khách Able (nhận theo tên công ty): PO chữ Hán, mã hàng = quy cách + gam (VD 38*5*460*250g), bản in/không in."""
+    return (prof or {}).get("poStyle") == "able" or bool(re.search(r"\bABLE\b", str((prof or {}).get("name") or "").upper()))
+
+
+def parse_able_po_rows(text, catalog_items):
+    """PO Able: mỗi dòng có tên (gam: 250g), quy cách (38*5*460), SL, đơn giá, thành tiền, mã tham chiếu 2026-2350-020.
+    Chỉ cần gam + quy cách + SL: tra mã Able theo 'phi*dày*dài*gam'; có chữ 印刷 (in) thì lấy mã 'in', không có thì mã '-ko-in' nếu có.
+    Trả [{code, desc, qty, price, ref}] (price 0 nếu không đọc được: lấy giá của danh mục)."""
+    cat = {str(it.get("code") or ""): it for it in catalog_items if it.get("code")}
+    rows = []
+    has_cjk = bool(re.search(r"[\u4e00-\u9fff]", text or ""))
+    spec_re = re.compile(r"(?<![\d.])(\d{2})\s*[*xX×]\s*(\d{1,2})\s*[*xX×]\s*(\d{3})(?!\d)")
+    for line in (text or "").splitlines():
+        m = spec_re.search(line)
+        if not m:
+            continue
+        d, t, ln = m.groups()
+        wm = re.search(r"(?<![\d.])(\d{2,3}(?:[.,]\d)?)\s*g\b", line[:m.start()] + " " + line[m.end():], re.I)
+        if not wm:
+            continue
+        w = wm.group(1).replace(",", ".")
+        tail = line[m.end():]
+        nums = [float(x.replace(",", "")) for x in re.findall(r"(?<![\d-])\d[\d,]*(?:\.\d+)?(?![\d-])", tail) if x.replace(",", "") not in ("",)]
+        qty = price = 0.0
+        for i, q in enumerate(nums):
+            if q == int(q) and 1 <= q < 5_000_000 and i + 2 < len(nums) + 1:
+                rest = nums[i + 1:i + 3]
+                if len(rest) == 2 and abs(q * rest[0] - rest[1]) < 1.5:
+                    qty, price = q, rest[0]
+                    break
+        if not qty:  # không đối chiếu được giá: nhận số nguyên đầu tiên sau quy cách là SL
+            qty = next((q for q in nums if q == int(q) and 1 <= q < 5_000_000), 0.0)
+        if not qty:
+            continue
+        printed = bool(re.search(r"印刷|\bin\b", line, re.I)) if has_cjk else True  # OCR không có chữ Hán: coi là bản in (loại phổ biến)
+        base = f"{d}*{t}*{ln}*{w}g"
+        order = [base, base + "-ko-in"] if printed else [base + "-ko-in", base]
+        code = next((c for c in order if c in cat), "")
+        if not code:  # quy cách dày khác (VD 28*2*305 trong PO, 28*5*305 trong danh mục): khớp theo phi, dài, gam
+            code = next((c for c in cat if re.fullmatch(rf"{d}\*\d+\*{ln}\*{re.escape(w)}g(?:-ko-in)?", c)), "")
+        ref = re.search(r"20\d{2}-\d{3,4}-\d{3}", line)
+        rows.append({"code": code or base, "desc": cat.get(code, {}).get("name") or base, "qty": qty, "price": price, "ref": ref.group(0) if ref else ""})
+    return rows
+
+
 def lines_from_erp_rows(rows, po_no, profile, catalog_items, data_store=None, tare_val=0.0):
     """Dòng hàng từ parse_erp_po_rows: mặt hàng đã học (theo mã) lấy tên, kg, định mức đã nhớ; mặt hàng mới lấy tên/giá theo PO
     (kg, định mức để trống cho người dùng điền ở Bước 3, rồi được nhớ cho lần sau)."""
@@ -4979,7 +5137,9 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
         store.dt_learn_items(rec["customer"], rec["items"])  # nhớ kg/chiếc, SL/kiện đã xác nhận vào data tổng dùng chung
     except Exception:
         pass
-    if mode in ("BEST", "PACK", "PGH", "DCCN") and not is_best_docset(rec):
+    if mode == "DCCN" and not is_best_docset(rec) and ("DCCN" in customer_extra_docs(PROFILES.get(rec["customer"], {})) or best_template(PROFILES.get(rec["customer"], {}), "dccn")):
+        pass  # khách đã học có đối chiếu công nợ riêng
+    elif mode in ("BEST", "PACK", "PGH", "DCCN") and not is_best_docset(rec):
         raise ValueError("Khách này chưa đặt bộ mẫu 'best'. Thêm khách bằng nút 'Thêm Khách Mới' và chọn bộ mẫu best.")
     if mode == "SO" and rec["customer"] != "shirai":
         raise ValueError("Phiếu SO chỉ dùng cho khách Shirai.")
@@ -5335,7 +5495,8 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
         raw_text = read_document_text(path)
         po_no, po_date, lines = parse_generic_po_text(raw_text, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
         pcs_rows = parse_pcs_note_rows(raw_text)
-        erp_rows = pcs_rows or erp_rows_repaired(raw_text, store.items_for_customer(customer))
+        able_rows = [] if pcs_rows or not is_able(prof) else parse_able_po_rows(raw_text, store.items_for_customer(customer))
+        erp_rows = pcs_rows or able_rows or erp_rows_repaired(raw_text, store.items_for_customer(customer))
         if pcs_rows:  # PO kiểu Quang Ích: dòng hàng kèm ngày giao và đơn giá ở cột ghi chú
             pass
         if erp_rows:  # PO in từ ERP có lớp chữ: đọc đúng từng cột, không đoán SL/giá từ cả dòng

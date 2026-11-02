@@ -11,6 +11,7 @@ import os
 import re
 
 from openpyxl.formula.translate import Translator
+from openpyxl.styles import Alignment
 from openpyxl.utils import get_column_letter
 
 DOCS = ("pkl", "pack", "pgh", "dccn", "dntt", "bbgh")  # tên file mẫu: <mã khách>/<doc>.xlsx
@@ -244,7 +245,45 @@ def fill_pgh(core, wb, rec, prof, tws, title):
     return ws
 
 
+def fill_dccn_able(core, wb, rec, prof, tws, title):
+    """Bảng đối chiếu công nợ kiểu Able (sheet 'BẢNG ĐỐI CHIẾU CÔNG NỢ'): STT | Ngày giao | PO | Mã SP | Quy cách | Mã hàng | ĐVT | SL | Đơn giá | Thành tiền."""
+    items = rec.get("items", [])
+    ws, pl = clone_sheet(wb, tws, title, [(12, 24, max(len(items), 1))], max_col=11)
+    d = core._iso_to_date(rec.get("docDate"))
+    ws["B2"] = f"Ngày日{d.day:02d} tháng月{d.month:02d}  năm年 {d.year}"
+    ws["D4"] = core.HT_NAME
+    ws["D5"] = core.ADDR_HT
+    ws["B7"] = f"Khách hàng客户:   {prof['name']}"
+    ws["B8"] = f"Địa chỉ:   :{prof.get('addrKho') or prof['addr']}"
+    ws["B9"] = f"Mã số thuế:\t  {prof.get('mst', '')}"
+    r0 = pl.first[12]
+    for i in range(1, len(items)):  # các dòng mẫu phía dưới cỡ chữ lệch nhau: lấy kiểu của dòng đầu cho đều
+        for col in "BCDEFGHIJK":
+            ws[f"{col}{r0 + i}"]._style = copy.copy(ws[f"{col}{r0}"]._style)
+        if ws.row_dimensions[r0].height:
+            ws.row_dimensions[r0 + i].height = ws.row_dimensions[r0].height
+    for i, it in enumerate(items):
+        r = r0 + i
+        u = str(it.get("unit") or prof.get("unit") or "")
+        ship = it.get("shipDate")
+        c = ws[f"C{r}"]
+        c.value = core._iso_to_date(ship) if ship else d
+        c.number_format = "dd/mm/yyyy"
+        for col, v in (("B", i + 1), ("D", it.get("po", "")), ("F", it.get("ten_sp", "")), ("H", u.lower()),
+                       ("I", it.get("qty", 0)), ("J", it.get("price", 0)), ("K", f"=I{r}*J{r}")):
+            ws[f"{col}{r}"] = v
+    total = round(core.lot_totals(rec)["amount"])
+    ws[f"B{pl.map(28)}"] = f"Tổng tiền bằng chữ 总金额大写（越南盾): {core.num_to_vn_words(total)}"
+    sig = pl.map(30)
+    ws.merge_cells(f"G{sig}:K{sig}")
+    ws[f"G{sig}"] = str(prof["name"]).upper()
+    ws[f"G{sig}"].alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    return ws
+
+
 def fill_dccn(core, wb, rec, prof, tws, title):
+    if "ĐỐI CHIẾU CÔNG NỢ" in str(tws["B1"].value or "").upper():
+        return fill_dccn_able(core, wb, rec, prof, tws, title)
     items = rec.get("items", [])
     ws, pl = clone_sheet(wb, tws, title, [(9, 20, max(len(items), 1))])
     d_hd = core._iso_to_date(rec.get("docDate"))

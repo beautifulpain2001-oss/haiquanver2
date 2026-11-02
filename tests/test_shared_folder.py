@@ -134,3 +134,42 @@ def test_reorganize_old_customer_folders_preview_move_and_undo(data_dir, tmp_pat
     assert s.plan_reorganize() == []  # đã thống nhất
     assert s.undo_reorganize() == n
     assert (hq / "Tesa" / "lo 30.10.2026" / "po.pdf").exists() and (hq / "Best" / "le.pdf").exists()
+
+
+def test_add_files_renames_pdfs_by_pxk_number_and_splits_folders(tmp_path):
+    """Thả file vào hồ sơ: PDF Bkav đặt tên theo số phiếu xuất kho, tờ khai giữ tên, Excel/PO gốc vào DO_PHAN_MEM_TAO."""
+    src = tmp_path / "src"
+    src.mkdir()
+    pdfs = {}
+    try:
+        from reportlab.pdfgen import canvas
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        font = next((f for f in ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",) if os.path.exists(f)), None)
+        if font:
+            pdfmetrics.registerFont(TTFont("DJ", font))
+            c = canvas.Canvas(str(src / "bkav_pxk.pdf"))
+            c.setFont("DJ", 12)
+            c.drawString(50, 800, "PHIẾU XUẤT KHO KIÊM VẬN CHUYỂN NỘI BỘ")
+            c.drawString(50, 780, "Số: 000000247   Ngày: 21/9/2026")
+            c.save()
+            pdfs["bkav_pxk.pdf"] = "PXK 247.pdf"
+    except ImportError:
+        pass
+    for n in ("00000113_308389723740.xls", "dsh113.xlsx", "HĐ 00000008.pdf", "IV PK.xlsx", "ivable113.pdf", "poable113.pdf", "1.4.2026.zip"):
+        (src / n).write_text("x")
+    root = tmp_path / "HAI_QUAN"
+    no, plan = app.plan_add_files(str(root), "Able", "2026-04-01", [str(src / n) for n in sorted(os.listdir(src))], "")
+    by = {os.path.basename(p["src"]): p for p in plan}
+    assert no == ("247" if pdfs else "113")
+    if pdfs:
+        assert by["bkav_pxk.pdf"]["new_name"] == "PXK 247.pdf"
+    assert by["HĐ 00000008.pdf"]["new_name"] == f"HĐ {no}.pdf" and by["ivable113.pdf"]["new_name"] == f"Invoice {no}.pdf"
+    assert by["00000113_308389723740.xls"]["new_name"] == "00000113_308389723740.xls" and by["00000113_308389723740.xls"]["area"] == "ngoai"
+    assert by["dsh113.xlsx"]["area"] == "ngoai" and by["1.4.2026.zip"]["area"] == "ngoai"
+    assert by["IV PK.xlsx"]["area"] == "tao" and by["poable113.pdf"]["new_name"] == "PO_goc_poable113.pdf"
+    done = app.apply_add_files(plan)
+    day = root / "Able" / "2026_Thang_04" / "2026-04-01"
+    assert (day / f"HĐ {no}.pdf").exists() and (day / "DO_PHAN_MEM_TAO" / "invoice_IV PK.xlsx").exists() and len(done) == len(plan)
+    again = app.apply_add_files(app.plan_add_files(str(root), "Able", "2026-04-01", [str(src / "ivable113.pdf")], "")[1])
+    assert os.path.basename(again[0]) == f"Invoice {no}_2.pdf"  # không ghi đè

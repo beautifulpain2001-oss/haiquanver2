@@ -482,3 +482,23 @@ def test_big_tables_open_instantly_and_data_tong_cells_are_editable(win):
     idx = win.data_tong.model.index(0, 6)
     assert win.data_tong.model.setData(idx, "40") and win.store.data_tong[0]["kien"] == 40 and win.store.data_tong[0]["kien_nguon"] == "tay"
     assert not (win.data_tong.model.flags(win.data_tong.model.index(0, 1)) & Qt.ItemIsEditable)  # chỉ sửa ô kg và SL/kiện
+
+
+def test_add_files_dialog_builds_plan_and_copies(win, tmp_path):
+    from ui_qt.pages_other import AddFilesDialog
+    from PySide6.QtCore import QDate
+    src = tmp_path / "in"
+    src.mkdir()
+    for n in ("00000113_308389723740.xls", "pxk 113.pdf", "HĐ 00000008.pdf", "IV PK.xlsx"):
+        (src / n).write_text("x")
+    dlg = AddFilesDialog(win.core, win.store)
+    dlg.cust.setCurrentText("Able")
+    dlg.day.setDate(QDate(2026, 4, 1))
+    dlg.paths = [str(src / n) for n in sorted(os.listdir(src))]
+    dlg.rebuild()
+    assert dlg.ok.isEnabled() and dlg.table.rowCount() == 4
+    names = {dlg.table.item(r, 2).text() for r in range(4)}
+    assert {"PXK 113.pdf", "HĐ 113.pdf", "00000113_308389723740.xls", "invoice_IV PK.xlsx"} == names
+    dlg.add()
+    day = os.path.join(win.store.customs_root(), "Able", "2026_Thang_04", "2026-04-01")
+    assert os.path.isfile(os.path.join(day, "HĐ 113.pdf")) and os.path.isfile(os.path.join(day, "DO_PHAN_MEM_TAO", "invoice_IV PK.xlsx")) and dlg.added == 4
