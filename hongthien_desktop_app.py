@@ -1473,6 +1473,175 @@ class DedicatedDataStore:
         out.sort(key=lambda o: (str((o["record"] or {}).get("docDate") or o["day"])[:10], o["path"]), reverse=True)
         return out
 
+    # ---- Sắp xếp lại thư mục cũ theo kiểu thống nhất: <Khách>/<yyyy>_Thang_<mm>/<yyyy-mm-dd> -------------------------
+    @staticmethod
+    def guess_date(text, default_year=None):
+        """Ngày trong một tên thư mục/file: 2026-10-29, 20261029, 29.10.2026, 29-10-26, 29.10 (năm lấy default_year). None nếu không thấy."""
+        t = str(text)
+        def ok(y, m, d):
+            try:
+                return datetime.date(int(y), int(m), int(d)).strftime("%Y-%m-%d")
+            except ValueError:
+                return None
+        m = re.search(r"(?<!\d)(20\d{2})[-_.]?(\d{2})[-_.]?(\d{2})(?!\d)", t)
+        if m and ok(*m.groups()):
+            return ok(*m.groups())
+        m = re.search(r"(?<!\d)(\d{1,2})[-_.](\d{1,2})[-_.](20\d{2}|\d{2})(?!\d)", t)
+        if m:
+            y = m.group(3) if len(m.group(3)) == 4 else "20" + m.group(3)
+            if ok(y, m.group(2), m.group(1)):
+                return ok(y, m.group(2), m.group(1))
+        m = re.search(r"(?<!\d)(\d{1,2})[-_.](\d{1,2})(?![\d.])", t)
+        if m and default_year and ok(default_year, m.group(2), m.group(1)):
+            return ok(default_year, m.group(2), m.group(1))
+        return None
+
+    def _folder_date(self, path, cust_dir):
+        """(ngày, nguồn): tên thư mục (và các thư mục cha trong khách) -> tên file -> ngày sửa file mới nhất."""
+        parts = os.path.relpath(path, cust_dir).split(os.sep) if path != cust_dir else []
+        year = next((m.group(1) for part in parts for m in [re.search(r"(20\d{2})", part)] if m), None)
+        for part in reversed(parts):
+            d = self.guess_date(part, year)
+            if d:
+                return d, "tên thư mục"
+        names = []
+        for dp, _ds, fs in os.walk(path):
+            names += [(os.path.join(dp, f), f) for f in fs if not f.startswith((".", "~$"))]
+        for _fp, f in sorted(names, key=lambda x: x[1]):
+            d = self.guess_date(f, year)
+            if d:
+                return d, "tên file"
+        mt = [os.path.getmtime(fp) for fp, _f in names if os.path.exists(fp)]
+        if mt:
+            return datetime.date.fromtimestamp(max(mt)).strftime("%Y-%m-%d"), "ngày sửa file (kiểm tra lại)"
+        return datetime.date.today().strftime("%Y-%m-%d"), "không có file (kiểm tra lại)"
+
+    def plan_reorganize(self):
+        """Kế hoạch đưa các thư mục khách cũ về <Khách>/<yyyy>_Thang_<mm>/<yyyy-mm-dd>. Chưa làm gì trên ổ đĩa.
+        Mỗi mục: {customer, src, dst, date, nguon, loai ('thu_muc'|'file')}. Thư mục đã đúng chỗ thì bỏ qua."""
+        root = self.customs_root()
+        skip = {CUSTOMS_ROOT, "MAU_CHUNG_TU", GENERATED_DIR, "_KIEM_TRA"}
+        roots = [root]
+        nested = os.path.join(root, CUSTOMS_ROOT)
+        if os.path.isdir(nested):
+            roots.append(nested)
+        plan, taken = [], set()
+        def target(cust, day):
+            base = os.path.join(root, cust, f"{day[:4]}_Thang_{day[5:7]}", day)
+            dst, n = base, 2
+            while os.path.normcase(dst) in taken or os.path.exists(dst):
+                dst = f"{base}_{n}"
+                n += 1
+            taken.add(os.path.normcase(dst))
+            return dst
+        def standard(path, cust_dir):
+            rel = os.path.relpath(path, cust_dir).split(os.sep)
+            return len(rel) == 2 and re.fullmatch(r"\d{4}_Thang_\d{2}", rel[0]) and re.match(r"\d{4}-\d{2}-\d{2}", rel[1]) and os.path.normcase(os.path.dirname(cust_dir)) == os.path.normcase(root)
+        folders = self.declaration_folders()
+        by_cust = {}
+        for o in folders:
+            by_cust.setdefault(o["customer"], []).append(o)
+        for rt in roots:
+            try:
+                custs = sorted(d for d in os.listdir(rt) if not d.startswith("_") and d.upper() not in skip and os.path.isdir(os.path.join(rt, d)))
+            except OSError:
+                custs = []
+            for cust in custs:
+                cdir = os.path.join(rt, cust)
+                for o in by_cust.get(cust, []):
+                    path = o["path"]
+                    if os.path.normcase(path).startswith(os.path.normcase(cdir) + os.sep) or os.path.normcase(path) == os.path.normcase(cdir):
+                        if path == cdir or not os.path.isdir(path):
+                            continue
+                        if standard(path, cdir):
+                            continue
+                        day, src = self._folder_date(path, cdir)
+                        plan.append({"customer": cust, "src": path, "dst": target(cust, day), "date": day, "nguon": src, "loai": "thu_muc"})
+                # file nằm lẻ trong thư mục khách: gom theo ngày
+                try:
+                    loose = [f for f in os.listdir(cdir) if os.path.isfile(os.path.join(cdir, f)) and not f.startswith((".", "~$"))]
+                except OSError:
+                    loose = []
+                if loose and any(os.path.isdir(os.path.join(cdir, d)) for d in os.listdir(cdir)):
+                    groups = {}
+                    for f in loose:
+                        fp = os.path.join(cdir, f)
+                        d = self.guess_date(f) or datetime.date.fromtimestamp(os.path.getmtime(fp)).strftime("%Y-%m-%d")
+                        groups.setdefault(d, []).append(fp)
+                    for d, fps in sorted(groups.items()):
+                        dst = target(cust, d)
+                        for fp in fps:
+                            plan.append({"customer": cust, "src": fp, "dst": dst, "date": d, "nguon": "tên file / ngày sửa", "loai": "file"})
+        return plan
+
+    def apply_reorganize(self, plan):
+        """Di chuyển theo kế hoạch (không ghi đè: trùng tên thì thêm _2, _3…). Ghi nhật ký để hoàn tác. Trả (số mục đã chuyển, đường dẫn nhật ký)."""
+        moves = []
+        for it in plan:
+            src, dst = it["src"], it["dst"]
+            if not os.path.exists(src):
+                continue
+            os.makedirs(dst if it["loai"] == "file" else os.path.dirname(dst), exist_ok=True)
+            if it["loai"] == "file":
+                final = os.path.join(dst, os.path.basename(src))
+                stem, ext = os.path.splitext(final)
+                n = 2
+                while os.path.exists(final):
+                    final = f"{stem}_{n}{ext}"
+                    n += 1
+            else:
+                final = dst
+                n = 2
+                while os.path.exists(final):
+                    final = f"{dst}_{n}"
+                    n += 1
+            shutil.move(src, final)
+            moves.append({"src": src, "dst": final})
+            for r in self.records:  # hồ sơ đã lưu trỏ vào thư mục cũ thì trỏ sang chỗ mới
+                f = r.get("folder")
+                if f and it["loai"] == "thu_muc" and os.path.normcase(self.rel_to_abs(f)) == os.path.normcase(src):
+                    r["folder"] = os.path.join(CUSTOMS_ROOT, os.path.relpath(final, self.customs_root()))
+        logdir = os.path.join(self.customs_root(), "_NHAT_KY_SAP_XEP")
+        os.makedirs(logdir, exist_ok=True)
+        log = os.path.join(logdir, datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + ".json")
+        with open(log, "w", encoding="utf-8") as f:
+            json.dump({"moves": moves}, f, ensure_ascii=False, indent=1)
+        if moves:
+            with contextlib.suppress(Exception):
+                self.save_records()
+        return len(moves), log
+
+    def latest_reorganize_log(self):
+        logdir = os.path.join(self.customs_root(), "_NHAT_KY_SAP_XEP")
+        try:
+            logs = sorted(n for n in os.listdir(logdir) if n.endswith(".json") and not n.endswith(".da_hoan_tac.json"))
+        except OSError:
+            return ""
+        return os.path.join(logdir, logs[-1]) if logs else ""
+
+    def undo_reorganize(self, log=None):
+        """Đưa các mục của lần sắp xếp gần nhất về chỗ cũ. Trả số mục đã hoàn tác."""
+        log = log or self.latest_reorganize_log()
+        if not log:
+            raise ValueError("Chưa có lần sắp xếp nào để hoàn tác.")
+        with open(log, encoding="utf-8") as f:
+            moves = json.load(f).get("moves", [])
+        n = 0
+        for m in reversed(moves):
+            if os.path.exists(m["dst"]) and not os.path.exists(m["src"]):
+                os.makedirs(os.path.dirname(m["src"]), exist_ok=True)
+                shutil.move(m["dst"], m["src"])
+                n += 1
+                for r in self.records:
+                    f = r.get("folder")
+                    if f and os.path.normcase(self.rel_to_abs(f)) == os.path.normcase(m["dst"]):
+                        r["folder"] = os.path.join(CUSTOMS_ROOT, os.path.relpath(m["src"], self.customs_root()))
+        if n:
+            with contextlib.suppress(Exception):
+                self.save_records()
+        os.replace(log, log[:-5] + ".da_hoan_tac.json")
+        return n
+
     def get_record_folder_path(self, rec):
         """Thư mục của một hồ sơ: HAI_QUAN / <Khách> / <Năm>_Thang_<mm> / <Ngày làm tờ khai>.
 

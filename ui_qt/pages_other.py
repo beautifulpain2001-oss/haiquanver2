@@ -71,6 +71,17 @@ class DeclarationsPage(_Page):
         self.lay.addWidget(_head("", "Danh sách lấy từ thư mục HAI_QUAN. Bấm “Mở thư mục” (hoặc bấm đúp dòng) để vào thẳng thư mục tờ khai và xem chi tiết.")[1])
         self.search = self.search_box("🔍  Tìm theo khách, số tờ khai, số PO, ngày…", lambda _t: self.refresh())
         self.lay.addWidget(self.search)
+        brow = QHBoxLayout()
+        self.reorg_btn = QPushButton("🗂️  Sắp xếp lại thư mục cũ…")
+        self.reorg_btn.setToolTip("Đưa thư mục khách cũ về kiểu thống nhất <Khách>/<năm>_Thang_<tháng>/<ngày>. Có xem trước và hoàn tác được.")
+        self.reorg_btn.clicked.connect(self.reorganize)
+        self.undo_btn = QPushButton("↩  Hoàn tác lần sắp xếp gần nhất")
+        self.undo_btn.setObjectName("sec")
+        self.undo_btn.clicked.connect(self.undo_reorganize)
+        brow.addWidget(self.reorg_btn)
+        brow.addWidget(self.undo_btn)
+        brow.addStretch(1)
+        self.lay.addLayout(brow)
         self.table = _table(["Khách", "Ngày", "Số tờ khai", "Số PO", "Tình trạng (đọc từ tên file trong thư mục)", "Người làm", "Mở"], 4)
         self.table.doubleClicked.connect(lambda _i: self.open_current())
         self.lay.addWidget(self.table, 1)
@@ -101,6 +112,47 @@ class DeclarationsPage(_Page):
             btn.setToolTip(o["path"])
             btn.clicked.connect(lambda _=False, f=o["path"]: widgets.open_folder(f))
             self.table.setCellWidget(i, 6, btn)
+
+    def reorganize(self):
+        plan = self.store.plan_reorganize()
+        if not plan:
+            widgets.info(self, "Sắp xếp lại thư mục", "Các thư mục đã theo đúng kiểu thống nhất, không cần sắp xếp.")
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Xem trước: sắp xếp lại thư mục")
+        dlg.resize(1000, 560)
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(QLabel(f"Sẽ DI CHUYỂN {len(plan)} mục (chưa làm gì cho đến khi bấm Đồng ý). Dòng ghi “kiểm tra lại” là ngày đoán theo ngày sửa file."))
+        tb = _table(["Khách", "Từ", "Sang", "Ngày", "Lấy ngày từ"], 1)
+        root = self.store.customs_root()
+        _fill(tb, [[o["customer"], os.path.relpath(o["src"], root), os.path.relpath(o["dst"], root), o["date"], o["nguon"]] for o in plan])
+        tb.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        lay.addWidget(tb, 1)
+        bb = QDialogButtonBox()
+        ok = bb.addButton("Đồng ý, di chuyển", QDialogButtonBox.AcceptRole)
+        bb.addButton("Hủy", QDialogButtonBox.RejectRole)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        lay.addWidget(bb)
+        if not dlg.exec():
+            return
+        try:
+            n, _log = self.store.apply_reorganize(plan)
+        except OSError as e:
+            widgets.warn(self, "Chưa sắp xếp được", f"{e}\nCó thể file đang mở hoặc OneDrive chưa tải xong. Hãy đóng file rồi thử lại.")
+            self.refresh()
+            return
+        widgets.info(self, "Đã sắp xếp", f"Đã di chuyển {n} mục. Nếu chưa ưng, bấm “Hoàn tác lần sắp xếp gần nhất”.")
+        self.refresh()
+
+    def undo_reorganize(self):
+        try:
+            n = self.store.undo_reorganize()
+        except (ValueError, OSError) as e:
+            widgets.warn(self, "Chưa hoàn tác được", str(e))
+            return
+        widgets.info(self, "Đã hoàn tác", f"Đã đưa {n} mục về chỗ cũ.")
+        self.refresh()
 
     def open_current(self):
         rows = self.table.selectionModel().selectedRows()

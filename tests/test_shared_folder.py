@@ -1,4 +1,5 @@
 """Nhiều máy dùng chung một thư mục dữ liệu (không máy chủ): đọc thấy nhau, lưu không đè nhau."""
+import os
 import hongthien_desktop_app as app
 
 
@@ -108,3 +109,28 @@ def test_declaration_folders_find_legacy_customer_folders_and_nested_hai_quan(da
     got = {o["customer"]: o for o in s.declaration_folders()}
     assert got["Tesa"]["day"] == "Lo 30.10" and got["Tesa"]["tk"] == "306891234560"
     assert "Arizon" in got and "MAU_CHUNG_TU" not in got and "HAI_QUAN" not in got
+
+
+def test_reorganize_old_customer_folders_preview_move_and_undo(data_dir, tmp_path):
+    hq = tmp_path / "HAI_QUAN"
+    (hq / "Tesa" / "lo 30.10.2026").mkdir(parents=True)
+    (hq / "Tesa" / "lo 30.10.2026" / "po.pdf").write_text("x")
+    (hq / "Best" / "dot a").mkdir(parents=True)
+    (hq / "Best" / "dot a" / "invoice_20261005.xlsx").write_text("y")
+    (hq / "Best" / "2026_Thang_10" / "2026-10-01").mkdir(parents=True)  # đã đúng chỗ
+    (hq / "Best" / "2026_Thang_10" / "2026-10-01" / "a.xlsx").write_text("z")
+    (hq / "Best" / "le.pdf").write_text("loose")
+    s = make_store(hq, tmp_path / "w", "ro")
+    plan = s.plan_reorganize()
+    dsts = {os.path.basename(p["src"]): p for p in plan}
+    assert "a.xlsx" not in dsts and "2026-10-01" not in dsts
+    assert dsts["lo 30.10.2026"]["date"] == "2026-10-30" and dsts["lo 30.10.2026"]["nguon"] == "tên thư mục"
+    assert dsts["dot a"]["date"] == "2026-10-05" and dsts["dot a"]["nguon"] == "tên file"
+    assert os.path.isdir(hq / "Tesa" / "lo 30.10.2026")  # xem trước chưa làm gì
+    n, log = s.apply_reorganize(plan)
+    assert n == len(plan) >= 3
+    assert (hq / "Tesa" / "2026_Thang_10" / "2026-10-30" / "po.pdf").exists() and not (hq / "Tesa" / "lo 30.10.2026").exists()
+    assert (hq / "Best" / "2026_Thang_10" / "2026-10-05" / "invoice_20261005.xlsx").exists()
+    assert s.plan_reorganize() == []  # đã thống nhất
+    assert s.undo_reorganize() == n
+    assert (hq / "Tesa" / "lo 30.10.2026" / "po.pdf").exists() and (hq / "Best" / "le.pdf").exists()
