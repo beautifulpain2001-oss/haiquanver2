@@ -2680,7 +2680,7 @@ def build_pkl_standard_sheet(wb, rec, sheet_name="Invoice_PKL"):
     dt_vn = f"{dt_parts[2]}/{dt_parts[1]}/{dt_parts[0]}" if len(dt_parts) == 3 else rec.get("docDate", "")
     pxk_no = rec.get("pxkNo") or "0000294"
 
-    widths = [6.57, 56.28, 17.14, 13.85, 16.57, 14.71, 17.28, 17.71, 11.14, 12.85, 23.42]
+    widths = [5.5, 36, 14.5, 7.5, 9.5, 11, 12.5, 12.5, 8.5, 11, 15.5]  # tổng ~144 ký tự: vừa 1 trang A4 ngang, cột cân đối
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -2733,7 +2733,7 @@ def build_pkl_standard_sheet(wb, rec, sheet_name="Invoice_PKL"):
     apply_region_outer_edge(ws, 1, 10, 11, 10, t=True, b=True, l=True, r=True)
     apply_region_outer_edge(ws, 1, 11, 2, 11, t=True, b=True, l=True, r=True)
 
-    for r_i, h_val in [(1, 30), (2, 46.5), (3, 30), (4, 16.5), (5, 16.5), (6, 16.5), (7, 28.5), (8, 69), (9, 21), (10, 36), (11, 18.75), (12, 48)]:
+    for r_i, h_val in [(1, 30), (2, 30), (3, 14), (4, 20), (5, 36), (6, 20), (7, 24), (8, 54), (9, 21), (10, 32), (11, 18.75), (12, 44)]:
         ws.row_dimensions[r_i].height = h_val
 
     heads = ["STT", "Tên Hàng", "PO", "ĐVT", "Số \nLượng", "Trọng lượng(kg)", "Trọng lượng\n cả bì(kg)", "Trọng lượng\n tịnh(kg)", "Số kiện", "Đơn Giá \nVND", "Thành Tiền \nVND"]
@@ -2748,7 +2748,9 @@ def build_pkl_standard_sheet(wb, rec, sheet_name="Invoice_PKL"):
     items = rec.get("items", [])
     for idx, it in enumerate(items):
         r = start_r + idx
-        ws.row_dimensions[r].height = 54.75
+        _nm = (f"{it['ma_sp']}\n" if prof.get("custom") and it.get("ma_sp") else "") + (it.get("ten_hq") or it["ten_sp"])
+        _lines = sum(max(1, math.ceil(len(part) / 40)) for part in _nm.split("\n"))  # cột Tên hàng rộng ~40 ký tự chữ 11
+        ws.row_dimensions[r].height = max(36, 15 * _lines + 4)
         w_kg = it.get("kg") or 0
         has_w = w_kg > 0
         po_val = (it.get("po") or "") if prof.get("linePo") else f"No {rec.get('poNumber', '')}"
@@ -2780,7 +2782,7 @@ def build_pkl_standard_sheet(wb, rec, sheet_name="Invoice_PKL"):
 
     end_r = start_r + max(len(items) - 1, 0)
     tot_r = end_r + 1
-    ws.row_dimensions[tot_r].height = 51
+    ws.row_dimensions[tot_r].height = 30
     for c_i in range(1, 12):
         ws.cell(row=tot_r, column=c_i).border = BOX_BORDER
     tb = ws.cell(row=tot_r, column=2, value="Tổng cộng")
@@ -2791,8 +2793,8 @@ def build_pkl_standard_sheet(wb, rec, sheet_name="Invoice_PKL"):
         c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         c.number_format = fmt
 
-    ws.row_dimensions[tot_r + 1].height = 28.5
-    ws.row_dimensions[tot_r + 2].height = 45.75
+    ws.row_dimensions[tot_r + 1].height = 22
+    ws.row_dimensions[tot_r + 2].height = 28
     ws.cell(row=tot_r + 1, column=2, value="Tổng:").font = Font(name="Times New Roman", size=16, bold=True)
     ws.cell(row=tot_r + 1, column=4, value=f"=I{tot_r}").font = Font(name="Times New Roman", size=14, bold=True)
     ws.cell(row=tot_r + 1, column=5, value="kiện").font = Font(name="Times New Roman", size=13, bold=True)
@@ -2801,6 +2803,18 @@ def build_pkl_standard_sheet(wb, rec, sheet_name="Invoice_PKL"):
     sg = ws.cell(row=tot_r + 3, column=4, value=HT_NAME)
     sg.font = Font(name="Times New Roman", size=13, bold=True)
     sg.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ws.row_dimensions[tot_r + 3].height = ws.row_dimensions[tot_r + 4].height = 20
+    # Mở ra là in được: A4 ngang, vừa bề ngang 1 trang, chỉ in vùng chứng từ, căn giữa; xem ở chế độ thường (không phải Page Layout)
+    ws.print_area = f"A1:K{tot_r + 6}"
+    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+    ws.page_setup.orientation = "landscape"
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 1 if len(items) <= 4 else 0  # ít dòng: gọn 1 trang; nhiều dòng: vừa bề ngang, tự sang trang
+    ws.page_margins.left = ws.page_margins.right = 0.4
+    ws.page_margins.top = ws.page_margins.bottom = 0.5
+    ws.print_options.horizontalCentered = True
+    ws.sheet_view.view = "normal"
     return ws
 
 
