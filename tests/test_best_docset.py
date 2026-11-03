@@ -261,7 +261,7 @@ def test_check_lot_reports_problems(store, best_customer):
     rec["hdNo"] = ""
     probs = app.check_lot(rec)
     text = "\n".join(probs)
-    assert "chưa có kg" in text and "kiện lẻ" in text and "SL x đơn giá" in text and "số hóa đơn VAT" in text
+    assert "chưa có kg" in text and "kiện lẻ" not in text and "SL x đơn giá" in text and "số hóa đơn VAT" in text
 
 
 def test_customer_name_does_not_change_existing_customers(seed):

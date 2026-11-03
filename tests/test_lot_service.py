@@ -116,3 +116,14 @@ def test_save_workbench_writes_meta_and_updates_by_id(store, seed):
     assert dest == store.get_record_folder_path(rec)
     assert sum(1 for r in store.records if r["id"] == rec["id"]) == 1
     assert next(r for r in store.records if r["id"] == rec["id"])["zone"] == "ARCHIVE"
+
+
+def test_partial_cartons_round_up_and_do_not_warn(store):
+    """Kiện lẻ làm tròn lên (1000/75 = 13,33 -> 14; 13,09 -> 14; chia hết thì giữ nguyên) và không còn cảnh báo kiện lẻ."""
+    import hongthien_desktop_app as app
+    for qty, div, want in ((1000, 75, 14), (1309, 100, 14), (1300, 100, 13), (1301, 100, 14), (5520, 84, 66), (1, 75, 1)):
+        vals = {"po": "P", "ma_sp": "X", "ten_sp": "Hàng thử", "hs": "48229090", "unit": "cái", "qty": str(qty), "price": "100", "div": str(div), "kg": "0.1"}
+        item = app.lot_item_from_values(store, "kodi", vals, "1.0")
+        assert item["kien"] == want, (qty, div, item["kien"])
+        warns = app.check_lot({"customer": "kodi", "items": [item]})
+        assert not any("kiện lẻ" in w or "chia hết" in w for w in warns)

@@ -3528,8 +3528,7 @@ def check_lot(rec):
             out.append(f"{tag}: trọng lượng cả bì nhỏ hơn tịnh.")
         if div <= 0:
             out.append(f"{tag}: chưa có SL/kiện.")
-        elif qty and abs(qty / div - round(qty / div)) > 1e-6:
-            out.append(f"{tag}: {qty:,.0f} không chia hết cho {div:g}/kiện (kiện lẻ).")
+        # Kiện lẻ là bình thường: số kiện luôn làm tròn LÊN (1000/75 = 13,33 -> 14; 13,09 -> 14), nên không cảnh báo.
         if not it.get("hs"):
             out.append(f"{tag}: chưa có mã HS.")
         if prof.get("linePo") and not str(it.get("po") or "").strip():
