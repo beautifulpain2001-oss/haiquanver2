@@ -99,3 +99,54 @@ def test_next_pxk_is_max_plus_one_keeping_zero_padding(tmp_path):
     d.mkdir(parents=True)
     (d / "PXK 301.pdf").write_text("x")
     assert store.next_pxk() == "0000302"  # lấy cả số từ tên file PXK trong thư mục hồ sơ
+
+
+def _table_po(tmp_path, rows, header_row=17):
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "po1"
+    ws["A5"] = "ĐƠN ĐẶT HÀNG/ P.O"
+    ws["D7"] = "Số/ No.  HT20269999"
+    for c, h in enumerate(["STT/ 序号", "TÊN HÀNG/ 货物", "ĐƠN VỊ/ 单位", "THÔNG SỐ KT ,QUY CÁCH", "SỐ LƯỢNG 数量", "ĐƠN GIÁ 单价VND", "THÀNH TIỀN 总价VND", "GHI CHÚ"], 1):
+        ws.cell(header_row, c, h)
+    r = header_row + 1
+    for name, unit, spec, qty, price in rows:
+        ws.cell(r, 1, r - header_row)
+        ws.cell(r, 2, name)
+        ws.cell(r, 3, unit)
+        ws.cell(r, 4, spec)
+        ws.cell(r, 5, qty)
+        ws.cell(r, 6, price)
+        ws.cell(r, 7, f"=E{r}*F{r}")
+        r += 1
+    ws.cell(r, 1, "TỔNG TIỀN/总价 (VND):")
+    ws.cell(r, 5, f"=SUM(E{header_row + 1}:E{r - 1})")
+    p = tmp_path / "po_table.xlsx"
+    wb.save(p)
+    return p
+
+
+def test_excel_table_po_skips_empty_rows_matches_by_paren_code_or_dims_and_reads_formula_qty(tmp_path):
+    store = app.DedicatedDataStore(base_dir=str(tmp_path / "d"))
+    items = [{"name": "Ống giấy 78 x 8 x 400mm (44A020101.0636)", "code": "44A020101.0636", "unit": "Chiếc", "price": 22100, "div": 20, "kg": 0.711},
+             {"name": "Ống giấy 78 x 16.5 x 1185mm (44A020101.0319)", "code": "44A020101.0319", "unit": "Chiếc", "price": 103000, "div": 3, "kg": 5.25},
+             {"name": "Nắp giấy 1202 x1098 x 110mm", "code": "44A010301.0023", "unit": "Chiếc", "price": 19000, "div": 5, "kg": 1.11},
+             {"name": "Thùng giấy 1190 x 542 x 540mm", "code": "44A010101.0049", "unit": "Chiếc", "price": 29000, "div": 5, "kg": 1.88}]
+    store.save_learned_customer("betx", {"name": "CTY BETX", "unit": "Chiếc", "addr": "BN", "mst": "0100000011", "po_pattern": r"HT\d{8}"}, items)
+    po = _table_po(tmp_path, [
+        ("Nắp giấy", "PCS个", " 1202 x1098 x 110mm ", None, 19000),  # dòng mẫu trống: bỏ qua
+        ("Thùng giấy ", "PCS个", "1190 x 542 x 540mm", 400, 29000),  # không có mã trong ngoặc: ghép theo loại hàng + kích thước
+        ("Ống giấy", "PCS个", "Ống  giấy 78 x 8 x 400mm (44A020101.0636)", 1200, 22100),
+        ("Ống giấy", "PCS个", "Ống giấy 78 x 16.5 x 1185mm\n(44A020101.0319)", "=992+2504", 103000),  # SL là công thức chưa có giá trị lưu sẵn
+        ("Ống giấy", "PCS个", "Ống lạ 99 x 9 x 999mm (44A099999.0001)", 10, 500),  # mặt hàng chưa học
+    ])
+    rows = app.parse_excel_table_po(str(po))
+    assert [(r["qty"], r["price"]) for r in rows] == [(400, 29000), (1200, 22100), (3496, 103000), (10, 500)]
+    res = app.lot_load_po(store, str(po), "betx")
+    assert res["ok"] and res["po"] == "HT20269999" and len(res["items"]) == 4
+    by = {x["ma_sp"] or x["ten_sp"][:12]: x for x in res["items"]}
+    assert by["44A010101.0049"]["qty"] == 400 and by["44A010101.0049"]["kg"] == 1.88
+    assert by["44A020101.0319"]["qty"] == 3496 and by["44A020101.0319"]["kien"] == 1166 and by["44A020101.0636"]["kien"] == 60
+    unknown = res["items"][-1]
+    assert unknown["qty"] == 10 and unknown["price"] == 500 and unknown.get("read") == "suy_ra"

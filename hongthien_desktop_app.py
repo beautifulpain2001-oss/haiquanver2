@@ -4795,6 +4795,121 @@ def parse_dated_unit_rows(text):
 _PO_LABEL_RE = re.compile(r"(?:mã\s*PO|PO\s*(?:No|number)|订单编号|采购订单编号)\s*[:：]?\s*(\d{7,14})", re.I)
 
 
+_XL_HEADERS = {
+    "name": ("TEN HANG", "TEN SAN PHAM", "HANG HOA", "DESCRIPTION OF GOODS", "PRODUCT"),
+    "spec": ("QUY CACH", "THONG SO", "MO TA", "DESCRIPTION", "SPECIFICATION"),
+    "code": ("MA HANG", "MA LIEU", "MA SP", "ITEM CODE", "PART NO", "CODE"),
+    "unit": ("DON VI", "DVT", "UNIT"),
+    "qty": ("SO LUONG", "QUANTITY", "QTY"),
+    "price": ("DON GIA", "UNIT PRICE", "PRICE"),
+    "amount": ("THANH TIEN", "AMOUNT", "TOTAL"),
+}
+
+
+def _xl_number(v, formula=None):
+    """Số trong ô Excel: số thật, chuỗi '1,200', hoặc công thức cộng trừ đơn giản chưa có giá trị lưu sẵn (=992+2504)."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return float(v)
+    if isinstance(v, str) and v.strip():
+        t = v.strip().replace(",", "")
+        try:
+            return float(t)
+        except ValueError:
+            pass
+    if v is None and isinstance(formula, str) and re.fullmatch(r"=[\d.+\-*/() ]+", formula):
+        try:
+            return float(eval(formula[1:], {"__builtins__": {}}, {}))  # noqa: S307 - chỉ gồm số và + - * / ( ), đã kiểm bằng regex
+        except Exception:
+            return None
+    return None
+
+
+def parse_excel_table_po(path):
+    """PO Excel dạng bảng (hàng tiêu đề: tên hàng / quy cách / số lượng / đơn giá / thành tiền, ở sheet nào cũng được). Tìm hàng tiêu đề theo chữ,
+    đọc từng dòng hàng đến dòng 'Tổng'. Bỏ dòng không có số lượng (dòng mẫu trống). Trả [{name, spec, code, unit, qty, price, amount, sheet, row}]."""
+    try:
+        wbv = openpyxl.load_workbook(path, data_only=True)
+        wbf = openpyxl.load_workbook(path, data_only=False)
+    except Exception:
+        return []
+    out = []
+    for ws in wbv.worksheets:
+        wf = wbf[ws.title]
+        head, cols = None, {}
+        for r in range(1, min(ws.max_row, 60) + 1):
+            found = {}
+            for c in range(1, min(ws.max_column, 26) + 1):
+                t = strip_accents_upper(str(ws.cell(r, c).value or "")).replace("\n", " ")
+                for key in ("amount", "price", "qty", "code", "unit", "spec", "name"):  # 'đơn giá' phải xét trước 'đơn vị'
+                    if key not in found and any(k in t for k in _XL_HEADERS[key]) and not (key == "unit" and "DON GIA" in t):
+                        found[key] = c
+                        break
+            if {"qty", "price"} <= set(found) and ("name" in found or "spec" in found):
+                head, cols = r, found
+                break
+        if head is None:
+            continue
+        for r in range(head + 1, ws.max_row + 1):
+            first = strip_accents_upper(" ".join(str(ws.cell(r, c).value or "") for c in range(1, 4)))
+            if re.match(r"\s*(TONG|TOTAL|THUE|VAT)", first):
+                break
+            def num(key):
+                c = cols.get(key)
+                return _xl_number(ws.cell(r, c).value, wf.cell(r, c).value) if c else None
+            qty, price = num("qty"), num("price")
+            if not qty or qty <= 0 or not price or price <= 0:
+                continue
+            txt = lambda key: re.sub(r"\s+", " ", str(ws.cell(r, cols[key]).value or "")).strip() if key in cols else ""
+            out.append({"name": txt("name"), "spec": txt("spec"), "code": txt("code"), "unit": txt("unit"), "qty": qty, "price": price,
+                        "amount": num("amount"), "sheet": ws.title, "row": r})
+        if out:
+            break
+    return out
+
+
+def match_po_item(row, catalog):
+    """Mặt hàng đã học ứng với một dòng PO: theo mã khách ghi trong ngoặc '(44A020101.0319)', rồi theo mã ở cột mã, rồi theo loại hàng + kích thước.
+    Trả mục danh mục hoặc None."""
+    text = f"{row.get('name', '')} {row.get('spec', '')}"
+    cat = list(catalog or [])
+    m = re.search(r"\(\s*([0-9A-Z][0-9A-Z.]{5,})\s*\)", text)
+    if m:
+        code = m.group(1)
+        hit = next((it for it in cat if f"({code})" in str(it.get("name") or "").replace(" ", "")), None) or next((it for it in cat if str(it.get("code") or "") == code), None)
+        if hit:
+            return hit
+    code = str(row.get("code") or "").strip()
+    if code:
+        hit = next((it for it in cat if str(it.get("code") or "") == code), None)
+        if hit:
+            return hit
+    dims, _g = _name_dims(text)
+    kind = re.split(r"\d", strip_accents_upper(f"{row.get('name', '')} {row.get('spec', '')}"), maxsplit=1)[0]
+    kind = re.sub(r"[^A-Z ]", " ", kind).split()
+    kind = " ".join(kind[:2]) if kind else ""
+    if dims:
+        for it in cat:
+            d2, _ = _name_dims(it.get("name", ""))
+            k2 = re.sub(r"[^A-Z ]", " ", re.split(r"\d", strip_accents_upper(it.get("name", "")), maxsplit=1)[0]).split()
+            if d2 == dims and (not kind or " ".join(k2[:2]) == kind):
+                return it
+    return None
+
+
+def lines_from_excel_table(rows, po_no, profile, catalog, data_store=None, tare_val=0.0):
+    """Dòng hàng từ parse_excel_table_po: dòng khớp mặt hàng đã học (đầy đủ kg, SL/kiện); dòng lạ vẫn giữ theo chữ trên PO (trạng thái 'suy ra') để người dùng điền."""
+    erp_rows = []
+    for r in rows:
+        it = match_po_item(r, catalog)
+        erp_rows.append({"code": (it or {}).get("code") or "", "desc": (it or {}).get("name") or re.sub(r"\s+", " ", f"{r['name']} {r['spec']}").strip(),
+                         "qty": r["qty"], "price": r["price"], "_matched": bool(it)})
+    lines = lines_from_erp_rows(erp_rows, po_no, profile, catalog, data_store=data_store, tare_val=tare_val)
+    for ln, r, e in zip(lines, rows, erp_rows):
+        if not e["_matched"]:
+            ln["read"], ln["read_note"] = "suy_ra", "Mặt hàng chưa có trong danh mục khách: kiểm tra mã, kg, SL/kiện"
+    return lines
+
+
 def find_po_after_label(text):
     """Số PO ngay sau nhãn 'mã PO' / '采购订单编号' (PO của khách chưa có mẫu nhận dạng số PO)."""
     flat = re.sub(r"[ \t]+", " ", text or "")
@@ -5803,10 +5918,14 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
         po_no, po_date, lines = parse_generic_po_text(raw_text, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
         pcs_rows = parse_pcs_note_rows(raw_text)
         able_rows = [] if pcs_rows or not is_able(prof) else parse_able_po_rows(raw_text, store.items_for_customer(customer))
-        dated_rows = [] if pcs_rows or able_rows else parse_dated_unit_rows(raw_text)
+        table_rows = parse_excel_table_po(path) if ext in (".xlsx", ".xlsm") else []
+        if table_rows:  # PO Excel dạng bảng: đọc đúng từng cột, bỏ dòng mẫu trống, mỗi dòng ghép mặt hàng theo mã khách trong ngoặc hoặc loại hàng + kích thước
+            lines = lines_from_excel_table(table_rows, po_no, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
+            pcs_rows = []
+        dated_rows = [] if (pcs_rows or able_rows or table_rows) else parse_dated_unit_rows(raw_text)
         if dated_rows and not po_no:
             po_no = find_po_after_label(raw_text) or po_no
-        erp_rows = pcs_rows or able_rows or dated_rows or erp_rows_repaired(raw_text, store.items_for_customer(customer))
+        erp_rows = [] if table_rows else (pcs_rows or able_rows or dated_rows or erp_rows_repaired(raw_text, store.items_for_customer(customer)))
         if pcs_rows:  # PO kiểu Quang Ích: dòng hàng kèm ngày giao và đơn giá ở cột ghi chú
             pass
         if scan_rep and scan_rep["rows"]:
