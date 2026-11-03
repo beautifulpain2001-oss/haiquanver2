@@ -2804,13 +2804,13 @@ def build_pkl_standard_sheet(wb, rec, sheet_name="Invoice_PKL"):
     sg.font = Font(name="Times New Roman", size=13, bold=True)
     sg.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     ws.row_dimensions[tot_r + 3].height = ws.row_dimensions[tot_r + 4].height = 20
-    # Mở ra là in được: A4 ngang, vừa bề ngang 1 trang, chỉ in vùng chứng từ, căn giữa; xem ở chế độ thường (không phải Page Layout)
+    # Mở ra là in được: A4 dọc, vừa bề ngang 1 trang, chỉ in vùng chứng từ, căn giữa; xem ở chế độ thường (không phải Page Layout)
     ws.print_area = f"A1:K{tot_r + 6}"
     ws.page_setup.paperSize = ws.PAPERSIZE_A4
-    ws.page_setup.orientation = "landscape"
+    ws.page_setup.orientation = "portrait"
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 1 if len(items) <= 4 else 0  # ít dòng: gọn 1 trang; nhiều dòng: vừa bề ngang, tự sang trang
+    ws.page_setup.fitToHeight = 0  # chỉ in dọc: vừa bề ngang 1 trang, nhiều dòng thì tự sang trang
     ws.page_margins.left = ws.page_margins.right = 0.4
     ws.page_margins.top = ws.page_margins.bottom = 0.5
     ws.print_options.horizontalCentered = True
