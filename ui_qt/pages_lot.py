@@ -379,7 +379,30 @@ class ItemsStep(QWidget):
     # ---- khung xem PO -----------------------------------------------------------
     def po_file_of(self, idx):
         it = self.lot.items[idx] if idx is not None and 0 <= idx < len(self.lot.items) else {}
-        return it.get("po_file") or (self.lot.po_files[-1] if self.lot.po_files else ""), max(0, int(it.get("page") or 1) - 1), it.get("box")
+        path = it.get("po_file") or (self.lot.po_files[-1] if self.lot.po_files else "")
+        return path, max(0, int(it.get("page") or 1) - 1), it.get("box") or self.estimate_box(idx, path)
+
+    def estimate_box(self, idx, path):
+        """Dòng chưa có vị trí trên PO (lô đọc từ bản cũ hoặc mở lại từ hồ sơ đã lưu): đo lại đường kẻ của trang đó rồi lấy theo thứ tự dòng."""
+        if idx is None or not path or not path.lower().endswith(".pdf") or not self.lot.core.po_scan:
+            return None
+        items = self.lot.items
+        page = items[idx].get("page")
+        if not page or items[idx].get("read") is None:
+            return None
+        same = [i for i, x in enumerate(items) if x.get("page") == page and (x.get("po_file") or path) == path]
+        if idx not in same:
+            return None
+        key = (path, page)
+        cache = self.__dict__.setdefault("_box_cache", {})
+        if key not in cache:
+            try:
+                cache[key] = self.lot.core.po_scan.page_row_boxes(self.lot.core, path, page - 1)
+            except Exception:  # noqa: BLE001 - không đo được thì thôi, vẫn xem được trang
+                cache[key] = []
+        boxes = cache[key]
+        k = same.index(idx)
+        return boxes[k] if k < len(boxes) else None
 
     def toggle_viewer(self):
         if not self.viewer.isHidden():

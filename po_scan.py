@@ -376,3 +376,25 @@ def read_able_pdf(core, path, catalog, scale=4, progress=None):
     if progress:
         progress("Đã đọc xong, đang kiểm tra…", 1.0)
     return {"rows": rows, "pages": pages, "check": "; ".join(notes)}
+
+
+def page_row_boxes(core, path, page_idx, scale=2.5):
+    """Khung (0..1 theo trang) của từng dòng hàng trên một trang PO Able, chỉ đo đường kẻ (không OCR, khoảng 1 giây).
+    Dùng cho dòng của lô đọc từ trước khi có tính năng tô sáng hoặc lô mở lại từ hồ sơ đã lưu. [] nếu không thấy bảng."""
+    if core.pdfium is None:
+        return []
+    doc = core.pdfium.PdfDocument(path)
+    if not 0 <= page_idx < len(doc):
+        return []
+    img = core.auto_rotate_scan(doc[page_idx].render(scale=scale).to_pil()).convert("L")
+    angle = deskew_angle(img)
+    W, H = img.size
+    img = img.rotate(angle, resample=Image.BILINEAR, fillcolor=255) if abs(angle) > 1e-6 else img
+    ys, xs = table_grid(img)
+    if not ys or len(xs) < 7:
+        return []
+    boxes = []
+    for y0, y1 in zip(ys[1:-1], ys[2:]):
+        pts = [unrotate_point(x, y, angle, W, H) for x, y in ((xs[0], y0), (xs[-1], y0), (xs[-1], y1), (xs[0], y1))]
+        boxes.append([[round(px / W, 4), round(py / H, 4)] for px, py in pts])
+    return boxes

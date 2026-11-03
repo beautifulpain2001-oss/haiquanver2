@@ -120,3 +120,14 @@ def test_viewer_highlight_draws_box_on_selected_row(qapp, tmp_path):
     y = int(0.425 * H)
     assert marked.pixelColor(marked.width() // 2, y) != plain.pixelColor(marked.width() // 2, y)  # vùng dòng đã đổi màu
     assert marked.pixelColor(marked.width() // 2, int(0.2 * H)) == plain.pixelColor(marked.width() // 2, int(0.2 * H))  # ngoài dòng giữ nguyên
+
+
+def test_page_row_boxes_match_boxes_from_full_read(qapp, tmp_path):
+    """Lô đọc từ bản cũ (không có vị trí dòng) vẫn tô sáng được: đo lại đường kẻ cho ra cùng khung với lúc đọc đầy đủ."""
+    pdf = "/root/.claude/uploads/60e0f727-02f2-5c49-8a4c-929e37443d6a/712a4f0e-poable295.pdf"
+    if not os.path.exists(pdf):
+        pytest.skip("không có PO mẫu")
+    boxes = po_scan.page_row_boxes(app, pdf, 1)
+    assert len(boxes) >= 36 and all(len(b) == 4 for b in boxes)
+    ys = [b[0][1] for b in boxes]
+    assert ys == sorted(ys) and 0.1 < ys[0] < 0.4 and ys[-1] < 0.95
