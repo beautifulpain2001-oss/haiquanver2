@@ -303,7 +303,7 @@ class ItemsStep(QWidget):
         bar.addWidget(self.lookup_btn)
         for text, fn in (("➕  Thêm dòng trống", self.add), ("✏  Sửa dòng", self.edit), ("🗑  Xóa dòng", self.delete), ("🔄  Tính lại bì / trọng lượng", self.recalc)):
             b = QPushButton(text)
-            b.setObjectName("sec")
+            b.setObjectName("dng" if "Xóa" in text else "sec")  # nút xóa màu đỏ để khỏi bấm nhầm
             b.clicked.connect(fn)
             bar.addWidget(b)
         bar.addStretch(1)
@@ -722,6 +722,7 @@ class LotPage(QWidget):
         self.step5.new_lot.connect(self.start_new)
         nav = QHBoxLayout()
         self.back = QPushButton("← Quay lại")
+        self.back.setObjectName("sec")
         self.next = QPushButton("Tiếp tục →")
         self.back.clicked.connect(lambda: self.go(self.bar.current - 1))
         self.next.clicked.connect(lambda: self.go(self.bar.current + 1))

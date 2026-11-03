@@ -5,10 +5,10 @@ import os
 import sys
 import traceback
 
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QListWidget, QMainWindow, QMessageBox, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtCore import QSize, QTimer
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QStackedWidget, QVBoxLayout, QWidget
 
-from . import theme, widgets
+from . import icons, theme, widgets
 from .pages_lot import STEPS, LotPage  # noqa: F401 - STEPS giữ ở đây cho code/test cũ
 from .pages_other import CatalogPage, CustomersPage, DataTongPage, DeclarationsPage, RecordsPage, SettingsPage
 
@@ -24,7 +24,13 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(980, 640)
         self.nav = QListWidget()
         self.nav.setObjectName("nav")
-        self.nav.addItems(NAV)
+        for text in NAV:  # biểu tượng nét trắng thay emoji; chữ giữ nguyên
+            name, rest = icons.split_emoji(text)
+            it = QListWidgetItem(rest)
+            if name:
+                it.setIcon(icons.make_icon(name, "#E2E8F0", "#94A3B8", 20))
+            self.nav.addItem(it)
+        self.nav.setIconSize(QSize(20, 20))
         side = QWidget()
         side.setObjectName("side")
         side.setFixedWidth(230)
@@ -116,6 +122,7 @@ def run(core, store, smoke=False):
     """Mở giao diện mới. `smoke`: tự đóng sau 3 giây (kiểm tra bản đóng gói)."""
     app = QApplication.instance() or QApplication([])
     app.setStyleSheet(theme.STYLE)
+    icons.install(app)
     win = MainWindow(core, store)
     _install_error_hook(core, lambda: win)
     win.show()
