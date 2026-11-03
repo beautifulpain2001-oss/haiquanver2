@@ -819,7 +819,7 @@ class DedicatedDataStore:
         items = [dict(x) for x in self.custom_items.get(key, [])]
         mau = {}
         folder = os.path.join(TEMPLATE_DIR or os.path.join(self.base_dir, "MAU_CHUNG_TU"), key)
-        for doc in ("pkl", "pack", "pgh", "dccn", "dntt", "bbgh"):
+        for doc in ("pkl", "pack", "pgh", "dccn", "dntt", "bbgh", "po"):
             path = os.path.join(folder, doc + ".xlsx")
             if os.path.isfile(path):
                 with open(path, "rb") as f:
@@ -833,7 +833,7 @@ class DedicatedDataStore:
         folder = os.path.join(TEMPLATE_DIR or os.path.join(self.base_dir, "MAU_CHUNG_TU"), key)
         n = 0
         for doc, b64 in (mau or {}).items():
-            if doc not in ("pkl", "pack", "pgh", "dccn", "dntt", "bbgh"):
+            if doc not in ("pkl", "pack", "pgh", "dccn", "dntt", "bbgh", "po"):
                 continue
             path = os.path.join(folder, doc + ".xlsx")
             if os.path.exists(path) and not overwrite:
@@ -1327,10 +1327,10 @@ class DedicatedDataStore:
     MADE_PREFIXES = (("invoice_", "Invoice (Excel)"), ("DongGoi_", "Đóng gói (Excel)"), ("Hoa_Don_VAT", "Hóa đơn Bkav (Excel)"), ("PXK_", "PXK Bkav (Excel)"),
                      ("ToKhai_B11", "Dữ liệu tờ khai B11"), ("PhieuGiaoHang", "Phiếu giao hàng"), ("DoiChieuCongNo", "Đối chiếu công nợ"),
                      ("DNTT", "Đề nghị thanh toán"), ("dsh_", "Danh sách hàng ECUS (Excel)"), ("KiemTraCheo", "Kiểm tra chéo"),
-                     ("Bo_Ho_So_Xuat_Hang", "Bộ hồ sơ"), ("00_HO_SO_", "Hồ sơ lưu"), ("PLX_", "PLX (Excel)"), ("SO_", "Đơn đặt hàng"), ("PO_goc_", "PO gốc"), ("BienBanBanGiao", "Biên bản bàn giao"), ("dccn", "Đối chiếu công nợ"))
+                     ("Bo_Ho_So_Xuat_Hang", "Bộ hồ sơ"), ("00_HO_SO_", "Hồ sơ lưu"), ("PLX_", "PLX (Excel)"), ("SO_", "Đơn đặt hàng"), ("PO_goc_", "PO gốc"), ("BienBanBanGiao", "Biên bản bàn giao"), ("DonDatHang", "Đơn đặt hàng (PO)"), ("dccn", "Đối chiếu công nợ"))
     MODE_TO_MADE = {"PKL": "Invoice (Excel)", "PACK": "Đóng gói (Excel)", "VAT": "Hóa đơn Bkav (Excel)", "PXK": "PXK Bkav (Excel)", "B11": "Dữ liệu tờ khai B11",
                     "PGH": "Phiếu giao hàng", "DCCN": "Đối chiếu công nợ", "DNTT": "Đề nghị thanh toán", "PLX": "PLX (Excel)", "SO": "Đơn đặt hàng",
-                    "BBGH": "Biên bản bàn giao", "DSH": "Danh sách hàng ECUS (Excel)"}
+                    "BBGH": "Biên bản bàn giao", "DSH": "Danh sách hàng ECUS (Excel)", "PO": "Đơn đặt hàng (PO)"}
     PREPARED_PREFIXES = MADE_PREFIXES  # tên cũ
 
     @classmethod
@@ -1496,6 +1496,24 @@ class DedicatedDataStore:
     def read_fix_log(self, cust_key=None, limit=20):
         rows = [x for x in self.read_fixes if not cust_key or x.get("customer") == cust_key]
         return rows[-limit:][::-1]
+
+    def next_po_number(self, cust_key, date_iso=""):
+        """Số PO kế tiếp cho khách có công thức `poGen` (VD 'HT{yyyymm}{nn}' -> HT20261001): cùng tháng, số thứ tự lớn nhất đã dùng + 1. '' nếu khách không có công thức."""
+        fmt = str((PROFILES.get(cust_key) or {}).get("poGen") or "")
+        if not fmt or "{nn}" not in fmt:
+            return ""
+        d = date_iso if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(date_iso or "")) else datetime.date.today().strftime("%Y-%m-%d")
+        ym = d[:4] + d[5:7]
+        head = fmt.split("{nn}")[0].replace("{yyyymm}", ym)
+        top = 0
+        for r in self.records:
+            if r.get("customer") != cust_key:
+                continue
+            for po in str(r.get("poNumber") or "").split(" + "):
+                m = re.fullmatch(re.escape(head) + r"(\d+)", po.strip())
+                if m:
+                    top = max(top, int(m.group(1)))
+        return f"{head}{top + 1:02d}"
 
     def pxk_numbers(self):
         """Mọi số phiếu xuất kho đã dùng: từ hồ sơ đã lưu, từ tên file 'PXK 247.pdf' / tờ khai '<số PXK>_<số tờ khai>' trong thư mục hồ sơ.
@@ -3033,7 +3051,7 @@ def build_dntt_sheet(wb, rec, sheet_name="DNTT"):
     return ws
 
 
-EXTRA_DOC_CODES = ("PLX", "DNTT", "B11", "BBGH", "DCCN")
+EXTRA_DOC_CODES = ("PLX", "DNTT", "B11", "BBGH", "DCCN", "PO")
 
 
 def customer_extra_docs(prof):
@@ -3109,6 +3127,47 @@ def build_plx_arizon_sheet(wb, rec, sheet_name="PLX"):
     put(f"B{r + 5}", f"B{r + 5}:D{r + 5}", "(Ký, đóng dấu, ghi rõ họ, tên)", 12, italic=True, h="right")
     ws.row_dimensions[r + 6].height = 70
     _fit_page(ws, landscape=False)
+    return ws
+
+
+def _parse_dmy(text):
+    """'03/10/2026' -> date; None nếu không đúng dạng."""
+    m = re.fullmatch(r"\s*(\d{1,2})/(\d{1,2})/(\d{4})\s*", str(text or ""))
+    try:
+        return datetime.date(int(m.group(3)), int(m.group(2)), int(m.group(1))) if m else None
+    except ValueError:
+        return None
+
+
+def build_po_sheet(wb, rec, sheet_name="PO"):
+    """Đơn đặt hàng (PO) do Hồng Thiên lập cho khách (VD Betterial, số PO dạng HT202610 + số thứ tự). Có file mẫu của khách (po.xlsx) thì xuất đúng định dạng mẫu;
+    không thì dùng bố cục đơn giản: STT | Tên hàng | ĐVT | Số lượng | Đơn giá | Thành tiền."""
+    prof = PROFILES.get(rec["customer"], {})
+    tpl = best_template(prof, "po")
+    if tpl:
+        return mau_chung_tu.build_from_template(sys.modules[__name__], "po", wb, rec, prof, tpl, sheet_name)
+    ws = wb.create_sheet(title=sheet_name[:31])
+    d = _parse_dmy(rec.get("poDate")) or _iso_to_date(rec.get("docDate"))
+    ws["A1"] = "ĐƠN ĐẶT HÀNG / P.O"
+    ws["A1"].font = Font(name="Arial", size=14, bold=True)
+    ws["A3"] = f"Số: {rec.get('poNumber', '')}    Ngày: {d.day:02d}/{d.month:02d}/{d.year}"
+    ws["A4"] = f"Bên mua: {prof.get('name', '')}"
+    ws["A5"] = f"Bên bán: {HT_NAME}"
+    heads = ["STT", "Tên hàng", "ĐVT", "Số lượng", "Đơn giá (VND)", "Thành tiền (VND)"]
+    for c, h in enumerate(heads, 1):
+        cell = ws.cell(row=7, column=c, value=h)
+        cell.font = Font(name="Arial", size=11, bold=True)
+        cell.border = BOX_BORDER
+    for i, it in enumerate(rec.get("items", []), 1):
+        r = 7 + i
+        for c, v in enumerate((i, it.get("ten_sp", ""), it.get("unit", ""), it.get("qty", 0), it.get("price", 0), f"=D{r}*E{r}"), 1):
+            ws.cell(row=r, column=c, value=v).border = BOX_BORDER
+    n = len(rec.get("items", []))
+    ws.cell(row=8 + n, column=1, value="Tổng cộng")
+    ws.cell(row=8 + n, column=4, value=f"=SUM(D8:D{7 + n})")
+    ws.cell(row=8 + n, column=6, value=f"=SUM(F8:F{7 + n})")
+    for col, w in zip("ABCDEF", (6, 50, 8, 12, 16, 18)):
+        ws.column_dimensions[col].width = w
     return ws
 
 
@@ -4049,6 +4108,8 @@ def build_full_bundle(wb, rec, s_key, skip_h=False):
             build_plx_sheet(wb, rec, f"PLX_{s_key}")
         if "DNTT" in extra:
             build_dntt_sheet(wb, rec, "DNTT")
+        if "PO" in extra:
+            build_po_sheet(wb, rec, f"PO_{s_key}")
         if "BBGH" in extra:
             build_bbgh_sheet(wb, rec, f"BBGH_{s_key}")
         if "DCCN" in extra:
@@ -4867,6 +4928,7 @@ _XL_HEADERS = {
     "qty": ("SO LUONG", "QUANTITY", "QTY"),
     "price": ("DON GIA", "UNIT PRICE", "PRICE"),
     "amount": ("THANH TIEN", "AMOUNT", "TOTAL"),
+    "ref": ("MA PXK", "SO PXK", "PHIEU XUAT"),
 }
 
 
@@ -4904,7 +4966,7 @@ def parse_excel_table_po(path):
             found = {}
             for c in range(1, min(ws.max_column, 26) + 1):
                 t = strip_accents_upper(str(ws.cell(r, c).value or "")).replace("\n", " ")
-                for key in ("amount", "price", "qty", "code", "unit", "spec", "name"):  # 'đơn giá' phải xét trước 'đơn vị'
+                for key in ("ref", "amount", "price", "qty", "code", "unit", "spec", "name"):  # 'đơn giá' phải xét trước 'đơn vị'
                     if key not in found and any(k in t for k in _XL_HEADERS[key]) and not (key == "unit" and "DON GIA" in t):
                         found[key] = c
                         break
@@ -4924,11 +4986,22 @@ def parse_excel_table_po(path):
             if not qty or qty <= 0 or not price or price <= 0:
                 continue
             txt = lambda key: re.sub(r"\s+", " ", str(ws.cell(r, cols[key]).value or "")).strip() if key in cols else ""
+            if not (txt("name") or txt("spec")):
+                continue  # dòng tổng cộng không có tên hàng
             out.append({"name": txt("name"), "spec": txt("spec"), "code": txt("code"), "unit": txt("unit"), "qty": qty, "price": price,
-                        "amount": num("amount"), "sheet": ws.title, "row": r})
+                        "amount": num("amount"), "ref": txt("ref"), "sheet": ws.title, "row": r})
         if out:
             break
     return out
+
+
+def _dims_clash(a, b):
+    """Hai mô tả đều có kích thước (ba số đầu) mà khác nhau."""
+    da, db = _name_dims(a)[0][:3], _name_dims(b)[0][:3]
+    try:
+        return bool(da and db and [float(x) for x in da] != [float(x) for x in db])
+    except ValueError:
+        return False
 
 
 def match_po_item(row, catalog):
@@ -4940,6 +5013,8 @@ def match_po_item(row, catalog):
     if m:
         code = m.group(1)
         hit = next((it for it in cat if f"({code})" in str(it.get("name") or "").replace(" ", "")), None) or next((it for it in cat if str(it.get("code") or "") == code), None)
+        if hit and _dims_clash(text, hit.get("name", "")):
+            hit = None  # cùng mã nhưng quy cách khác (VD 55mm so với 45mm): không phải mặt hàng đã học
         if hit:
             return hit
     code = str(row.get("code") or "").strip()
@@ -4960,9 +5035,35 @@ def match_po_item(row, catalog):
     return None
 
 
+def aggregate_ledger_rows(rows, catalog):
+    """Sổ chi tiết bán hàng (mỗi dòng một lần xuất, có cột Mã PXK): gộp các dòng cùng mặt hàng và cùng đơn giá thành một dòng, cộng số lượng.
+    Mặt hàng ghép như match_po_item (mã khách trong ngoặc, rồi loại hàng + kích thước). Thứ tự theo lần xuất hiện đầu."""
+    groups, order = {}, []
+    for r in rows:
+        it = match_po_item(r, catalog)
+        key = (it.get("name") if it else re.sub(r"\s+", " ", f"{r['name']} {r['spec']}").strip().lower(), float(r["price"]))
+        if key not in groups:
+            groups[key] = {**r, "qty": 0.0, "_n": 0, "_refs": []}
+            order.append(key)
+        g = groups[key]
+        g["qty"] += float(r["qty"])
+        g["_n"] += 1
+        if r.get("ref") and r["ref"] not in g["_refs"]:
+            g["_refs"].append(r["ref"])
+    out = []
+    for k in order:
+        g = groups[k]
+        g["note"] = f"Gộp {g['_n']} dòng sổ chi tiết" + (f" ({len(g['_refs'])} phiếu xuất kho)" if g["_refs"] else "")
+        out.append(g)
+    return out
+
+
 def lines_from_excel_table(rows, po_no, profile, catalog, data_store=None, tare_val=0.0):
     """Dòng hàng từ parse_excel_table_po: dòng khớp mặt hàng đã học (đầy đủ kg, SL/kiện); dòng lạ vẫn giữ theo chữ trên PO (trạng thái 'suy ra') để người dùng điền."""
     erp_rows = []
+    ledger = any(r.get("ref") for r in rows)
+    if ledger:  # sổ chi tiết bán hàng: cộng các lần xuất của cùng mặt hàng
+        rows = aggregate_ledger_rows(rows, catalog)
     for r in rows:
         it = match_po_item(r, catalog)
         erp_rows.append({"code": (it or {}).get("code") or "", "desc": (it or {}).get("name") or re.sub(r"\s+", " ", f"{r['name']} {r['spec']}").strip(),
@@ -4971,6 +5072,8 @@ def lines_from_excel_table(rows, po_no, profile, catalog, data_store=None, tare_
     for ln, r, e in zip(lines, rows, erp_rows):
         if not e["_matched"]:
             ln["read"], ln["read_note"] = "suy_ra", "Mặt hàng chưa có trong danh mục khách: kiểm tra mã, kg, SL/kiện"
+        elif r.get("note"):
+            ln["read"], ln["read_note"] = "ok", r["note"]
     return lines
 
 
@@ -5677,6 +5780,9 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
     elif mode == "PLX":
         build_plx_sheet(wb, rec, f"PLX_{s_key}")
         fname = f"PLX_{rec['customer']}_{s_key}.xlsx"
+    elif mode == "PO":
+        build_po_sheet(wb, rec, f"PO_{s_key}")
+        fname = f"DonDatHang_{rec['customer']}_{re.sub(r'[^A-Za-z0-9_-]', '', str(rec.get('poNumber') or s_key))}.xlsx"
     elif mode == "BBGH":
         build_bbgh_sheet(wb, rec, f"BBGH_{s_key}")
         fname = f"BienBanBanGiao_{rec['customer']}_{s_key}.xlsx"
@@ -5732,7 +5838,7 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
 LOT_MODE_LABELS = {
     "SO": "Phiếu SO", "PKL": "Invoice / Packing List", "PACK": "Chi tiết đóng gói", "VAT": "Hóa đơn VAT", "PXK": "Phiếu xuất kho",
     "B11": "Tờ khai B11", "PLX": "Phụ lục X", "PGH": "Phiếu giao hàng", "DCCN": "Đối chiếu công nợ", "DNTT": "Đề nghị thanh toán",
-    "DSH": "Danh sách hàng ECUS", "CHECK": "Kiểm tra chéo", "BBGH": "Biên bản bàn giao",
+    "DSH": "Danh sách hàng ECUS", "CHECK": "Kiểm tra chéo", "BBGH": "Biên bản bàn giao", "PO": "Đơn đặt hàng (PO)",
 }
 
 
@@ -6001,6 +6107,8 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
         able_rows = [] if pcs_rows or not is_able(prof) else parse_able_po_rows(raw_text, store.items_for_customer(customer))
         table_rows = parse_excel_table_po(path) if ext in (".xlsx", ".xlsm") else []
         if table_rows:  # PO Excel dạng bảng: đọc đúng từng cột, bỏ dòng mẫu trống, mỗi dòng ghép mặt hàng theo mã khách trong ngoặc hoặc loại hàng + kích thước
+            if any(r.get("ref") for r in table_rows) and not _po_pattern_hits(prof, raw_text, po_no):
+                po_no = ""  # sổ chi tiết bán hàng không có số PO: số PO tạo sau (poGen)
             lines = lines_from_excel_table(table_rows, po_no, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
             pcs_rows = []
         dated_rows = [] if (pcs_rows or able_rows or table_rows) else parse_dated_unit_rows(raw_text)

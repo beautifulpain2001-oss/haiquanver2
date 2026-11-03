@@ -24,6 +24,7 @@ class Lot:
         self.po_files = []  # file PO gốc đã nạp (được lưu cùng chứng từ)
         self.read_text = ""  # câu tóm tắt kết quả đọc PO (hiện ở đầu bước ③)
         self.rule_note = ""
+        self.po_auto, self.po_touched = False, False
         self.pxk_auto, self.pxk_touched = False, False  # số PXK tự điền (số lớn nhất + 1) / người dùng đã tự sửa
         self.exported = {}  # ô chứng từ của hồ sơ (vat, pxk, pkl, tk) -> file
         self.files = []  # mọi file đã xuất trong lô này, để hiển thị
@@ -37,6 +38,17 @@ class Lot:
         d = self.core.lot_defaults(self.customer)
         self.form.update(xe=d["xe"], driver=d["driver"], ldd=d["ldd"], tare=d["tare"], pay_days=d["pay_days"],
                          delivery=d["delivery"], luong=d["luong"])
+
+    def fill_next_po(self):
+        """Khách có công thức số PO (poGen, VD Betterial HT202610 + số thứ tự): PO còn trống thì điền số kế tiếp và gán cho các dòng chưa có số PO."""
+        if str(self.form.get("po", "")).strip() or self.po_touched or self.record_id or not self.customer:
+            return
+        nxt = self.store.next_po_number(self.customer, self.form.get("doc_date", ""))
+        if nxt:
+            self.form["po"], self.po_auto = nxt, True
+            for it in self.items:
+                if not str(it.get("po") or "").strip():
+                    it["po"] = nxt
 
     def fill_next_pxk(self):
         """Số PXK còn trống thì điền số kế tiếp (lớn nhất đã có + 1); người dùng sửa tay thì không điền lại."""

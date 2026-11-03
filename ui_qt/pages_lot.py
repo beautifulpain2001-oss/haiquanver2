@@ -655,6 +655,11 @@ class InfoStep(QWidget):
     def on_edit(self, key, text):
         if key == "pxk":
             self.lot.pxk_touched, self.lot.pxk_auto = True, False
+        if key == "po":
+            self.lot.po_touched, self.lot.po_auto = True, False
+            for it in self.lot.items:
+                if not str(it.get("po") or "").strip() or it.get("po") == self.lot.form.get("po"):
+                    it["po"] = text
         self.lot.form[key] = text
         self.lot.saved = False
         self.mark_missing()
@@ -676,6 +681,7 @@ class InfoStep(QWidget):
     def refresh(self):
         self.lot.fill_vehicle_defaults()
         self.lot.fill_next_pxk()
+        self.lot.fill_next_po()
         for k, e in self.edits.items():
             e.setText(str(self.lot.form.get(k, "")))
         self.groups["pay"].setVisible(self.lot.is_best)
@@ -686,7 +692,7 @@ class InfoStep(QWidget):
 
 # --------------------------------------------------------------------------- ④ xuất & lưu
 EXPORTS = [("VAT", "Hóa đơn VAT (Bkav)"), ("PKL", "Invoice / Packing List"), ("PXK", "Phiếu xuất kho (Bkav)"),
-           ("DNTT", "Đề nghị thanh toán"), ("PLX", "Phụ lục X"), ("BBGH", "Biên bản bàn giao"), ("BEST", "Mẫu riêng của Best"), ("DSH", "Danh sách hàng ECUS (dsh)")]
+           ("DNTT", "Đề nghị thanh toán"), ("PLX", "Phụ lục X"), ("BBGH", "Biên bản bàn giao"), ("PO", "Đơn đặt hàng (PO)"), ("BEST", "Mẫu riêng của Best"), ("DSH", "Danh sách hàng ECUS (dsh)")]
 
 
 def _lines_html(lines):
@@ -777,6 +783,7 @@ class ExportStep(QWidget):
         self.big.setEnabled(ok)
         self.one.setEnabled(ok)
         self.btns["BEST"].setVisible(self.lot.is_best)
+        self.btns["PO"].setVisible(bool(self.lot.customer) and "PO" in self.lot.core.lot_bundle_modes({"customer": self.lot.customer}))
         self.btns["PLX"].setVisible(self.lot.customer in ("tesa", "kodi", "shirai") or bool(self.lot.customer and self.lot.profile.get("customs")))
         self.save_btn.setEnabled(ok)
         self.open_btn.setEnabled(ok)

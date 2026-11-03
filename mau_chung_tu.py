@@ -14,7 +14,7 @@ from openpyxl.formula.translate import Translator
 from openpyxl.styles import Alignment
 from openpyxl.utils import get_column_letter
 
-DOCS = ("pkl", "pack", "pgh", "dccn", "dntt", "bbgh")  # tên file mẫu: <mã khách>/<doc>.xlsx
+DOCS = ("pkl", "pack", "pgh", "dccn", "dntt", "bbgh", "po")  # tên file mẫu: <mã khách>/<doc>.xlsx
 
 _REF = re.compile(r"(?<![A-Za-z_!'])(\$?[A-Z]{1,3})(\$?)(\d+)(?![\d(])")
 
@@ -388,7 +388,43 @@ def fill_bbgh(core, wb, rec, prof, tws, title):
     return ws
 
 
-FILLERS = {"bbgh": fill_bbgh, "pkl": fill_pkl, "pkl_arizon": fill_pkl_arizon, "pack": fill_pack, "pgh": fill_pgh, "dccn": fill_dccn, "dntt": fill_dntt}
+def fill_po(core, wb, rec, prof, tws, title):
+    """Đơn đặt hàng (PO) song ngữ theo mẫu của khách (VD Betterial): STT | Tên hàng | ĐVT | Thông số quy cách | SL | Đơn giá | Thành tiền, tổng, VAT, bằng chữ, điều khoản."""
+    items = rec.get("items", [])
+    ws, pl = clone_sheet(wb, tws, title, [(18, 25, max(len(items), 1))], max_col=8)
+    d_po = core._parse_dmy(rec.get("poDate")) or core._iso_to_date(rec.get("docDate"))
+    d_giao = core._iso_to_date(rec.get("deliveryDate") or rec.get("docDate"))
+    ws["A7"] = f"Ngày/ 日期 : {d_po.year}.{d_po.month:02d}.{d_po.day:02d}"
+    ws["D7"] = f"Số/ No.  {rec.get('poNumber', '')}"
+    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=9, max_col=14):  # ô phụ ngoài bảng (tham chiếu file khác...) không đưa sang PO mới
+        for c in row:
+            c.value = None
+    r0 = pl.first[18]
+    for i, it in enumerate(items):
+        r = r0 + i
+        name = str(it.get("ten_sp") or "").strip()
+        code = str(it.get("ma_sp") or "").strip()
+        kind = re.split(r"[\d(]", name, maxsplit=1)[0].strip() or "Hàng hóa"
+        spec = name if (not code or f"({code})" in name.replace(" ", "")) else f"{name}\n({code})"
+        if i:  # dòng thêm lấy kiểu dòng đầu cho đều
+            for col in "ABCDEFGH":
+                ws[f"{col}{r}"]._style = copy.copy(ws[f"{col}{r0}"]._style)
+        ws.row_dimensions[r].height = max(30.0, 15.0 * (1 + len(spec) // 34 + spec.count("\n")))
+        for col, v in (("A", i + 1), ("B", kind), ("C", "PCS个"), ("D", spec), ("E", it.get("qty", 0)), ("F", it.get("price", 0)), ("G", f"=E{r}*F{r}")):
+            ws[f"{col}{r}"] = v
+    last = r0 + max(len(items), 1) - 1
+    t = pl.map(26)
+    ws[f"E{t}"] = f"=SUM(E{r0}:E{last})"
+    ws[f"G{t}"] = f"=SUM(G{r0}:G{last})"
+    ws[f"G{t + 1}"] = 0
+    ws[f"G{t + 2}"] = f"=G{t}+G{t + 1}"
+    total = round(sum(float(it.get("qty", 0)) * float(it.get("price", 0)) for it in items))
+    ws[f"C{pl.map(29)}"] = core.num_to_vn_words(total)
+    ws[f"A{pl.map(30)}"] = f"* Thời gian giao hàng 交货时间:{d_giao.day:02d}/{d_giao.month:02d}/{d_giao.year}"
+    return ws
+
+
+FILLERS = {"po": fill_po, "bbgh": fill_bbgh, "pkl": fill_pkl, "pkl_arizon": fill_pkl_arizon, "pack": fill_pack, "pgh": fill_pgh, "dccn": fill_dccn, "dntt": fill_dntt}
 
 
 def build_from_template(core, doc, wb, rec, prof, path, title):

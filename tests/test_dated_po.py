@@ -177,3 +177,63 @@ def test_desc_dims_and_kind_handle_chinese_descriptions():
     assert app.desc_dims("纸筒φ53xφ50x220mm/两端+内黑") == ["53", "50", "220"] and app.desc_kind("纸筒φ53xφ50x220mm") == "ONG"
     assert app.desc_dims("纸滑板/1145x1000x1.2mm/附图") == ["1145", "1000", "1.2"] and app.desc_kind("纸滑板/1145x1000x1.2mm") == "SLIP"
     assert app.desc_kind("Thanh nẹp góc 1320x50x50x5mm") == "NEP" and app.desc_kind("Ống giấy phi 53 x 50 x 220 mm") == "ONG"
+
+
+def _ledger(tmp_path, rows):
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    heads = ["Tên khách hàng", "Ngày hóa đơn", "Mã PXK", "Số hóa đơn", "Tên hàng xuất hóa đơn", "ĐVT (bán hàng)", "Số lượng (ĐVT bán hàng)", "Đơn giá", "Thành tiền trước thuế"]
+    for c, h in enumerate(heads, 1):
+        ws.cell(4, c, h)
+    for i, (pxk, name, qty, price) in enumerate(rows, 5):
+        for c, v in enumerate(("CTY X", "2026-10-30", pxk, None, name, "ống", qty, price, qty * price), 1):
+            ws.cell(i, c, v)
+    n = 5 + len(rows)
+    ws.cell(n, 7, sum(r[2] for r in rows))
+    ws.cell(n, 8, sum(r[3] for r in rows))  # dòng tổng cộng không có tên hàng: phải bị bỏ
+    ws.cell(n, 9, sum(r[2] * r[3] for r in rows))
+    p = tmp_path / "so_chi_tiet.xlsx"
+    wb.save(p)
+    return p
+
+
+def test_sales_ledger_is_input_rows_merge_by_item_and_price_and_total_matches(tmp_path):
+    store = app.DedicatedDataStore(base_dir=str(tmp_path / "d"))
+    items = [{"name": "Ống giấy 78 x 16.5 x 1185mm (44A020101.0319)", "code": "44A020101.0319", "unit": "Chiếc", "price": 103000, "div": 3, "kg": 5.25},
+             {"name": "Ống giấy 79 x 8 x 45 mm (44A020101.0648)", "code": "44A020101.0648", "unit": "Chiếc", "price": 3600, "div": 10, "kg": 0.08}]
+    store.save_learned_customer("betled", {"name": "CTY BETLED", "unit": "Chiếc", "addr": "BN", "mst": "0100000013", "po_pattern": r"HT\\d{8}",
+                                           "extraDocs": "PO", "poGen": "HT{yyyymm}{nn}"}, items)
+    f = _ledger(tmp_path, [("XK-1", "Ống giấy 78 x 16.5 x 1185mm(44A020101.0319)", 126, 101000), ("XK-2", "Ống giấy 78 x 16.5 x 1185mm(44A020101.0319)", 126, 101000),
+                           ("XK-3", "Ống  giấy  79 x 8 x 45mm ( 44A020101.0648)", 5902, 3600),
+                           ("XK-4", "Ống giấy 79 x 8 x 55mm (44A020101.0648)", 800, 4500)])  # cùng mã nhưng quy cách khác: không gộp vào mặt hàng 45mm
+    res = app.lot_load_po(store, str(f), "betled")
+    assert res["ok"] and res["po"] == "" and len(res["items"]) == 3
+    a, b, c = res["items"]
+    assert (a["qty"], a["price"]) == (252, 101000) and "Gộp 2 dòng" in a["read_note"] and a["read"] == "ok"  # giá theo sổ, không theo danh mục
+    assert (b["qty"], b["price"]) == (5902, 3600)
+    assert c["qty"] == 800 and c["price"] == 4500 and c["read"] == "suy_ra" and "55" in c["ten_sp"]  # quy cách mâu thuẫn: giữ tên trong sổ, báo kiểm tra
+    assert sum(x["amount"] for x in res["items"]) == 252 * 101000 + 5902 * 3600 + 800 * 4500
+
+
+def test_po_number_generated_from_poGen_and_po_document_exports(tmp_path):
+    from ui_qt.state import Lot
+    store = app.DedicatedDataStore(base_dir=str(tmp_path / "d"))
+    store.save_learned_customer("betpo", {"name": "CTY BETPO", "unit": "Chiếc", "addr": "BN", "mst": "0100000014", "extraDocs": "PO", "poGen": "HT{yyyymm}{nn}"},
+                                [{"name": "Ống giấy 78 x 8 x 400mm (44A020101.0636)", "code": "44A020101.0636", "unit": "Chiếc", "price": 22100, "div": 20, "kg": 0.711}])
+    store.records = [{"id": "R1", "customer": "betpo", "poNumber": "HT20261001", "docDate": "2026-10-03"}, {"id": "R2", "customer": "betpo", "poNumber": "HT20261002", "docDate": "2026-10-04"}]
+    assert store.next_po_number("betpo", "2026-10-30") == "HT20261003" and store.next_po_number("betpo", "2026-11-02") == "HT20261101"
+    assert "PO" in app.lot_bundle_modes({"customer": "betpo"})
+    lot = Lot(app, store)
+    lot.select_customer("betpo")
+    lot.form["doc_date"] = "2026-11-02"
+    lot.items = [{"stt": 1, "po": "", "hs": "48229090", "ma_sp": "44A020101.0636", "ten_sp": "Ống giấy 78 x 8 x 400mm (44A020101.0636)", "unit": "Chiếc", "qty": 1200, "price": 22100,
+                  "amount": 26520000, "div": 20, "kg": 0.711, "kien": 60, "net": 853.2, "gross": 854.2, "tare": 1.0}]
+    lot.fill_next_po()
+    assert lot.form["po"] == "HT20261101" and lot.items[0]["po"] == "HT20261101"
+    lot.form["pxk"] = "0000999"
+    res = lot.export("PO")
+    import openpyxl
+    ws = openpyxl.load_workbook(res["files"][0]["path"]).worksheets[0]
+    cells = {c.value for row in ws.iter_rows() for c in row if c.value is not None}
+    assert "HT20261101" in " ".join(str(v) for v in cells) and 1200 in cells and 22100 in cells
