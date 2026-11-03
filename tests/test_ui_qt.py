@@ -15,8 +15,8 @@ import os  # noqa: E402
 
 
 @pytest.fixture
-def win(store, monkeypatch):
-    app = mw.QApplication.instance() or mw.QApplication([])
+def win(qapp, store, monkeypatch):
+    app = qapp
     app.setStyleSheet(mw.theme.STYLE)
     shown = []
     # Không bật hộp thoại chặn trong test; ghi lại để kiểm tra

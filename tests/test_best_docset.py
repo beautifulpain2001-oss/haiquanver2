@@ -270,13 +270,10 @@ def test_customer_name_does_not_change_existing_customers(seed):
         assert not app.is_best_docset(seed[cust])
 
 
-def test_learn_dialog_then_two_pos_one_lot(store, best_invoice, tmp_path):
+def test_learn_dialog_then_two_pos_one_lot(qapp, store, best_invoice, tmp_path):
     """Học khách Best từ invoice mẫu (hộp thoại Qt), gộp 2 PO thành một lô, xuất trọn bộ có Đóng gói/PGH/ĐCCN/B11/Kiểm tra chéo."""
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtWidgets import QApplication
     from ui_qt.dialogs import LearnCustomerDialog
     from ui_qt.state import Lot
-    QApplication.instance() or QApplication([])
     dlg = LearnCustomerDialog(app, store, [best_invoice])
     assert dlg.edits["sample_po"].text() == "POS269990001"
     for k, v in (("key", "mauthu"), ("docSet", "best"), ("payDays", "60"), ("mst", "0100000001")):

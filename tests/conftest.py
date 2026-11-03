@@ -147,3 +147,21 @@ def make_shirai_po(tmp_path):
 
 def pytest_report_header(config):
     return f"app: {os.path.join(APP_DIR, 'hongthien_desktop_app.py')}"
+
+
+@pytest.fixture(scope="session")
+def qapp():
+    """Một QApplication cho cả phiên kiểm thử, giữ tham chiếu tới hết phiên: để Python tự hủy giữa chừng sẽ làm Qt sập khi thoát."""
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    yield app
+    # Cuối phiên: chờ luồng nền (đọc PO, OCR) xong rồi dọn cửa sổ trước khi Python thoát, nếu không Qt báo "pure virtual method called" và thoát mã 250
+    from ui_qt import widgets
+    widgets.wait_jobs(15000)
+    for w in app.topLevelWidgets():
+        w.close()
+        w.deleteLater()
+    app.processEvents()
+    app.sendPostedEvents(None, 0)

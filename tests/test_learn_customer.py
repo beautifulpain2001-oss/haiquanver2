@@ -177,14 +177,10 @@ def test_saving_again_updates_items_instead_of_duplicating(store):
     assert len(items) == 1 and items[0]["price"] == 120 and items[0]["kg"] == 0.3
 
 
-def test_wizard_adds_customer_and_scans_po(store, sample_docs, tmp_path):
+def test_wizard_adds_customer_and_scans_po(qapp, store, sample_docs, tmp_path):
     """Hộp thoại Qt học khách mới: đọc chứng từ mẫu, soát lại, lưu, rồi đọc PO mẫu và xuất trọn bộ."""
-    import os
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtWidgets import QApplication
     from ui_qt.dialogs import LearnCustomerDialog
     from ui_qt.state import Lot
-    QApplication.instance() or QApplication([])
     dlg = LearnCustomerDialog(app, store, [sample_docs["vat"], sample_docs["pxk"], sample_docs["inv"]])
     assert dlg.edits["mst"].text() == "2301234567" and dlg.table.rowCount() == 2
     dlg.edits["key"].setText("daiphat")
