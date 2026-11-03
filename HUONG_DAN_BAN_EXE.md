@@ -44,7 +44,7 @@ PHẦN MỀM HỒ SƠ HẢI QUAN HỒNG THIÊN - BẢN .EXE (KHÔNG CẦN CÀI P
 ## Giao diện
 
 - Bấm đúp `HongThien_HaiQuan_Desktop.exe` mở **giao diện mới** (mặc định).
-- Giao diện cũ vẫn còn để dùng tạm các chức năng chưa chuyển sang: bấm đúp `MO_GIAO_DIEN_CU.bat` (cùng thư mục). Hai giao diện dùng chung thư mục `DATA_LUU_TRU_HONG_THIEN`, hồ sơ làm ở bên nào cũng mở được ở bên kia.
+- Giao diện cũ (Tkinter) đã được gỡ hẳn. Học khách mới từ chứng từ mẫu nằm ở **Khách hàng → Học khách mới từ chứng từ mẫu**; sổ theo dõi hồ sơ ở **Hồ sơ đã lưu → Xuất sổ theo dõi ra Excel**.
 - Giao diện mới làm chứng từ theo 5 bước: ① chọn khách hàng → ② nạp file PO (kéo thả được) → ③ kiểm tra và sửa dòng hàng (dòng thiếu thông tin tô vàng) → ④ nhập số PXK, hóa đơn, xe, tài xế → ⑤ kiểm tra (hiện đủ từng cảnh báo), xuất trọn bộ (mỗi chứng từ một file Excel riêng, kèm file KiemTraCheo) hoặc chỉ xuất từng file, rồi lưu hồ sơ.
 - **Danh mục** có hai cách xem hồ sơ: *theo tháng* (mặc định là tháng hiện tại, có mũi tên chuyển tháng) và *theo khách hàng* (bấm tên khách để xem các tờ khai đã khai, kèm nút mở thư mục hồ sơ trên máy). Hai bảng cân nặng và mã ERP vẫn ở cùng mục.
 - **Cài đặt**: sửa thông tin công ty (tên, mã số thuế, địa chỉ, tài khoản ngân hàng…) — được in lên hóa đơn, phiếu xuất kho, invoice, đề nghị thanh toán, tờ khai. Đổi thư mục lưu dữ liệu.

@@ -1,7 +1,7 @@
 """Trạng thái một lô hàng đang làm trong giao diện mới. Thuần Python (không Qt) để test được.
 
 Mọi tính toán/đọc/xuất/lưu đều gọi các hàm lot_* của lõi (`core` = hongthien_desktop_app),
-nên giao diện Tkinter cũ và giao diện mới cho kết quả giống hệt nhau.
+nên giao diện và các kiểm thử dùng chung một đường xử lý.
 """
 
 import datetime

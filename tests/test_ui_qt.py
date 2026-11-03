@@ -563,3 +563,13 @@ def test_lookup_dialog_searches_and_adds_lines(win, store):
     dlg.search.setText("khong-co-mat-hang-nay")
     dlg.run_search()
     assert dlg.table.rowCount() == 0 and "Không thấy" in dlg.empty.text()
+
+
+def test_customers_page_has_learn_button_and_records_export(win, store, tmp_path):
+    from ui_qt.pages_other import CustomersPage, RecordsPage  # noqa: F401
+    assert "Học khách mới" in win.customers.learn_btn.text()
+    out = tmp_path / "log.xlsx"
+    win.records.export_log(str(out))
+    import openpyxl
+    ws = openpyxl.load_workbook(out).active
+    assert ws.cell(1, 3).value == "Khách hàng" and ws.max_row == 1 + len(store.records)

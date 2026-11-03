@@ -39,10 +39,6 @@ OCR_LANGS = ("eng", "vie", "osd")  # osd: tự xoay trang PO scan bị nằm nga
 
 
 def build():
-    if os.name == "nt":
-        # Thiếu Tcl/Tk thì PyInstaller lặng lẽ bỏ Tkinter và .exe sẽ không mở được cửa sổ
-        import tkinter
-        tkinter.Tcl()
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--noconfirm", "--clean",
@@ -54,6 +50,7 @@ def build():
         # Không dùng tới, bỏ bớt cho file nhỏ và khởi động nhanh hơn
         "--exclude-module", "pytest",
         "--exclude-module", "numpy",
+        "--exclude-module", "tkinter",
         # Giao diện mới chỉ dùng QtCore/QtGui/QtWidgets; bỏ các module Qt nặng không dùng
         "--hidden-import", "ui_qt.main_window",
         "--hidden-import", "mau_chung_tu",
@@ -144,16 +141,6 @@ def self_test(with_ocr=True):
                 print(f"Giao diện THẤT BẠI (exit {res.returncode})")
                 return 1
             print("Giao diện OK")
-            print("== mở thử giao diện cũ (--giao-dien-cu --gui-smoke)")
-            try:
-                res = subprocess.run([exe, "--giao-dien-cu", "--gui-smoke"], cwd=ROOT, timeout=180)
-            except subprocess.TimeoutExpired:
-                print("Giao diện cũ THẤT BẠI: không tự đóng sau 180 giây")
-                return 1
-            if res.returncode:
-                print(f"Giao diện cũ THẤT BẠI (exit {res.returncode})")
-                return 1
-            print("Giao diện cũ OK")
         return 0
 
 
@@ -161,8 +148,6 @@ def package(with_ocr=True):
     with zipfile.ZipFile(ZIP, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(EXE, os.path.basename(EXE))
         z.write(GUIDE, "HUONG_DAN.txt")
-        # Bấm đúp .exe mở giao diện mới; file này chỉ để mở lại giao diện cũ khi cần. Chỉ dùng ký tự ASCII cho cmd.
-        z.writestr("MO_GIAO_DIEN_CU.bat", '@echo off\r\ncd /d "%~dp0"\r\nstart "" "' + os.path.basename(EXE) + '" --giao-dien-cu\r\n')
         if with_ocr:
             for root, _, files in os.walk(OCR_DIR):
                 for f in files:

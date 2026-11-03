@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton,
+    QAbstractItemView, QComboBox, QDialog, QGridLayout, QDialogButtonBox, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton,
     QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
@@ -187,3 +187,129 @@ class LookupDialog(QDialog):
     def say(self, text, ok):
         self.msg.setText(text)
         self.msg.setStyleSheet(f"color: {'#03543F' if ok else '#9B1C1C'}; font-weight: 600;")
+
+
+class LearnCustomerDialog(QDialog):
+    """Thêm khách mới từ chứng từ mẫu (hóa đơn/PXK XML, Invoice Excel, PO mẫu): máy đọc thông tin và mã hàng, bạn soát lại rồi mới lưu."""
+
+    FIELDS = [("key", "Mã khách (không dấu)"), ("label", "Tên ngắn hiển thị"), ("name", "Tên công ty khách"), ("mst", "Mã số thuế"),
+              ("addr", "Địa chỉ"), ("addrKho", "Địa chỉ kho nhận"), ("emails", "Email nhận hóa đơn"), ("unit", "Đơn vị tính mặc định"),
+              ("driver", "Lái xe"), ("xe", "Biển xe"), ("symbol", "Ký hiệu PXK"), ("veViec", "Về việc (PXK)"), ("tare", "Bì / dòng hàng (kg)"),
+              ("sample_po", "Số PO trong file mẫu"), ("po_pattern", "Mẫu nhận dạng số PO"), ("docSet", "Bộ mẫu (chuan / best)"),
+              ("payDays", "Hạn thanh toán (ngày)"), ("nameCn", "Tên khách tiếng Trung"), ("deliveryPlace", "Điểm giao hàng"),
+              ("buyerContact", "Người liên hệ bên mua"), ("sellerContact", "Người liên hệ bên bán")]
+    COLS = [("code", "Mã hàng"), ("name", "Tên hàng"), ("unit", "ĐVT"), ("price", "Đơn giá"), ("div", "SL/kiện"), ("kg", "kg/chiếc"), ("hs", "Mã HS")]
+
+    def __init__(self, core, store, paths, parent=None, draft=None):
+        super().__init__(parent)
+        self.core, self.store, self.key = core, store, None
+        self.draft = draft or core.learn_customer_from_documents(list(paths))
+        prof = self.draft["profile"]
+        key = core.customer_key_from_name(prof.get("name", ""), set(core.PROFILES) | set(store.custom_profiles))
+        self.setWindowTitle("Thêm khách mới từ chứng từ mẫu")
+        self.resize(980, 760)
+        lay = QVBoxLayout(self)
+        head = QLabel(f"Đã đọc {len(paths)} file: {', '.join(__import__('os').path.basename(p) for p in paths)}. "
+                      "Kiểm tra và sửa các ô bên dưới; chưa có gì được lưu cho đến khi bấm “Lưu khách hàng mới”.")
+        head.setWordWrap(True)
+        head.setObjectName("hint")
+        lay.addWidget(head)
+        if self.draft["errors"]:
+            err = QLabel("⚠ " + "\n⚠ ".join(self.draft["errors"]))
+            err.setObjectName("banner_warn")
+            err.setWordWrap(True)
+            lay.addWidget(err)
+        doc_set = "best" if "BEST PACIFIC" in core.strip_accents_upper(prof.get("name", "")) else "chuan"
+        init = {"key": key, "label": key.capitalize(), "name": prof.get("name", ""), "mst": prof.get("mst", ""), "addr": prof.get("addr", ""),
+                "addrKho": prof.get("addrKho", ""), "emails": prof.get("emails", ""), "unit": prof.get("unit", "cái"), "driver": prof.get("driver", ""),
+                "xe": prof.get("xe", ""), "symbol": prof.get("symbol", "6C26NAA"), "veViec": "xuất kho bán hàng cho",
+                "tare": str(self.draft.get("tare") or "0.0"), "sample_po": self.draft.get("sample_po", ""),
+                "po_pattern": core.infer_po_pattern(self.draft.get("sample_po", "")), "docSet": doc_set, "payDays": "60" if doc_set == "best" else "30",
+                "nameCn": "", "deliveryPlace": core.short_place(prof.get("addr", "")), "buyerContact": "", "sellerContact": ""}
+        grid = QGridLayout()
+        self.edits = {}
+        for i, (k, label) in enumerate(self.FIELDS):
+            r, c = divmod(i, 2)
+            grid.addWidget(QLabel(label + ":"), r, c * 2)
+            e = QLineEdit(str(init.get(k, "")))
+            self.edits[k] = e
+            grid.addWidget(e, r, c * 2 + 1)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(3, 1)
+        lay.addLayout(grid)
+        self.edits["sample_po"].textChanged.connect(lambda t: self.edits["po_pattern"].setText(core.infer_po_pattern(t)))
+        self.items_label = QLabel("")
+        self.items_label.setObjectName("h2")
+        lay.addWidget(self.items_label)
+        self.table = QTableWidget(0, len(self.COLS))
+        self.table.setHorizontalHeaderLabels([c[1] for c in self.COLS])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.verticalHeader().hide()
+        self.table.setAlternatingRowColors(True)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        lay.addWidget(self.table, 1)
+        row = QHBoxLayout()
+        dele = QPushButton("🗑  Xóa dòng đã chọn")
+        dele.setObjectName("dng")
+        dele.clicked.connect(self.delete_rows)
+        test = QPushButton("🔍  Thử đọc PO mẫu")
+        test.setObjectName("sec")
+        test.clicked.connect(self.try_po)
+        self.test_msg = QLabel("")
+        self.test_msg.setWordWrap(True)
+        row.addWidget(dele)
+        row.addWidget(test)
+        row.addWidget(self.test_msg, 1)
+        save = QPushButton("💾  Lưu khách hàng mới")
+        save.clicked.connect(self.save)
+        cancel = QPushButton("Hủy")
+        cancel.setObjectName("sec")
+        cancel.clicked.connect(self.reject)
+        row.addWidget(cancel)
+        row.addWidget(save)
+        lay.addLayout(row)
+        self.refresh_items()
+
+    def refresh_items(self):
+        items = self.draft["items"]
+        self.items_label.setText(f"Mã hàng / định mức học được ({len(items)} dòng) — chọn dòng sai rồi bấm Xóa")
+        self.table.setRowCount(len(items))
+        for r, it in enumerate(items):
+            for c, (k, _) in enumerate(self.COLS):
+                self.table.setItem(r, c, QTableWidgetItem(str(it.get(k, "") if it.get(k) is not None else "")))
+
+    def delete_rows(self):
+        for idx in sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True):
+            self.draft["items"].pop(idx)
+        self.refresh_items()
+
+    def collect(self):
+        out = {k: e.text().strip() for k, e in self.edits.items() if k not in ("key", "sample_po")}
+        try:
+            out["tare"] = float(out.get("tare") or 0.0)
+        except ValueError:
+            out["tare"] = 0.0
+        try:
+            out["payDays"] = int(float(out.get("payDays") or 0)) or ""
+        except ValueError:
+            out["payDays"] = ""
+        if out.get("docSet") == "best" and not out["tare"]:
+            out["tare"] = self.core.BEST_DOCSET_DEFAULTS["tare"]
+        return out
+
+    def try_po(self):
+        if not self.draft["po_text"]:
+            self.test_msg.setText("Chưa nạp PO mẫu (PDF/Excel/ảnh/txt) nên chưa thử đọc được.")
+            return
+        prof = self.core.build_custom_profile("tmp", self.collect())
+        po_no, _, lines = self.core.parse_generic_po_text(self.draft["po_text"], prof, self.draft["items"])
+        self.test_msg.setText(f"Thử đọc PO mẫu: số PO = {po_no or '(không thấy)'}, {len(lines)} dòng hàng khớp.")
+
+    def save(self):
+        try:
+            self.key = self.store.save_learned_customer(self.edits["key"].text(), self.collect(), self.draft["items"])
+        except ValueError as e:
+            widgets.warn(self, "Chưa lưu được", str(e))
+            return
+        self.accept()

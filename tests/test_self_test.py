@@ -19,12 +19,12 @@ def test_run_self_test_writes_one_workbook_per_customer(monkeypatch, data_dir):
         openpyxl.load_workbook(data_dir / "HAI_QUAN" / "_KIEM_TRA" / name)
 
 
-def test_module_imports_without_tkinter(tmp_path):
-    # Bản đóng gói và máy chủ không màn hình vẫn phải import được phần xử lý
+def test_core_does_not_depend_on_tkinter(tmp_path):
+    # Giao diện cũ (Tkinter) đã gỡ: lõi không được nhập lại Tkinter
     code = (
         "import sys; sys.modules['tkinter'] = None; "
         f"sys.path.insert(0, {str(APP_DIR)!r}); "
-        "import hongthien_desktop_app as m; assert m.tk is None; print('ok')"
+        "import hongthien_desktop_app as m; assert not hasattr(m, 'tk'); print('ok')"
     )
     res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=tmp_path)
     assert res.returncode == 0, res.stderr

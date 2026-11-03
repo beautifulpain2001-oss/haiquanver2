@@ -3,7 +3,7 @@
 ```bash
 pip install -r requirements-dev.txt
 python run_tests.py              # self-test của app + pytest (bỏ qua GUI)
-python run_tests.py --gui        # thêm kiểm thử giao diện (cần Tkinter; Linux dùng xvfb-run)
+python run_tests.py --gui        # thêm kiểm thử giao diện (cần PySide6; Linux không màn hình dùng xvfb-run)
 python run_tests.py -k pkl       # tham số còn lại đưa thẳng cho pytest
 python run_tests.py --update-snapshots   # ghi lại snapshot khi cố ý đổi định dạng Excel
 ```
@@ -19,7 +19,7 @@ Mọi test chạy trên thư mục dữ liệu tạm, không đụng `DATA_LUU_T
 | `test_customer_rules.py` | Hồ sơ từng khách, toàn vẹn catalog (206 / 1.833), quy tắc Kodi/Tesa/Shirai |
 | `test_learn_customer.py` | Học khách mới: XML hóa đơn/PXK TT78, Invoice Excel nhiều sheet (sheet mới nhất thắng, bảng SL/túi, số PO, bì, tên/MST khách), mẫu số PO, đọc PO khách mới (khớp theo mã, tên, quy cách 38*5*467 + định lượng, số OCR bị tách), lưu/nạp lại, xuất trọn bộ |
 | `test_ocr.py` | OCR PDF scan: PO Kodi/Tesa dựng thành ảnh rồi đọc lại (Tesa trang chẵn + dải tiêu đề), file ảnh, `--ocr-self-test`, PO khách mới scan bị xoay ngang. Tự bỏ qua nếu máy chưa có Tesseract (`apt install tesseract-ocr tesseract-ocr-vie`) |
-| `test_self_test.py` | `run_self_test()` và import được khi không có Tkinter |
+| `test_self_test.py` | `run_self_test()` và lõi không phụ thuộc Tkinter (đã gỡ giao diện cũ) |
 | `test_gui_smoke.py` | Mở app, xuất trọn bộ, chuyển sang Bước 2 (đánh dấu `gui`) |
 
 ## xfail có chủ đích

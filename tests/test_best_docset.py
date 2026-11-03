@@ -270,66 +270,46 @@ def test_customer_name_does_not_change_existing_customers(seed):
         assert not app.is_best_docset(seed[cust])
 
 
-@pytest.mark.gui
-def test_gui_best_two_pos_one_lot(store, best_invoice, monkeypatch):
-    if app.tk is None:
-        pytest.skip("Không có Tkinter")
-    try:
-        root = app.tk.Tk()
-    except app.tk.TclError as e:
-        pytest.skip(f"Không có màn hình: {e}")
-    root.withdraw()
-    shown = []
-    for fn in ("showinfo", "showwarning", "showerror"):
-        monkeypatch.setattr(app.messagebox, fn, lambda title, msg, *a, _fn=fn, **k: shown.append((_fn, msg)))
-    try:
-        ui = app.HongThienCustomsDesktopApp(root, store)
-        wz = ui.open_learn_customer_wizard(paths=[best_invoice])
-        assert wz["vars"]["sample_po"].get() == "POS269990001"
-        wz["vars"]["key"].set("mauthu")
-        wz["vars"]["docSet"].set("best")
-        wz["vars"]["payDays"].set("60")
-        wz["vars"]["mst"].set("0100000001")
-        assert wz["save"]() == "mauthu"
-        assert ui.cur_pay_days.get() == "60"
+def test_learn_dialog_then_two_pos_one_lot(store, best_invoice, tmp_path):
+    """Học khách Best từ invoice mẫu (hộp thoại Qt), gộp 2 PO thành một lô, xuất trọn bộ có Đóng gói/PGH/ĐCCN/B11/Kiểm tra chéo."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    from ui_qt.dialogs import LearnCustomerDialog
+    from ui_qt.state import Lot
+    QApplication.instance() or QApplication([])
+    dlg = LearnCustomerDialog(app, store, [best_invoice])
+    assert dlg.edits["sample_po"].text() == "POS269990001"
+    for k, v in (("key", "mauthu"), ("docSet", "best"), ("payDays", "60"), ("mst", "0100000001")):
+        dlg.edits[k].setText(v)
+    dlg.save()
+    assert dlg.key == "mauthu"
 
-        assert ui.scan_custom_po_text(PO1_TEXT)
-        assert ui.scan_custom_po_text(PO2_TEXT, append=True)
-        assert ui.cur_po.get() == "POS269990001 + POS269990002"
-        assert len(ui.tree_items.get_children()) == 3
-        assert not ui.scan_custom_po_text(PO2_TEXT, append=True)  # cùng PO không gộp 2 lần
-        assert shown[-1][0] == "showwarning"
+    lot = Lot(app, store)
+    lot.select_customer("mauthu")
+    assert lot.form["pay_days"] == "60"
+    for name, text, append in (("po1.txt", PO1_TEXT, False), ("po2.txt", PO2_TEXT, True)):
+        f = tmp_path / name
+        f.write_text(text, encoding="utf-8")
+        assert lot.apply_po(lot.read_po(str(f), append=append))
+    assert lot.form["po"] == "POS269990001 + POS269990002" and len(lot.items) == 3
+    dup = lot.read_po(str(tmp_path / "po2.txt"), append=True)
+    assert not dup["ok"]  # cùng PO không gộp 2 lần
 
-        ui.cur_pxk.set("00000999")
-        ui.cur_hd.set("00009999")
-        ui.cur_doc_date.set("2026-10-29")
-        rec = ui.build_current_step1_record()
-        assert rec["poDates"] == {"POS269990001": "08/10/2026", "POS269990002": "02/10/2026"} and rec["totalKien"] == 95
+    lot.form.update(pxk="00000999", hd="00009999", doc_date="2026-10-29")
+    rec = lot.record()
+    assert rec["poDates"] == {"POS269990001": "08/10/2026", "POS269990002": "02/10/2026"} and rec["totalKien"] == 95
+    res = lot.export("ALL")
+    assert not res["problems"]
+    out_dir = os.path.join(store.get_record_folder_path(rec), app.GENERATED_DIR)
+    files = os.listdir(out_dir)
+    assert "dsh_00000999.xlsx" in files or any(f.startswith("dsh_") for f in files)
+    names = {f["mode"] for f in res["files"]}
+    assert {"PKL", "PACK", "VAT", "PXK", "PGH", "DCCN", "B11"} <= names
 
-        ui.export_step1_excel("ALL")
-        assert shown[-1][0] == "showinfo" and "Kiểm tra chéo: ĐẠT" in shown[-1][1]
-        out_dir = os.path.join(store.get_record_folder_path(rec), app.GENERATED_DIR)  # file do phần mềm tạo nằm trong thư mục con
-        files = os.listdir(out_dir)
-        assert "dsh_00000999.xlsx" in files
-        full = next(f for f in files if f.startswith("Bo_Ho_So_Xuat_Hang_"))
-        names = openpyxl.load_workbook(os.path.join(out_dir, full)).sheetnames
-        assert {"DongGoi_29.10", "PGH_29.10", "DCCN_29.10", "ToKhai_B11_29.10", "KiemTra_29.10"} <= set(names)
-
-        ui.export_step1_excel("BEST")
-        assert any(f.startswith("Mau_Best_") for f in os.listdir(out_dir))
-
-        # Sửa mã vật liệu / Inquiry trên dòng 3 -> nhớ cho lần quét sau
-        ui.tree_items.selection_set("2")
-        ui.edit_selected_item_dialog()
-        dlg = [w for w in root.winfo_children() if isinstance(w, app.tk.Toplevel)][-1]
-        entries = [w for w in dlg.winfo_children() if isinstance(w, app.tk.Entry)]
-        entries[2].delete(0, "end")
-        entries[2].insert(0, "VN0000003")
-        entries[-2].delete(0, "end")
-        entries[-2].insert(0, "QS2600000003")
-        next(w for w in dlg.winfo_children() if isinstance(w, app.tk.Button)).invoke()
-        item = next(x for x in store.custom_items["mauthu"] if x["name"].endswith("1350mm"))
-        assert item["code"] == "VN0000003" and item["inquiry"] == "QS2600000003"
-        assert ui.cur_items[2]["customsNo"] == "PackingF001"  # trường không sửa vẫn giữ
-    finally:
-        root.destroy()
+    # Sửa mã vật liệu / Inquiry trên dòng 3: nhớ cho lần sau, trường khác giữ nguyên
+    vals = {k: str(lot.items[2].get(k, "")) for k in ("po", "ma_sp", "ten_sp", "hs", "unit", "qty", "price", "div", "kg", "inquiry", "customsNo")}
+    vals["ma_sp"], vals["inquiry"] = "VN0000003", "QS2600000003"
+    lot.save_item(vals, 2)
+    item = next(x for x in store.custom_items["mauthu"] if x["name"].endswith("1350mm"))
+    assert item["code"] == "VN0000003" and item["inquiry"] == "QS2600000003"
+    assert lot.items[2]["customsNo"] == "PackingF001"

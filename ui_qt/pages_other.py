@@ -519,8 +519,12 @@ class RecordsPage(_Page):
         b2 = QPushButton("📁  Mở thư mục hồ sơ")
         b2.setObjectName("sec")
         b2.clicked.connect(self.open_dir)
+        b3 = QPushButton("📊  Xuất sổ theo dõi ra Excel…")
+        b3.setObjectName("sec")
+        b3.clicked.connect(self.export_log)
         row.addWidget(b1)
         row.addWidget(b2)
+        row.addWidget(b3)
         row.addStretch(1)
         self.lay.addLayout(row)
 
@@ -543,6 +547,18 @@ class RecordsPage(_Page):
     def current(self):
         rows = self.table.selectionModel().selectedRows()
         return self.shown[rows[0].row()] if rows else None
+
+    def export_log(self, path=None):
+        if not path:
+            path, _ = QFileDialog.getSaveFileName(self, "Lưu sổ theo dõi hồ sơ", "So_Theo_Doi_Ho_So.xlsx", "Excel (*.xlsx)")
+        if not path:
+            return
+        try:
+            out = self.core.export_master_log(self.store, path)
+        except OSError as e:
+            widgets.warn(self, "Chưa xuất được", f"{e}\nCó thể file đang mở trong Excel.")
+            return
+        widgets.info(self, "Xuất sổ theo dõi", f"Đã lưu sổ theo dõi {len(self.store.records)} hồ sơ tại:\n{out}")
 
     def reopen(self):
         rec = self.current()
@@ -933,6 +949,11 @@ class CustomersPage(_Page):
         self.add_btn.clicked.connect(self.add)
         row.addWidget(self.save_btn)
         row.addWidget(self.add_btn)
+        self.learn_btn = QPushButton("📚  Học khách mới từ chứng từ mẫu…")
+        self.learn_btn.setObjectName("sec")
+        self.learn_btn.setToolTip("Chọn hóa đơn/PXK XML, Invoice Excel, PO mẫu của khách mới: máy đọc thông tin và mã hàng, bạn soát lại rồi lưu.")
+        self.learn_btn.clicked.connect(self.learn)
+        row.addWidget(self.learn_btn)
         self.export_btn = QPushButton("📤  Xuất file học của khách này")
         self.export_btn.setObjectName("sec")
         self.export_btn.setToolTip("Tạo file .json (hồ sơ khách, danh mục hàng, định mức, file mẫu chứng từ) để máy khác nạp ở Cài đặt → Nạp dữ liệu học.")
@@ -984,6 +1005,25 @@ class CustomersPage(_Page):
         self.msg.setText("✅  Đã lưu thông tin khách hàng. Các chứng từ xuất từ giờ sẽ dùng thông tin này.")
         self.refresh(select=key)
         self.changed.emit()
+
+    def learn(self, paths=None):
+        if not paths:
+            paths, _ = QFileDialog.getOpenFileNames(self, "Chọn chứng từ mẫu của khách mới (chọn được nhiều file)", "",
+                                                    "Chứng từ mẫu (*.xml *.xlsx *.xlsm *.pdf *.png *.jpg *.jpeg *.txt)")
+        if not paths:
+            return
+        self.msg.setText("⏳  Đang đọc chứng từ mẫu… file scan có thể mất vài chục giây.")
+        widgets.run_job(self, lambda: self.core.learn_customer_from_documents(list(paths)), lambda d, p=list(paths): self._learned(d, p),
+                        lambda m: self.msg.setText(f"Không đọc được chứng từ mẫu: {m}"))
+
+    def _learned(self, draft, paths):
+        from .dialogs import LearnCustomerDialog
+        self.msg.setText("")
+        dlg = LearnCustomerDialog(self.core, self.store, paths, self, draft=draft)
+        if dlg.exec():
+            self.msg.setText(f"✅  Đã thêm khách “{dlg.key}” với {len(self.store.custom_items.get(dlg.key, []))} mã hàng. Chọn khách này ở Làm chứng từ rồi nạp PO.")
+            self.refresh(select=dlg.key)
+            self.changed.emit()
 
     def export_learned(self, path=None):
         key = self.current_key()
