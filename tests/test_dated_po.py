@@ -275,3 +275,19 @@ def test_tesa_new_po_not_in_erp_still_reads(tmp_path):
     store = app.DedicatedDataStore(base_dir=str(tmp_path / "d"))
     po, lines = app.parse_tesa_po_text(TESA_V2, store.tesa_items, store)
     assert lines[0]["ten_sp"] == "Ống lõi giấy phi 153 x 15 x 1500mm" and lines[0]["read"] == "suy_ra" and "đã thêm mới" in lines[0]["read_note"]
+
+
+def test_tesa_name_comes_from_erp_product_list_of_customer(tmp_path):
+    store = app.DedicatedDataStore(base_dir=str(tmp_path / "d"))
+    store.data_tong = [{"khach": "Tesa", "ten": "Ống lõi giấy phi 153 x 15 x 1500mm - ERP", "ma_hang": "", "ma_erp": "TM91120-001-00099", "kg": 4.5, "kg_nguon": "erp", "kien": 10}]
+    store._dt_cache = {}
+    po, lines = app.parse_tesa_po_text(TESA_V2, store.tesa_items, store)
+    assert lines[0]["ten_sp"] == "Ống lõi giấy phi 153 x 15 x 1500mm - ERP" and lines[0]["ma_sp"] == "TM91120-001-00099"
+    # PO dạng cũ có mã Tesa: tên danh mục có sẵn bị thay bằng tên ERP của khách
+    store.data_tong = [{"khach": "Tesa", "ten": "Ống lõi giấy ERP 76.5x3x1390 Blue", "ma_hang": "39753-91390-00", "ma_erp": "TM91120-001-00007", "kg": 0.858, "kg_nguon": "erp", "kien": 250}]
+    store._dt_cache = {}
+    old = "tesa Purchase Order: 8600123456\n 1 39753-91390-00 Ống 500 EA 29,998.00 1 EA 14,999,000.00\n"
+    r = app.parse_tesa_po_page(old + "@@HDR@@ 8600123456")
+    if r:
+        _po, ls = app.parse_tesa_po_text(old + "@@HDR@@ 8600123456", store.tesa_items, store)
+        assert ls and ls[0]["ten_sp"] == "Ống lõi giấy ERP 76.5x3x1390 Blue"

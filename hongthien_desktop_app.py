@@ -2211,6 +2211,16 @@ def resolve_tesa_item(res, tesa_catalog, erp_catalog=None):
     return None, "", res.get("code", ""), ""
 
 
+def tesa_erp_entry(data_store, code="", hint=""):
+    """Mục danh mục sản phẩm của Tesa trong Data tổng (tên theo ERP): tra theo mã Tesa, không có mã thì theo quy cách trong `hint`."""
+    if data_store is None or not hasattr(data_store, "dt_lookup"):
+        return None
+    try:
+        return data_store.dt_lookup("tesa", hint, code)
+    except Exception:  # noqa: BLE001 - Data tổng hỏng/chưa nạp không được làm hỏng việc đọc PO
+        return None
+
+
 def parse_tesa_po_text(text, tesa_catalog, data_store=None):
     pages = [p.strip() for p in text.split("@@PAGE@@") if p.strip()]
     if not pages:
@@ -2219,6 +2229,11 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
     for p in pages:
         for r2 in parse_tesa_po_page_v2(p):
             item, name, code, src = resolve_tesa_item(r2, tesa_catalog, getattr(data_store, "erp_catalog", None))
+            dt = tesa_erp_entry(data_store, r2["code"], r2["desc"])
+            if dt and dt.get("ten"):  # tên theo danh mục sản phẩm của khách trong ERP (Data tổng) là tên chuẩn
+                name, src = re.sub(r"\s+", " ", str(dt["ten"])).strip(), "erp"
+                code = code or str(dt.get("ma_erp") or dt.get("ma_hang") or "")
+                item = next((x for x in tesa_catalog if x.get("name") == name or (code and x.get("code") == code)), None)
             if not name:  # không có trong danh mục Tesa lẫn ERP: dựng tên từ quy cách trên PO, người dùng bổ sung kg/SL kiện
                 dims = desc_dims(r2["desc"])
                 name = ("Ống lõi giấy phi " + " x ".join(str(int(float(d))) if float(d) == int(float(d)) else d for d in dims) + "mm") if dims else (r2["desc"] or "Ống lõi giấy")
@@ -2250,6 +2265,9 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
             continue
         known = next((x for x in tesa_catalog if x["code"] == res["code"]), None)
         name = known["name"] if known else f"Ống lõi giấy {res['desc']} ({res['code']})"
+        dt = tesa_erp_entry(data_store, res["code"], name)
+        if dt and dt.get("ten"):  # tên theo danh mục sản phẩm của khách trong ERP (Data tổng)
+            name = re.sub(r"\s+", " ", str(dt["ten"])).strip()
         mem = data_store.get_item_norm(name) if data_store else None
         div = mem["div"] if (mem and mem.get("div")) else (known["div"] if known else 0)
         kg = mem["kg"] if (mem and mem.get("kg")) else (known["kg"] if known else 0)
