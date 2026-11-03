@@ -91,3 +91,32 @@ def test_able_pdf_end_to_end_when_sample_present(tmp_path):
     assert r["ok"] and len(r["items"]) == 41 and r["read_report"]["loi"] == 0
     assert sum(x["qty"] for x in r["items"]) == 14776 + 5520 + 2160  # tổng SL ba trang theo PO
     assert "khớp PO" in r["msg"]
+
+
+def test_unrotate_point_maps_deskewed_coordinates_back_to_original():
+    from PIL import Image, ImageDraw
+    W, H = 600, 400
+    for angle in (1.5, -1.0, 0.5):
+        im = Image.new("L", (W, H), 255)
+        ImageDraw.Draw(im).rectangle((96, 296, 104, 304), fill=0)  # điểm đánh dấu quanh (100, 300)
+        rot = im.rotate(angle, resample=Image.BILINEAR, fillcolor=255).point(lambda v: 255 if v < 128 else 0)
+        x0, y0, x1, y1 = rot.getbbox()
+        x, y = po_scan.unrotate_point((x0 + x1) / 2, (y0 + y1) / 2, angle, W, H)
+        assert abs(x - 100) < 1.5 and abs(y - 300) < 1.5
+
+
+def test_viewer_highlight_draws_box_on_selected_row(qapp, tmp_path):
+    from ui_qt.po_viewer import PoViewer
+    pdf = tmp_path / "po.pdf"
+    app.make_scanned_pdf(str(pdf), ["Trang 1"])
+    v = PoViewer(app)
+    v.resize(500, 600)
+    v.show_page(str(pdf), 0, None)
+    plain = v.label.pixmap().toImage()
+    v.show_page(str(pdf), 0, [[0.1, 0.4], [0.9, 0.4], [0.9, 0.45], [0.1, 0.45]])
+    marked = v.label.pixmap().toImage()
+    H = marked.height()
+    assert plain.size() == marked.size() and plain != marked
+    y = int(0.425 * H)
+    assert marked.pixelColor(marked.width() // 2, y) != plain.pixelColor(marked.width() // 2, y)  # vùng dòng đã đổi màu
+    assert marked.pixelColor(marked.width() // 2, int(0.2 * H)) == plain.pixelColor(marked.width() // 2, int(0.2 * H))  # ngoài dòng giữ nguyên

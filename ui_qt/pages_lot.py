@@ -379,7 +379,7 @@ class ItemsStep(QWidget):
     # ---- khung xem PO -----------------------------------------------------------
     def po_file_of(self, idx):
         it = self.lot.items[idx] if idx is not None and 0 <= idx < len(self.lot.items) else {}
-        return it.get("po_file") or (self.lot.po_files[-1] if self.lot.po_files else ""), max(0, int(it.get("page") or 1) - 1)
+        return it.get("po_file") or (self.lot.po_files[-1] if self.lot.po_files else ""), max(0, int(it.get("page") or 1) - 1), it.get("box")
 
     def toggle_viewer(self):
         if not self.viewer.isHidden():
@@ -407,8 +407,8 @@ class ItemsStep(QWidget):
         self.layout_columns()
         self.refresh_labels()
         self.split.setSizes([max(520, self.width() * 58 // 100), max(360, self.width() * 42 // 100)])
-        path, page = self.po_file_of(self.selected() if self.selected() is not None else (self.lot.attention_rows() or [0])[0])
-        self.viewer.show_page(path, page)
+        path, page, box = self.po_file_of(self.selected() if self.selected() is not None else (self.lot.attention_rows() or [0])[0])
+        self.viewer.show_page(path, page, box)
         self.view_btn.setText(" Ẩn khung xem PO")
 
     def hide_viewer(self):
@@ -420,9 +420,9 @@ class ItemsStep(QWidget):
 
     def follow_selection(self):
         if not self.viewer.isHidden() and self.selected() is not None:
-            path, page = self.po_file_of(self.selected())
-            if path != self.viewer.file or page != self.viewer.page:
-                self.viewer.show_page(path, page)
+            path, page, box = self.po_file_of(self.selected())
+            if path != self.viewer.file or page != self.viewer.page or box != self.viewer.box:
+                self.viewer.show_page(path, page, box)
 
     def set_filter(self, key):
         self.filter = key

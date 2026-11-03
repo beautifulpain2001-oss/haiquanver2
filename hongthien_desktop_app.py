@@ -4898,11 +4898,11 @@ def lines_from_able_scan(rows, prof, catalog, store, tare_val=0.0):
         if r["read"] == "loi":
             lines.append({"stt": len(lines) + 1, "po": r.get("po", ""), "hs": (prof.get("customs") or {}).get("hs", "") or "48229090", "ma_sp": "", "ten_sp": "", "ten_hq": "",
                           "unit": prof.get("unit", "cái"), "qty": 0, "price": 0, "amount": 0, "div": 0, "kg": 0, "kien": 0, "net": 0.0, "gross": 0.0,
-                          "tare": tare_val, "read": "loi", "read_note": r["read_note"], "ref": r.get("ref", ""), "page": r.get("page", 0)})
+                          "tare": tare_val, "read": "loi", "read_note": r["read_note"], "ref": r.get("ref", ""), "page": r.get("page", 0), "box": r.get("box")})
             continue
         one = lines_from_erp_rows([{"code": r["code"], "desc": r["name"], "qty": r["qty"], "price": r["price"]}], r.get("po", ""), prof, catalog,
                                   data_store=store, tare_val=tare_val)[0]
-        one.update({"stt": len(lines) + 1, "read": r["read"], "read_note": r["read_note"], "ref": r.get("ref", ""), "page": r.get("page", 0)})
+        one.update({"stt": len(lines) + 1, "read": r["read"], "read_note": r["read_note"], "ref": r.get("ref", ""), "page": r.get("page", 0), "box": r.get("box")})
         lines.append(one)
     return lines
 

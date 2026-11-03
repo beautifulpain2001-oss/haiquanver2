@@ -6,7 +6,8 @@ PDF dựng bằng pypdfium2 (đã có sẵn trong phần mềm), ảnh mở bằ
 import os
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtCore import QPointF
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 IMAGE_EXT = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
@@ -20,7 +21,7 @@ class PoViewer(QWidget):
     def __init__(self, core):
         super().__init__()
         self.core = core
-        self.file, self.page, self.pages, self.zoom = "", 0, 0, 1.0
+        self.file, self.page, self.pages, self.zoom, self.box = "", 0, 0, 1.0, None
         self.cache = {}
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -95,7 +96,28 @@ class PoViewer(QWidget):
         self.cache[key] = pm
         return pm
 
-    def show_page(self, path, page=0):
+    def _highlighted(self, pm, box):
+        """Bản sao trang có tô sáng dòng đang chọn: nền vàng trong, viền cam, mũi tên bên trái để thấy ngay cả khi PO nhiều dòng sát nhau."""
+        if not box or len(box) != 4:
+            return pm
+        out = QPixmap(pm)
+        p = QPainter(out)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        W, H = pm.width(), pm.height()
+        poly = QPolygonF([QPointF(x * W, y * H) for x, y in box])
+        p.setPen(QPen(QColor("#EA580C"), 2.5))
+        p.setBrush(QColor(255, 214, 0, 80))
+        p.drawPolygon(poly)
+        mid_y = sum(y for _x, y in box) / 4 * H
+        left = min(x for x, _y in box) * W
+        arrow = QPolygonF([QPointF(left - 22, mid_y - 9), QPointF(left - 4, mid_y), QPointF(left - 22, mid_y + 9)])
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("#EA580C"))
+        p.drawPolygon(arrow)
+        p.end()
+        return out
+
+    def show_page(self, path, page=0, box=None):
         if not self.can_view(path):
             self.file, self.pages = "", 0
             self.label.setText("PO này là file Excel hoặc chưa còn trên máy: mở bằng Excel để so.\n(Chỉ xem được PO dạng PDF hoặc ảnh.)")
@@ -109,17 +131,21 @@ class PoViewer(QWidget):
             self.label.setText(f"Không mở được PO để xem: {e}")
             self.label.adjustSize()
             return
-        self.file, self.page = path, max(0, min(page, self.pages - 1))
-        pm = self._render(path, self.page)
+        self.file, self.page, self.box = path, max(0, min(page, self.pages - 1)), box
+        pm = self._highlighted(self._render(path, self.page), box)
         self.label.setPixmap(pm)
         self.label.resize(pm.size())
+        if box:  # cuộn để dòng đang chọn nằm giữa khung xem
+            cy = int(sum(y for _x, y in box) / 4 * pm.height())
+            bar = self.scroll.verticalScrollBar()
+            bar.setValue(max(0, cy - self.scroll.viewport().height() // 2))
         self.title.setText(f"Xem PO — {os.path.basename(path)} · trang {self.page + 1}/{self.pages}")
         self._buttons()
 
     def set_zoom(self, z):
         self.zoom = max(0.4, min(3.0, z))
         if self.file:
-            self.show_page(self.file, self.page)
+            self.show_page(self.file, self.page, self.box)
 
     def _buttons(self):
         self.prev.setEnabled(bool(self.file) and self.page > 0)

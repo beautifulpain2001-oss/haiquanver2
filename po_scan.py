@@ -42,8 +42,8 @@ def runs(flags, gap=4):
     return [int(sum(r) / len(r)) for r in out]
 
 
-def deskew(img):
-    """Xoay nhẹ cho đường kẻ ngang thật thẳng (scan hay lệch 0.3-1 độ): chọn góc làm các vạch ngang sắc nhất."""
+def deskew_angle(img):
+    """Góc xoay nhẹ (độ) làm các đường kẻ ngang thật thẳng (scan hay lệch 0.3-1 độ): chọn góc làm các vạch ngang sắc nhất."""
     small = img.resize((img.width // 4, img.height // 4), BOX)
     best_a, best_s = 0.0, -1.0
     a = -1.5
@@ -54,7 +54,21 @@ def deskew(img):
         if s > best_s:
             best_a, best_s = a, s
         a = round(a + 0.25, 2)
-    return img.rotate(best_a, resample=Image.BILINEAR, fillcolor=255) if abs(best_a) > 1e-6 else img
+    return best_a
+
+
+def deskew(img):
+    a = deskew_angle(img)
+    return img.rotate(a, resample=Image.BILINEAR, fillcolor=255) if abs(a) > 1e-6 else img
+
+
+def unrotate_point(x, y, angle, W, H):
+    """Điểm (x, y) trên ảnh đã xoay `angle` độ (PIL rotate, ngược chiều kim đồng hồ, quanh tâm) -> vị trí tương ứng trên ảnh gốc chưa xoay."""
+    import math
+    a = math.radians(angle)
+    cx, cy = W / 2.0, H / 2.0
+    dx, dy = x - cx, y - cy
+    return cx + dx * math.cos(a) - dy * math.sin(a), cy + dx * math.sin(a) + dy * math.cos(a)
 
 
 # ------------------------------------------------------------------ khung bảng
@@ -232,8 +246,9 @@ def solve_row(qs, ps, ams, spec_digits, idx, in_hint=None):
 
 def read_able_page(img, idx, page_no=1, on_row=None):
     """Đọc một trang PO Able. Trả (số hợp đồng, dòng [dict], tổng SL, tổng tiền, ghi chú)."""
-    img = deskew(img)
+    angle = deskew_angle(img)
     W, H = img.size
+    img = img.rotate(angle, resample=Image.BILINEAR, fillcolor=255) if abs(angle) > 1e-6 else img
     ys, xs = table_grid(img)
     if not ys or len(xs) < 7:
         return "", [], None, None, "không thấy khung bảng"
@@ -302,7 +317,10 @@ def read_able_page(img, idx, page_no=1, on_row=None):
         ams = list(dict.fromkeys(v for x in r["amount_t"] for v in vnd_candidates(x)))
         sol = solve_row(qs, ps, ams, r["digits"], idx, in_flags[i - 1])
         ref = re.search(r"VN?\d{4}-\d{4}-\d{3}|20\d{2}-\d{3,4}-\d{3}", r["ref_t"]) or None
-        base = {"page": page_no, "idx": i, "spec_t": r["spec_t"], "ref": (ref.group(0) if ref else r["ref_t"]), "po": po}
+        y0, y1 = r["y"]
+        # khung của dòng trên trang PO gốc (toạ độ 0..1 theo bề rộng/cao trang, đã bù góc xoay) để tô sáng khi chọn dòng
+        box = [[round(px / W, 4), round(py / H, 4)] for px, py in (unrotate_point(x, y, angle, W, H) for x, y in ((xs[0], y0), (xs[-1], y0), (xs[-1], y1), (xs[0], y1)))]
+        base = {"page": page_no, "idx": i, "spec_t": r["spec_t"], "ref": (ref.group(0) if ref else r["ref_t"]), "po": po, "box": box}
         if sol:
             item, qty, price, amount, how, nc = sol
             out.append({**base, "code": item["code"], "name": item["name"], "qty": qty, "price": price, "amount": amount, "read": how,
