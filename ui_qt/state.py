@@ -60,9 +60,10 @@ class Lot:
         return bool(self.customer) and self.customer not in self.core.BUILTIN_CUSTOMERS
 
     # ---- nạp PO ----------------------------------------------------------------
-    def read_po(self, path, append=False):
-        """Đọc PO (chạy được ở luồng nền: không đụng trạng thái). Trả kết quả để `apply_po` áp dụng."""
-        res = self.core.lot_load_po(self.store, path, self.customer, self.form.get("tare", ""), self.items, append, self.po_dates)
+    def read_po(self, path, append=False, progress=None):
+        """Đọc PO (chạy được ở luồng nền: không đụng trạng thái). Trả kết quả để `apply_po` áp dụng.
+        progress(text, fraction) báo tiến trình đọc (nếu có)."""
+        res = self.core.lot_load_po(self.store, path, self.customer, self.form.get("tare", ""), self.items, append, self.po_dates, progress)
         res["path"], res["append"] = path, append
         return res
 
@@ -75,7 +76,12 @@ class Lot:
         if res.get("path"):
             self.po_files = (self.po_files if res.get("append") else []) + [res["path"]]
         self.items = res["items"]
-        self.read_text = (res.get("read_report") or {}).get("text", "")
+        catalog = self.store.items_for_customer(self.customer) if self.customer else []
+        self.core.mark_read(self.items, catalog)
+        for it in self.items:  # nhớ file PO và trang của từng dòng để mở đúng chỗ khi cần soát
+            it.setdefault("po_file", res.get("path") or "")
+        rep = res.get("read_report") or self.core.read_report(self.items)
+        self.read_text = rep.get("text", "") if res.get("read_report") else ""
         self.po_dates = res["po_dates"]
         self.form["po"] = res["po"] or self.form["po"]
         if res["po_date"]:

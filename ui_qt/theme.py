@@ -69,6 +69,7 @@ QPushButton#chip:hover {{ background: #EDF2F7; }}
 QPushButton#chip:checked {{ background: {NAVY}; color: #FFFFFF; border-color: {NAVY}; font-weight: 600; }}
 QPushButton#chip:focus {{ border: 1px solid #3F83F8; }}
 QLineEdit, QComboBox {{ background: #FFFFFF; border: 1px solid {LINE}; border-radius: 6px; padding: 6px 10px; min-height: 24px; font-size: 11pt; }}
+QLineEdit[warn="true"] {{ border: 1px solid #C27803; background: #FFFBEB; }}
 QLineEdit:focus, QComboBox:focus {{ border: 1px solid {NAVY}; }}
 QTableWidget {{ font-size: 10pt; background: #FFFFFF; alternate-background-color: #F7FAFC; border: 1px solid {LINE}; border-radius: 6px; gridline-color: #EDF2F7; }}
 QHeaderView::section {{ background: #EDF2F7; color: {NAVY}; font-size: 10pt; font-weight: 600; border: none; border-right: 1px solid {LINE}; padding: 8px 4px; }}

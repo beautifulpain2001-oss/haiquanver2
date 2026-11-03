@@ -16,14 +16,15 @@ class Job(QThread):
 
     done = Signal(object)
     failed = Signal(str)
+    progress = Signal(str, float)
 
-    def __init__(self, fn, parent=None):
+    def __init__(self, fn, parent=None, with_progress=False):
         super().__init__(parent)
-        self.fn = fn
+        self.fn, self.with_progress = fn, with_progress
 
     def run(self):
         try:
-            self.done.emit(self.fn())
+            self.done.emit(self.fn(self.progress.emit) if self.with_progress else self.fn())
         except Exception as e:  # noqa: BLE001 - báo lỗi cho người dùng thay vì để luồng chết lặng lẽ
             self.error_trace = traceback.format_exc()
             self.failed.emit(str(e) or e.__class__.__name__)
@@ -32,9 +33,12 @@ class Job(QThread):
 _JOBS = set()
 
 
-def run_job(owner, fn, on_done, on_failed=None):
-    """Giữ tham chiếu tới luồng trong `owner` để không bị dọn mất khi đang chạy."""
-    job = Job(fn, owner)
+def run_job(owner, fn, on_done, on_failed=None, on_progress=None):
+    """Giữ tham chiếu tới luồng trong `owner` để không bị dọn mất khi đang chạy.
+    on_progress(text, fraction): khi có, `fn` được gọi với một hàm báo tiến trình `report(text, fraction)`."""
+    job = Job(fn, owner, with_progress=on_progress is not None)
+    if on_progress is not None:
+        job.progress.connect(on_progress)
     owner._job = job
     _JOBS.add(job)
     job.finished.connect(lambda j=job: _JOBS.discard(j))

@@ -230,7 +230,7 @@ def solve_row(qs, ps, ams, spec_digits, idx, in_hint=None):
     return pick[1], int(qty), int(round(price)), int(round(qty * price)), how, len(cands)
 
 
-def read_able_page(img, idx, page_no=1):
+def read_able_page(img, idx, page_no=1, on_row=None):
     """Đọc một trang PO Able. Trả (số hợp đồng, dòng [dict], tổng SL, tổng tiền, ghi chú)."""
     img = deskew(img)
     W, H = img.size
@@ -258,6 +258,8 @@ def read_able_page(img, idx, page_no=1):
             r["amount_t"].append(cell("amount", "--psm 8 -c tessedit_char_whitelist=0123456789,."))
         ink = img.crop((ncol[0] + 8, y0 + 8, ncol[1] - 8, y1 - 8)).point(lambda v: 255 if v < 150 else 0).getbbox()
         r["name_w"] = (ink[2] - ink[0]) if ink else 0
+        if on_row:
+            on_row()
         return r
 
     from concurrent.futures import ThreadPoolExecutor
@@ -318,23 +320,34 @@ def read_able_page(img, idx, page_no=1):
     return po, out, total_q, total_a, ""
 
 
-def read_able_pdf(core, path, catalog, scale=4):
+def read_able_pdf(core, path, catalog, scale=4, progress=None):
     """Đọc mọi trang PO Able dạng scan. Trả {rows, pages, check}. rows = danh sách dòng có trạng thái; check = câu nói về việc tổng có khớp PO.
-    [] nếu không phải bảng Able / không đọc được gì."""
+    progress(text, fraction 0..1) được gọi trong lúc đọc để giao diện hiện tiến trình. [] nếu không phải bảng Able / không đọc được gì."""
     if core.pdfium is None or pytesseract is None:
         return {"rows": [], "pages": 0, "check": ""}
     idx = _catalog_index(catalog)
     if not idx:
         return {"rows": [], "pages": 0, "check": ""}
+    import threading
     doc = core.pdfium.PdfDocument(path)
+    total_pages = len(doc)
     rows, notes, pages = [], [], 0
-    for n in range(len(doc)):
+    lock = threading.Lock()
+    for n in range(total_pages):
+        if progress:
+            progress(f"Đang đọc trang {n + 1}/{total_pages}…", n / total_pages)
         img = core.auto_rotate_scan(doc[n].render(scale=scale).to_pil()).convert("L")
-        po, got, tq, ta, why = read_able_page(img, idx, n + 1)
+        done = [0]
+
+        def on_row(n=n):
+            with lock:
+                done[0] += 1
+                if progress:
+                    progress(f"Đang đọc trang {n + 1}/{total_pages} · {done[0]} dòng đã xong", (n + min(0.95, done[0] / 40.0)) / total_pages)
+        po, got, tq, ta, why = read_able_page(img, idx, n + 1, on_row)
         if not got:
             continue
         pages += 1
-        sq = sum(r["qty"] for r in got)
         sa = sum(r["amount"] for r in got)
         bad = sum(1 for r in got if r["read"] == "loi")
         if ta and abs(sa - ta) <= 1 and not bad:
@@ -342,4 +355,6 @@ def read_able_pdf(core, path, catalog, scale=4):
         elif ta:
             notes.append(f"Trang {n + 1}: tổng tiền đọc được {sa:,.0f} ≠ tổng trên PO {ta:,.0f} — có dòng sai hoặc chưa đọc")
         rows += got
+    if progress:
+        progress("Đã đọc xong, đang kiểm tra…", 1.0)
     return {"rows": rows, "pages": pages, "check": "; ".join(notes)}

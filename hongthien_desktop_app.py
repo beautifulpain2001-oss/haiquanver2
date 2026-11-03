@@ -4871,6 +4871,25 @@ def read_report(lines, check=""):
     return {**n, "total": total, "bad_rows": bad, "warn_rows": warn, "text": text}
 
 
+def mark_read(items, catalog=None):
+    """Gắn trạng thái đọc cho dòng chưa có (mọi khách): ok = có SL, đơn giá và nhận ra mặt hàng trong danh mục; suy_ra = mặt hàng/đơn giá chưa chắc;
+    loi = thiếu số lượng. Dòng đã có trạng thái (đọc theo ô, nhập tay) giữ nguyên."""
+    known = {str(c.get("code") or "") for c in (catalog or []) if c.get("code")} | {c.get("name") for c in (catalog or [])}
+    for it in items:
+        if it.get("read"):
+            continue
+        qty, price = float(it.get("qty") or 0), float(it.get("price") or 0)
+        if qty <= 0:
+            it["read"], it["read_note"] = "loi", "Chưa có số lượng"
+        elif price <= 0:
+            it["read"], it["read_note"] = "suy_ra", "Chưa có đơn giá"
+        elif known and (it.get("ma_sp") not in known and it.get("ten_sp") not in known):
+            it["read"], it["read_note"] = "suy_ra", "Mặt hàng chưa có trong danh mục của khách"
+        else:
+            it["read"], it["read_note"] = "ok", ""
+    return items
+
+
 def lines_from_able_scan(rows, prof, catalog, store, tare_val=0.0):
     """Dòng hàng từ po_scan.read_able_pdf: dòng đọc được dựng như dòng PO thường; dòng chưa đọc được thành dòng trống để nhập tay.
     Mỗi dòng mang read (ok/suy_ra/loi), read_note và ref (mã tham chiếu cột ghi chú của PO)."""
@@ -4879,11 +4898,11 @@ def lines_from_able_scan(rows, prof, catalog, store, tare_val=0.0):
         if r["read"] == "loi":
             lines.append({"stt": len(lines) + 1, "po": r.get("po", ""), "hs": (prof.get("customs") or {}).get("hs", "") or "48229090", "ma_sp": "", "ten_sp": "", "ten_hq": "",
                           "unit": prof.get("unit", "cái"), "qty": 0, "price": 0, "amount": 0, "div": 0, "kg": 0, "kien": 0, "net": 0.0, "gross": 0.0,
-                          "tare": tare_val, "read": "loi", "read_note": r["read_note"], "ref": r.get("ref", "")})
+                          "tare": tare_val, "read": "loi", "read_note": r["read_note"], "ref": r.get("ref", ""), "page": r.get("page", 0)})
             continue
         one = lines_from_erp_rows([{"code": r["code"], "desc": r["name"], "qty": r["qty"], "price": r["price"]}], r.get("po", ""), prof, catalog,
                                   data_store=store, tare_val=tare_val)[0]
-        one.update({"stt": len(lines) + 1, "read": r["read"], "read_note": r["read_note"], "ref": r.get("ref", "")})
+        one.update({"stt": len(lines) + 1, "read": r["read"], "read_note": r["read_note"], "ref": r.get("ref", ""), "page": r.get("page", 0)})
         lines.append(one)
     return lines
 
@@ -5565,7 +5584,7 @@ def best_scan_lines(path, prof, store, po_no, po_date, tare_v):
     return lines if len(lines) == len(rows) else []
 
 
-def lot_load_po(store, path, customer, tare_text="", existing_items=None, append=False, po_dates=None):
+def lot_load_po(store, path, customer, tare_text="", existing_items=None, append=False, po_dates=None, progress=None):
     """Đọc file PO của khách `customer` (offline). Không đụng giao diện.
 
     Trả dict: ok, msg (tiếng Việt), customer (có thể đổi theo nhận dạng file), po, po_date, po_dates,
@@ -5588,7 +5607,7 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
             tare_v = 0.0
         scan_rep = None
         if is_able(prof) and ext == ".pdf" and po_scan is not None and not _pdf_has_text(path):
-            scan_rep = po_scan.read_able_pdf(sys.modules[__name__], path, store.items_for_customer(customer))  # PO scan: đọc từng ô của bảng, mỗi trang một PO
+            scan_rep = po_scan.read_able_pdf(sys.modules[__name__], path, store.items_for_customer(customer), progress=progress)  # PO scan: đọc từng ô của bảng, mỗi trang một PO
         raw_text = "" if (scan_rep and scan_rep["rows"]) else read_document_text(path)  # đọc được theo ô rồi thì khỏi OCR cả trang
         po_no, po_date, lines = parse_generic_po_text(raw_text, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
         pcs_rows = parse_pcs_note_rows(raw_text)

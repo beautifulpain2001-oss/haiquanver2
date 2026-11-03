@@ -63,7 +63,7 @@ def test_settings_page_shows_data_folder(win, store):
 
 def test_step_bar_and_buttons(win):
     lot = win.lot
-    assert len(lot.bar.labels) == 5 and lot.bar.current == 0 and not lot.back.isEnabled()
+    assert len(lot.bar.labels) == 4 and lot.bar.current == 0 and not lot.back.isEnabled()
     assert not lot.next.isEnabled()  # chưa chọn khách thì chưa đi tiếp
     lot.step1.cards["kodi"].click()
     assert lot.step1.customer == "kodi" and lot.next.isEnabled()
@@ -71,12 +71,10 @@ def test_step_bar_and_buttons(win):
     assert lot.bar.current == 1 and lot.stack.currentWidget() is lot.step2 and lot.next.isEnabled()
     lot.next.click()
     lot.next.click()
-    assert lot.bar.current == 3 and lot.stack.currentIndex() == 3
-    assert [lb.property("step") for lb in lot.bar.labels] == ["done", "done", "done", "current", "todo"]
-    lot.next.click()
-    assert lot.bar.current == 4 and not lot.next.isEnabled()
+    assert lot.bar.current == 3 and lot.stack.currentIndex() == 3 and not lot.next.isEnabled()  # thông tin chuyến và xuất hồ sơ chung một bước
+    assert [lb.property("step") for lb in lot.bar.labels] == ["done", "done", "done", "current"]
     lot.go(99)
-    assert lot.bar.current == 4
+    assert lot.bar.current == 3
     lot.go(-5)
     assert lot.bar.current == 0 and not lot.back.isEnabled()
 
@@ -573,3 +571,70 @@ def test_customers_page_has_learn_button_and_records_export(win, store, tmp_path
     import openpyxl
     ws = openpyxl.load_workbook(out).active
     assert ws.cell(1, 3).value == "Khách hàng" and ws.max_row == 1 + len(store.records)
+
+
+def test_po_read_marks_status_for_every_customer_and_shows_banner(win, tmp_path):
+    """Trạng thái đọc từng dòng áp cho mọi khách, không chỉ Able."""
+    load_kodi_po(win, tmp_path)
+    lot = win.lot.lot
+    assert lot.items and all(it.get("read") in ("ok", "suy_ra", "loi") for it in lot.items)
+    win.lot.go(2)
+    st = win.lot.step3
+    assert not st.table.isColumnHidden(1) and st.banner.isVisibleTo(st)
+    assert st.table.item(0, 1).text() in ("✅ Đọc đủ", "🟡 Suy ra, kiểm tra", "❌ Chưa đọc được")
+
+
+def test_load_po_reports_progress_and_hides_bar_when_done(win, tmp_path, monkeypatch):
+    seen = []
+    orig = win.lot.lot.read_po
+
+    def fake(path, append=False, progress=None):
+        if progress:
+            progress("Đang đọc trang 1/2…", 0.25)
+            progress("Đang đọc trang 2/2 · 5 dòng đã xong", 0.75)
+        return orig(path, append)
+
+    monkeypatch.setattr(win.lot.lot, "read_po", fake)
+    win.lot.step1.cards["kodi"].click()
+    st = win.lot.step2
+    monkeypatch.setattr(st, "on_progress", lambda t, f, _o=st.on_progress: (seen.append((t, f)), _o(t, f)))
+    f = tmp_path / "po.pdf"
+    f.write_bytes(b"%PDF-1.4")
+    st.load_file(str(f))
+    wait(win, lambda: bool(win.lot.lot.items))
+    assert [round(x[1], 2) for x in seen] == [0.25, 0.75] and "trang 2/2" in seen[-1][0]
+    assert not st.busy.isVisible()
+
+
+def test_po_viewer_opens_beside_table_and_follows_selected_row(win, tmp_path):
+    pdf = tmp_path / "po.pdf"
+    core.make_scanned_pdf(str(pdf), ["Trang 1", "Trang 2"])
+    win.lot.step1.cards["kodi"].click()
+    lot = win.lot.lot
+    base = dict(lot.new_item_values(), ten_sp="Hàng A", qty=10, price=100, kg=0.1, div=5)
+    lot.items = [dict(lot.core.lot_item_from_values(win.store, "kodi", base, "1.0"), read="ok", page=1, po_file=str(pdf)),
+                 dict(lot.core.lot_item_from_values(win.store, "kodi", dict(base, ten_sp="Hàng B"), "1.0"), read="suy_ra", page=2, po_file=str(pdf))]
+    lot.po_files = [str(pdf)]
+    win.lot.go(2)
+    st = win.lot.step3
+    assert st.viewer.isVisibleTo(st) and st.viewer.pages == 2  # có dòng cần soát: khung xem PO mở sẵn
+    st.table.selectRow(1)
+    assert st.viewer.page == 1 and "trang 2/2" in st.viewer.title.text()
+    st.table.selectRow(0)
+    assert st.viewer.page == 0
+    st.hide_viewer()
+    assert not st.viewer.isVisibleTo(st)
+
+
+def test_finish_step_merges_info_and_export_and_flags_missing_numbers(win):
+    win.lot.step1.cards["kodi"].click()
+    win.lot.go(3)
+    fin = win.lot.finish
+    assert fin.info is win.lot.step4 and fin.export is win.lot.step5 and win.lot.stack.currentWidget() is fin
+    e = win.lot.step4.edits["pxk"]
+    win.lot.lot.form["pxk"] = ""
+    win.lot.step4.mark_missing()
+    assert e.property("warn") is True and "Chưa có số PXK" in e.placeholderText()
+    e.setText("0000777")
+    win.lot.step4.on_edit("pxk", "0000777")
+    assert e.property("warn") is False

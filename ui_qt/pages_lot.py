@@ -7,15 +7,16 @@ from shiboken6 import isValid
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame, QGridLayout, QGroupBox,
-    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QProgressBar, QPushButton, QScrollArea, QStackedWidget,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QProgressBar, QPushButton, QScrollArea, QSplitter, QStackedWidget,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from . import theme, widgets
 from .dialogs import ItemDialog, LookupDialog
+from .po_viewer import PoViewer
 from .state import Lot
 
-STEPS = ["① Chọn khách hàng", "② Nạp file PO", "③ Kiểm tra dòng hàng", "④ Thông tin chuyến hàng", "⑤ Xuất & lưu hồ sơ"]
+STEPS = ["① Chọn khách hàng", "② Nạp file PO", "③ Kiểm tra dòng hàng", "④ Thông tin chuyến & xuất hồ sơ"]
 def _label(text, name=None, wrap=False):
     lb = QLabel(text)
     if name:
@@ -167,7 +168,7 @@ class PoStep(QWidget):
         self.busy = QProgressBar()
         self.busy.setRange(0, 0)
         self.busy.setTextVisible(False)
-        self.busy.setFixedHeight(8)
+        self.busy.setFixedHeight(10)
         self.busy.hide()
         lay.addWidget(self.busy)
         self.status = _label("", "hint", wrap=True)
@@ -207,7 +208,14 @@ class PoStep(QWidget):
         self.drop.setEnabled(False)
         self.add_po.setEnabled(False)
         self.set_status("Đang đọc PO… file scan có thể mất vài chục giây, vui lòng chờ.", ok=None)
-        widgets.run_job(self, lambda: self.lot.read_po(path, append), self.on_loaded, self.on_failed)
+        self.busy.setRange(0, 0)  # chưa biết tiến độ: thanh chạy; khi có số trang/dòng thì chuyển sang phần trăm
+        widgets.run_job(self, lambda report: self.lot.read_po(path, append, report), self.on_loaded, self.on_failed, self.on_progress)
+
+    def on_progress(self, text, frac):
+        if self.busy.maximum() == 0:
+            self.busy.setRange(0, 100)
+        self.busy.setValue(int(max(0.0, min(1.0, frac)) * 100))
+        self.set_status(f"{text}  ({int(frac * 100)}%)", ok=None)
 
     def _idle(self):
         self.busy.hide()
@@ -301,17 +309,20 @@ class ItemsStep(QWidget):
         self.lookup_btn.setToolTip("Gõ mã, tên hoặc quy cách (VD 467 250g) rồi chọn mặt hàng và nhập số lượng. Ctrl+F")
         self.lookup_btn.clicked.connect(self.lookup)
         bar.addWidget(self.lookup_btn)
-        for text, fn in (("➕  Thêm dòng trống", self.add), ("✏  Sửa dòng", self.edit), ("🗑  Xóa dòng", self.delete), ("🔄  Tính lại bì / trọng lượng", self.recalc)):
+        for text, fn in (("➕  Thêm dòng trống", self.add), ("✏  Sửa dòng", self.edit), ("🗑  Xóa dòng", self.delete), ("🔄  Tính lại bì", self.recalc)):
             b = QPushButton(text)
             b.setObjectName("dng" if "Xóa" in text else "sec")  # nút xóa màu đỏ để khỏi bấm nhầm
             b.clicked.connect(fn)
             bar.addWidget(b)
         bar.addStretch(1)
+        self.view_btn = QPushButton("📄  Xem PO")
+        self.view_btn.setObjectName("sec")
+        self.view_btn.setToolTip("Mở khung xem file PO cạnh bảng để so số liệu. Chọn dòng thì nhảy tới đúng trang.")
+        self.view_btn.clicked.connect(self.toggle_viewer)
         self.next_btn = QPushButton("⏭  Dòng cần xem tiếp")
         self.next_btn.setObjectName("sec")
         self.next_btn.setToolTip("Nhảy tới dòng chưa đọc được / phải suy ra. F3")
         self.next_btn.clicked.connect(self.goto_next)
-        bar.addWidget(self.next_btn)
         lay.addLayout(bar)
         # lọc nhanh theo trạng thái đọc
         self.chips = QHBoxLayout()
@@ -324,6 +335,8 @@ class ItemsStep(QWidget):
             self.chips.addWidget(b)
             self.chip_btns[key] = b
         self.chips.addStretch(1)
+        self.chips.addWidget(self.next_btn)
+        self.chips.addWidget(self.view_btn)
         self.chip_wrap = QWidget()
         self.chip_wrap.setLayout(self.chips)
         self.chips.setContentsMargins(0, 0, 0, 0)
@@ -342,7 +355,18 @@ class ItemsStep(QWidget):
         hh.setStretchLastSection(True)
         self.table.setColumnHidden(C_STT, True)  # STT: không cần để soát số liệu
         self.table.doubleClicked.connect(lambda _i: self.edit())
-        lay.addWidget(self.table, 1)
+        self.viewer = PoViewer(lot.core)
+        self.viewer.closed.connect(self.hide_viewer)
+        self.viewer.hide()
+        self.viewer_closed_by_user = False
+        self.split = QSplitter(Qt.Horizontal)
+        self.split.addWidget(self.table)
+        self.split.addWidget(self.viewer)
+        self.split.setStretchFactor(0, 3)
+        self.split.setStretchFactor(1, 2)
+        self.split.setChildrenCollapsible(False)
+        lay.addWidget(self.split, 1)
+        self.table.itemSelectionChanged.connect(self.follow_selection)
         self.empty = _label("Chưa có dòng hàng. Quay lại bước ② để nạp file PO, hoặc bấm “Tra mã để thêm dòng”.", "hint", wrap=True)
         lay.addWidget(self.empty)
         self.summary = _label("", "h2")
@@ -351,6 +375,54 @@ class ItemsStep(QWidget):
             sc = QShortcut(QKeySequence(key), self)
             sc.setContext(Qt.WidgetWithChildrenShortcut)
             sc.activated.connect(fn)
+
+    # ---- khung xem PO -----------------------------------------------------------
+    def po_file_of(self, idx):
+        it = self.lot.items[idx] if idx is not None and 0 <= idx < len(self.lot.items) else {}
+        return it.get("po_file") or (self.lot.po_files[-1] if self.lot.po_files else ""), max(0, int(it.get("page") or 1) - 1)
+
+    def toggle_viewer(self):
+        if not self.viewer.isHidden():
+            self.hide_viewer()
+        else:
+            self.viewer_closed_by_user = False
+            self.show_viewer()
+
+    def refresh_labels(self):
+        """Đổi nhãn trạng thái giữa dạng đầy đủ và dạng biểu tượng khi bật/tắt khung xem PO (giữ nguyên dòng đang chọn)."""
+        sel = self.selected()
+        self.refresh()
+        if sel is not None and sel < self.table.rowCount():
+            self.table.selectRow(sel)
+
+    def layout_columns(self):
+        """Mở khung xem PO thì bớt các cột định mức/trọng lượng để bảng vẫn thấy đủ mã, tên, SL, giá, thành tiền và Lưu ý."""
+        compact = not self.viewer.isHidden()
+        for c in list(range(9, 14)) + [C_CODE]:
+            self.table.setColumnHidden(c, compact)
+        self.table.setColumnWidth(C_NAME, 200 if compact else 260)
+
+    def show_viewer(self):
+        self.viewer.show()
+        self.layout_columns()
+        self.refresh_labels()
+        self.split.setSizes([max(520, self.width() * 58 // 100), max(360, self.width() * 42 // 100)])
+        path, page = self.po_file_of(self.selected() if self.selected() is not None else (self.lot.attention_rows() or [0])[0])
+        self.viewer.show_page(path, page)
+        self.view_btn.setText(" Ẩn khung xem PO")
+
+    def hide_viewer(self):
+        self.viewer_closed_by_user = True
+        self.viewer.hide()
+        self.layout_columns()
+        self.refresh_labels()
+        self.view_btn.setText(" Xem PO")
+
+    def follow_selection(self):
+        if not self.viewer.isHidden() and self.selected() is not None:
+            path, page = self.po_file_of(self.selected())
+            if path != self.viewer.file or page != self.viewer.page:
+                self.viewer.show_page(path, page)
 
     def set_filter(self, key):
         self.filter = key
@@ -374,6 +446,8 @@ class ItemsStep(QWidget):
             if code in ("bad", "check", "hand") and code != "hand":
                 issues = ([note] if note else []) + [x for x in issues if code != "bad"]
             warn_rows += bool(issues) or code in ("bad", "check")
+            if not self.viewer.isHidden() and label:
+                label = label.split(" ")[0]  # khung xem PO đang mở: chỉ hiện biểu tượng trạng thái cho bảng gọn
             vals = [it.get("stt"), label, it.get("po", ""), it.get("ma_sp", ""), it.get("ten_sp", ""), it.get("unit", ""),
                     widgets.fmt_num(it.get("qty")), widgets.fmt_num(it.get("price")), widgets.fmt_num(it.get("amount")),
                     f"{float(it.get('div') or 0):g}", f"{float(it.get('kg') or 0):g}", f"{float(it.get('kien') or 0):g}",
@@ -391,8 +465,7 @@ class ItemsStep(QWidget):
                     f = cell.font()
                     f.setBold(True)
                     cell.setFont(f)
-                    if note:
-                        cell.setToolTip(note)
+                    cell.setToolTip(core.READ_LABELS.get(it.get("read"), "") + (f": {note}" if note else ""))
                 if c == C_NOTE and issues:
                     cell.setToolTip("; ".join(issues))
                 self.table.setItem(r, c, cell)
@@ -401,7 +474,7 @@ class ItemsStep(QWidget):
         self.table.setColumnHidden(C_UNIT, True)
         has_read = lot.has_read_info()
         self.table.setColumnHidden(C_READ, not has_read)
-        self.chip_wrap.setVisible(has_read)
+        self.chip_wrap.setVisible(has_read or bool(self.po_file_of(None)[0]))
         if has_read:
             n = lot.read_counts()
             self.chip_btns["bad"].setText(f"❌ Chưa đọc được ({n['bad']})")
@@ -410,10 +483,17 @@ class ItemsStep(QWidget):
             self.chip_btns["all"].setText(f"Tất cả ({len(lot.items)})")
         else:
             self.filter = "all"
+        for b in self.chip_btns.values():
+            b.setVisible(has_read)
         self.next_btn.setVisible(has_read)
         self.next_btn.setEnabled(bool(lot.attention_rows()))
         self.apply_filter()
         self.show_banner()
+        po_path = self.po_file_of(None)[0]
+        self.view_btn.setVisible(bool(po_path))
+        if has_read and lot.attention_rows() and not self.viewer_closed_by_user and self.viewer.can_view(po_path) and self.viewer.isHidden():
+            self.show_viewer()  # có dòng cần soát: mở sẵn PO cạnh bảng
+        self.layout_columns()
         self.empty.setVisible(not lot.items)
         if lot.items:
             t = core.lot_totals(lot.record())
@@ -498,14 +578,16 @@ class ItemsStep(QWidget):
 
 # --------------------------------------------------------------------------- ③ thông tin chuyến hàng
 class InfoStep(QWidget):
+    changed = Signal()
+
     def __init__(self, lot: Lot):
         super().__init__()
         self.setObjectName("inner")
         self.lot = lot
         self.edits = {}
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(28, 20, 28, 20)
-        lay.setSpacing(14)
+        lay.setContentsMargins(20, 16, 12, 16)
+        lay.setSpacing(12)
         self.groups = {}
         spec = [
             ("doc", "Chứng từ", [("po", "Số PO"), ("po_date", "Ngày PO (dd/mm/yyyy)"), ("doc_date", "Ngày chứng từ (yyyy-mm-dd)"),
@@ -517,6 +599,7 @@ class InfoStep(QWidget):
             box = QGroupBox(title)
             form = QFormLayout(box)
             form.setLabelAlignment(Qt.AlignLeft)
+            form.setRowWrapPolicy(QFormLayout.WrapLongRows)
             form.setVerticalSpacing(10)
             form.setContentsMargins(14, 18, 14, 12)
             for key, label in fields:
@@ -535,6 +618,19 @@ class InfoStep(QWidget):
     def on_edit(self, key, text):
         self.lot.form[key] = text
         self.lot.saved = False
+        self.mark_missing()
+        self.changed.emit()
+
+    def mark_missing(self):
+        """Ô số PXK / hóa đơn còn trống: viền cam và gợi ý ngay tại ô (không đợi tới lúc xuất mới báo)."""
+        need = {"pxk": "Chưa có số PXK: Invoice sẽ dùng số tạm", "hd": "Chưa có số hóa đơn VAT"}
+        for k, hint in need.items():
+            e = self.edits[k]
+            empty = not str(self.lot.form.get(k, "")).strip() and (k == "pxk" or self.lot.is_best)
+            e.setProperty("warn", bool(empty))
+            e.setPlaceholderText(hint if empty else "")
+            e.style().unpolish(e)
+            e.style().polish(e)
 
     def refresh(self):
         self.lot.fill_vehicle_defaults()
@@ -543,6 +639,7 @@ class InfoStep(QWidget):
         self.groups["pay"].setVisible(self.lot.is_best)
         self.skip_h.setVisible(self.lot.customer == "kodi")
         self.skip_h.setChecked(self.lot.skip_h)
+        self.mark_missing()
 
 
 # --------------------------------------------------------------------------- ④ xuất & lưu
@@ -590,11 +687,12 @@ class ExportStep(QWidget):
         scroll.setWidget(content)
         outer.addWidget(scroll)
         lay = QVBoxLayout(content)
-        lay.setContentsMargins(28, 20, 28, 20)
+        lay.setContentsMargins(12, 16, 20, 16)
         lay.setSpacing(10)
         lay.addWidget(_label("Kiểm tra trước khi xuất", "h2"))
         self.checks = _text_card(lay)
-        self.big = QPushButton("📦  Xuất trọn bộ chứng từ (mỗi chứng từ một file)")
+        self.big = QPushButton("📦  Xuất trọn bộ chứng từ")
+        self.big.setToolTip("Mỗi chứng từ một file Excel riêng, cùng thư mục hồ sơ")
         self.big.setObjectName("big")
         self.big.clicked.connect(lambda: self.do_export("ALL"))
         lay.addWidget(self.big)
@@ -606,7 +704,7 @@ class ExportStep(QWidget):
             b.setObjectName("sec")
             b.clicked.connect(lambda _=False, m=mode: self.do_export(m))
             self.btns[mode] = b
-            g.addWidget(b, i // 3, i % 3)
+            g.addWidget(b, i // 2, i % 2)
         lay.addWidget(self.one)
         lay.addWidget(_label("File đã xuất", "h2"))
         self.done = _text_card(lay)
@@ -691,6 +789,25 @@ class ExportStep(QWidget):
         self.new_lot.emit()
 
 
+class FinishStep(QWidget):
+    """Bước ④: thông tin chuyến hàng (trái) và xuất & lưu hồ sơ (phải) trên cùng một màn hình, gõ số xong thấy ngay kiểm tra."""
+
+    def __init__(self, info, export):
+        super().__init__()
+        self.setObjectName("inner")
+        self.info, self.export = info, export
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(info, 4)
+        lay.addWidget(export, 6)
+        info.changed.connect(lambda: export.refresh(keep_msg=True))
+
+    def refresh(self):
+        self.info.refresh()
+        self.export.refresh()
+
+
 # --------------------------------------------------------------------------- trang chứa 4 bước
 class LotPage(QWidget):
     saved = Signal()
@@ -713,11 +830,13 @@ class LotPage(QWidget):
         self.step3 = ItemsStep(self.lot)
         self.step4 = InfoStep(self.lot)
         self.step5 = ExportStep(self.lot)
-        self.steps = [self.step1, self.step2, self.step3, self.step4, self.step5]
+        self.finish = FinishStep(self.step4, self.step5)
+        self.steps = [self.step1, self.step2, self.step3, self.finish]
         for s in self.steps:
             self.stack.addWidget(s)
         self.step1.changed.connect(self.refresh_buttons)
         self.step2.changed.connect(self.refresh_buttons)
+        self.step2.changed.connect(lambda: setattr(self.step3, "viewer_closed_by_user", False))  # PO mới: mở lại khung xem nếu có dòng cần soát
         self.step5.saved.connect(self.saved)
         self.step5.new_lot.connect(self.start_new)
         nav = QHBoxLayout()
