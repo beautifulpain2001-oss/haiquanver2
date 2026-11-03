@@ -4497,6 +4497,38 @@ def customer_key_from_name(name, taken=()):
     return key
 
 
+def find_existing_customer(store, name="", mst=""):
+    """Khách đã học/thêm mới có cùng tên công ty (bỏ dấu, không phân biệt hoa thường) hoặc cùng mã số thuế. Trả mã khách hoặc ''."""
+    norm = lambda t: re.sub(r"[^A-Z0-9]+", " ", strip_accents_upper(str(t or ""))).strip()
+    n, m = norm(name), re.sub(r"\D", "", str(mst or ""))
+    for k, p in PROFILES.items():
+        if k in BUILTIN_CUSTOMERS:
+            continue
+        if (n and norm(p.get("name")) == n) or (m and re.sub(r"\D", "", str(p.get("mst") or "")) == m):
+            return k
+    return ""
+
+
+def merge_learned_items(existing, new):
+    """Gộp mặt hàng học thêm vào danh mục đã có của khách: trùng mã hoặc tên thì chỉ điền chỗ còn trống (giữ giá trị người dùng đã sửa), chưa có thì thêm.
+    Trả (danh sách gộp, số mặt hàng thêm mới, số mặt hàng đã có được bổ sung)."""
+    out = [dict(x) for x in existing]
+    added = filled = 0
+    for it in new:
+        hit = next((x for x in out if (it.get("code") and x.get("code") == it.get("code")) or (it.get("name") and x.get("name") == it.get("name"))), None)
+        if hit is None:
+            out.append(dict(it))
+            added += 1
+            continue
+        changed = False
+        for k, v in it.items():
+            if v not in (None, "", 0) and hit.get(k) in (None, "", 0):
+                hit[k] = v
+                changed = True
+        filled += changed
+    return out, added, filled
+
+
 def build_custom_profile(key, fields):
     prof = dict(CUSTOM_PROFILE_DEFAULTS)
     if fields.get("docSet") == "best":
@@ -4677,6 +4709,40 @@ _PCS_ROW = re.compile(
     r"(?P<code>(?<![A-Za-z0-9])\d[A-Z0-9]{9,}(?![A-Za-z0-9]))(?P<mid>.{0,220}?)(?P<qty>(?<![\d,.])\d[\d,]*)\s*(?P<unit>PCS|EA|PC|SET)\s+(?P<amt>\d[\d,]*\.\d{2})\s+(?P<date>\d{2}/\d{2}/\d{4})\s*(?P<price>\d[\d,]*\.\d{2,4})",
     re.S,
 )
+
+
+_DATED_ROW = re.compile(
+    r"(?P<code>(?<![A-Za-z0-9.])\d{6,12}(?![A-Za-z0-9]))(?P<desc>[^\n]{0,160}?)\s+(?P<date>20\d{2}-\d{2}-\d{2})\s+(?P<qty>\d[\d,]*(?:\.\d+)?)\s+(?P<unit>PCS?|EA|SET|PC|Chiếc|chiếc|Cái|cái)\s+"
+    r"(?P<price>\d[\d,]*(?:\.\d+)?)\s+(?P<amt>\d[\d,]*(?:\.\d+)?)",
+)
+
+
+def parse_dated_unit_rows(text):
+    """PO kiểu 'STT | Mã liệu | Mô tả | Ngày giao (yyyy-mm-dd) | SL | ĐVT | Đơn giá | Thành tiền' (VD Richsound).
+    Mã liệu là số dài, SL đứng sau ngày giao và trước đơn vị: không lẫn mã với số lượng. Chỉ nhận dòng có SL x đơn giá = thành tiền.
+    Trả [{code, desc, qty, price, ship}]."""
+    rows = []
+    for m in _DATED_ROW.finditer(text or ""):
+        try:
+            qty, price, amt = (float(m.group(k).replace(",", "")) for k in ("qty", "price", "amt"))
+        except ValueError:
+            continue
+        if qty <= 0 or price <= 0 or abs(qty * price - amt) > max(1.0, amt * 1e-6):
+            continue
+        d = m.group("date")
+        rows.append({"code": m.group("code"), "desc": re.sub(r"\s+", " ", m.group("desc")).strip(), "qty": qty, "price": price,
+                     "ship": f"{d[8:10]}/{d[5:7]}/{d[:4]}"})
+    return rows
+
+
+_PO_LABEL_RE = re.compile(r"(?:mã\s*PO|PO\s*(?:No|number)|订单编号|采购订单编号)\s*[:：]?\s*(\d{7,14})", re.I)
+
+
+def find_po_after_label(text):
+    """Số PO ngay sau nhãn 'mã PO' / '采购订单编号' (PO của khách chưa có mẫu nhận dạng số PO)."""
+    flat = re.sub(r"[ \t]+", " ", text or "")
+    m = _PO_LABEL_RE.search(flat) or re.search(r"(?:mã\s*PO|订单编号)[^\d\n]{0,30}(\d{7,14})", flat, re.I)
+    return m.group(1) if m else ""
 
 
 def parse_pcs_note_rows(text):
@@ -5611,7 +5677,10 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
         po_no, po_date, lines = parse_generic_po_text(raw_text, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
         pcs_rows = parse_pcs_note_rows(raw_text)
         able_rows = [] if pcs_rows or not is_able(prof) else parse_able_po_rows(raw_text, store.items_for_customer(customer))
-        erp_rows = pcs_rows or able_rows or erp_rows_repaired(raw_text, store.items_for_customer(customer))
+        dated_rows = [] if pcs_rows or able_rows else parse_dated_unit_rows(raw_text)
+        if dated_rows and not po_no:
+            po_no = find_po_after_label(raw_text) or po_no
+        erp_rows = pcs_rows or able_rows or dated_rows or erp_rows_repaired(raw_text, store.items_for_customer(customer))
         if pcs_rows:  # PO kiểu Quang Ích: dòng hàng kèm ngày giao và đơn giá ở cột ghi chú
             pass
         if scan_rep and scan_rep["rows"]:

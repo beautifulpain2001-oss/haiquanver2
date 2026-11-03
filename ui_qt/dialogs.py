@@ -219,6 +219,22 @@ class LearnCustomerDialog(QDialog):
             err.setObjectName("banner_warn")
             err.setWordWrap(True)
             lay.addWidget(err)
+        # Khách đã có (cùng tên công ty / mã số thuế): thêm vào khách cũ, không tạo khách mới
+        trow = QHBoxLayout()
+        trow.addWidget(QLabel("Lưu vào:"))
+        self.target = QComboBox()
+        self.target.addItem("➕ Tạo khách mới", "")
+        for k, p_ in core.PROFILES.items():
+            if k not in core.BUILTIN_CUSTOMERS:
+                self.target.addItem(f"{p_.get('label') or k} — {p_.get('name', '')}", k)
+        same = core.find_existing_customer(store, prof.get("name", ""), prof.get("mst", ""))
+        if same:
+            self.target.setCurrentIndex(self.target.findData(same))
+        trow.addWidget(self.target, 1)
+        lay.addLayout(trow)
+        self.target_msg = QLabel("")
+        self.target_msg.setWordWrap(True)
+        lay.addWidget(self.target_msg)
         doc_set = "best" if "BEST PACIFIC" in core.strip_accents_upper(prof.get("name", "")) else "chuan"
         init = {"key": key, "label": key.capitalize(), "name": prof.get("name", ""), "mst": prof.get("mst", ""), "addr": prof.get("addr", ""),
                 "addrKho": prof.get("addrKho", ""), "emails": prof.get("emails", ""), "unit": prof.get("unit", "cái"), "driver": prof.get("driver", ""),
@@ -237,7 +253,9 @@ class LearnCustomerDialog(QDialog):
         grid.setColumnStretch(1, 1)
         grid.setColumnStretch(3, 1)
         lay.addLayout(grid)
+        self.init_values = dict(init)
         self.edits["sample_po"].textChanged.connect(lambda t: self.edits["po_pattern"].setText(core.infer_po_pattern(t)))
+        self.target.currentIndexChanged.connect(lambda _i: self.on_target())
         self.items_label = QLabel("")
         self.items_label.setObjectName("h2")
         lay.addWidget(self.items_label)
@@ -269,7 +287,35 @@ class LearnCustomerDialog(QDialog):
         row.addWidget(cancel)
         row.addWidget(save)
         lay.addLayout(row)
+        self.on_target()
         self.refresh_items()
+
+    def existing_key(self):
+        return self.target.currentData() or ""
+
+    def on_target(self):
+        """Chọn khách đã có: điền sẵn thông tin của khách đó (chỗ trống thì lấy từ chứng từ mẫu), khóa mã khách, báo rõ sẽ thêm vào đâu."""
+        k = self.existing_key()
+        self.edits["key"].setEnabled(not k)
+        if k:
+            old = self.core.PROFILES[k]
+            for f, e in self.edits.items():
+                if f in ("key", "label"):
+                    e.setText(k if f == "key" else str(old.get("label") or k))
+                    continue
+                v = old.get(f)
+                e.setText(str(v) if v not in (None, "") else self.init_values.get(f, ""))
+            exist = self.store.custom_items.get(k, [])
+            _m, added, filled = self.core.merge_learned_items(exist, self.draft["items"])
+            self.target_msg.setObjectName("banner_info")
+            self.target_msg.setText(f"Khách “{old.get('label') or k}” đã có ({len(exist)} mặt hàng). Chứng từ mẫu này sẽ được THÊM VÀO khách đó: {added} mặt hàng mới, "
+                                    f"{filled} mặt hàng cũ được bổ sung chỗ còn trống; mặt hàng và thông tin đã sửa tay được giữ nguyên.")
+        else:
+            self.edits["key"].setText(self.init_values.get("key", ""))
+            self.target_msg.setObjectName("")
+            self.target_msg.setText("Sẽ tạo khách hàng mới.")
+        self.target_msg.style().unpolish(self.target_msg)
+        self.target_msg.style().polish(self.target_msg)
 
     def refresh_items(self):
         items = self.draft["items"]
@@ -296,6 +342,9 @@ class LearnCustomerDialog(QDialog):
             out["payDays"] = ""
         if out.get("docSet") == "best" and not out["tare"]:
             out["tare"] = self.core.BEST_DOCSET_DEFAULTS["tare"]
+        k = self.existing_key()
+        if k:  # khách đã có: giữ mọi thiết lập cũ (bộ chứng từ phụ, kiểu PO…), chỉ ghi đè bằng ô đã nhập
+            out = {**self.core.PROFILES[k], **{f: v for f, v in out.items() if v not in (None, "")}}
         return out
 
     def try_po(self):
@@ -308,7 +357,9 @@ class LearnCustomerDialog(QDialog):
 
     def save(self):
         try:
-            self.key = self.store.save_learned_customer(self.edits["key"].text(), self.collect(), self.draft["items"])
+            k = self.existing_key()
+            items = self.core.merge_learned_items(self.store.custom_items.get(k, []), self.draft["items"])[0] if k else self.draft["items"]
+            self.key = self.store.save_learned_customer(k or self.edits["key"].text(), self.collect(), items)
         except ValueError as e:
             widgets.warn(self, "Chưa lưu được", str(e))
             return

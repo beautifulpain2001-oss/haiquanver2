@@ -196,3 +196,39 @@ def test_wizard_adds_customer_and_scans_po(qapp, store, sample_docs, tmp_path):
     assert lot.form["po"] == "DP2026-0457" and len(lot.items) == 2
     res = lot.export("ALL")
     assert res["files"]
+
+
+def test_learning_again_adds_to_existing_customer_instead_of_creating_new(qapp, store, sample_docs):
+    """Học thêm chứng từ của một khách đã có: gộp vào khách cũ (cùng tên công ty), không tạo khách mới kiểu 'daiphat2'."""
+    from ui_qt.dialogs import LearnCustomerDialog
+    paths = [sample_docs["vat"], sample_docs["pxk"], sample_docs["inv"]]
+    first = LearnCustomerDialog(app, store, paths)
+    assert first.existing_key() == ""  # khách chưa có: tạo mới
+    first.edits["key"].setText("daiphat")
+    first.edits["label"].setText("Đại Phát")
+    first.save()
+    assert first.key == "daiphat"
+    n_customers = len(app.PROFILES)
+    old_items = [dict(x) for x in store.custom_items["daiphat"]]
+    old_items[0]["price"] = 99999  # người dùng đã sửa tay giá một mặt hàng
+
+    store.custom_items["daiphat"][0]["price"] = 99999
+    store.save_catalog()
+    second = LearnCustomerDialog(app, store, paths)
+    assert second.existing_key() == "daiphat" and not second.edits["key"].isEnabled()
+    assert "THÊM VÀO khách đó" in second.target_msg.text()
+    second.draft["items"].append({"code": "DP-NEW-01", "name": "Mặt hàng mới thêm", "unit": "chiếc", "price": 5000, "div": 10, "kg": 0.2, "hs": "48229090"})
+    second.save()
+    assert second.key == "daiphat" and len(app.PROFILES) == n_customers and "daiphat2" not in app.PROFILES
+    items = store.custom_items["daiphat"]
+    assert len(items) == len(old_items) + 1 and any(x["code"] == "DP-NEW-01" for x in items)
+    assert items[0]["price"] == 99999  # giá đã sửa tay không bị chứng từ mẫu ghi đè
+
+
+def test_find_existing_customer_matches_name_without_accents_or_by_tax_code(store):
+    store.save_learned_customer("mauabc", {"name": "CÔNG TY TNHH MẪU ABC", "unit": "cái", "addr": "HN", "mst": "0100000077"}, [])
+    assert app.find_existing_customer(store, "Cong ty TNHH Mau ABC") == "mauabc"
+    assert app.find_existing_customer(store, "Tên khác hẳn", "0100000077") == "mauabc"
+    assert app.find_existing_customer(store, "Công ty khác", "0999") == ""
+    items, added, filled = app.merge_learned_items([{"code": "A", "name": "Hàng A", "price": 10, "kg": 0}], [{"code": "A", "name": "Hàng A", "price": 99, "kg": 0.5}, {"code": "B", "name": "Hàng B"}])
+    assert added == 1 and filled == 1 and items[0]["price"] == 10 and items[0]["kg"] == 0.5

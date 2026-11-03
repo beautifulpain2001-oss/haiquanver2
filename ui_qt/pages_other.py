@@ -1021,7 +1021,7 @@ class CustomersPage(_Page):
         self.msg.setText("")
         dlg = LearnCustomerDialog(self.core, self.store, paths, self, draft=draft)
         if dlg.exec():
-            self.msg.setText(f"✅  Đã thêm khách “{dlg.key}” với {len(self.store.custom_items.get(dlg.key, []))} mã hàng. Chọn khách này ở Làm chứng từ rồi nạp PO.")
+            self.msg.setText(f"✅  Đã lưu khách “{dlg.key}”: nay có {len(self.store.custom_items.get(dlg.key, []))} mã hàng. Chọn khách này ở Làm chứng từ rồi nạp PO.")
             self.refresh(select=dlg.key)
             self.changed.emit()
 
