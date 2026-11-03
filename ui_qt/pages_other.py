@@ -64,7 +64,7 @@ class _Page(QWidget):
 
 class AddFilesDialog(QDialog):
     """Kênh thêm file vào hồ sơ (kể cả hồ sơ cũ): chọn khách + ngày + file. PDF Bkav đặt tên theo số phiếu xuất kho,
-    tờ khai giữ tên; Excel và PO gốc vào DO_PHAN_MEM_TAO, phần còn lại để bên ngoài."""
+    tờ khai giữ tên; Excel, PO gốc và file khác đều nằm thẳng trong thư mục ngày."""
 
     def __init__(self, core, store, parent=None):
         super().__init__(parent)
@@ -159,7 +159,7 @@ class AddFilesDialog(QDialog):
         else:
             self.msg.setText("")
         _fill(self.table, [[os.path.basename(p["src"]), self.KIND.get(p["kind"], ""), p["new_name"],
-                            "DO_PHAN_MEM_TAO" if p["area"] == "tao" else "Bên ngoài", p["note"]] for p in self.plan])
+                            "Phần mềm tạo" if p["area"] == "tao" else "Bên ngoài", p["note"]] for p in self.plan])
         self.ok.setEnabled(bool(self.plan))
 
     def dest_folder(self):

@@ -297,7 +297,7 @@ def test_learn_dialog_then_two_pos_one_lot(qapp, store, best_invoice, tmp_path):
     assert rec["poDates"] == {"POS269990001": "08/10/2026", "POS269990002": "02/10/2026"} and rec["totalKien"] == 95
     res = lot.export("ALL")
     assert not res["problems"]
-    out_dir = os.path.join(store.get_record_folder_path(rec), app.GENERATED_DIR)
+    out_dir = store.get_record_folder_path(rec)
     files = os.listdir(out_dir)
     assert "dsh_00000999.xlsx" in files or any(f.startswith("dsh_") for f in files)
     names = {f["mode"] for f in res["files"]}

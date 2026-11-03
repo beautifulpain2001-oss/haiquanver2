@@ -393,10 +393,10 @@ def test_export_files_land_in_customs_customer_month_day_folder(win, tmp_path, s
     win.lot.step5.do_export("ALL")
     day = os.path.join(store.base_dir, "HAI_QUAN", "Kodi", "2026_Thang_11", "2026-11-01")
     files = [f for f in win.lot.lot.files]
-    gen = os.path.join(day, "DO_PHAN_MEM_TAO")  # chứng từ do phần mềm tạo nằm trong thư mục con; bên ngoài dành cho scan, PDF Bkav, file hải quan
+    gen = day  # mọi file nằm thẳng trong thư mục ngày (không còn thư mục con DO_PHAN_MEM_TAO)
     assert len(files) == 5 and all(os.path.dirname(f["path"]) == gen for f in files)
     assert sorted(os.listdir(gen)) == sorted([os.path.basename(f["path"]) for f in files] + ["PO_goc_po.pdf"])  # kèm bản sao PO gốc
-    assert os.listdir(day) == ["DO_PHAN_MEM_TAO"]
+    assert not os.path.exists(os.path.join(day, "DO_PHAN_MEM_TAO"))
     assert os.listdir(os.path.join(store.base_dir, "HAI_QUAN", "Kodi")) == ["2026_Thang_11"]
     win.lot.step5.do_save()
     win.lot.go(4)
@@ -506,7 +506,7 @@ def test_add_files_dialog_builds_plan_and_copies(win, tmp_path):
     assert {"PXK 113.pdf", "HĐ 113.pdf", "00000113_308389723740.xls", "invoice_IV PK.xlsx"} == names
     dlg.add()
     day = os.path.join(win.store.customs_root(), "Able", "2026_Thang_04", "2026-04-01")
-    assert os.path.isfile(os.path.join(day, "HĐ 113.pdf")) and os.path.isfile(os.path.join(day, "DO_PHAN_MEM_TAO", "invoice_IV PK.xlsx")) and dlg.added == 4
+    assert os.path.isfile(os.path.join(day, "HĐ 113.pdf")) and os.path.isfile(os.path.join(day, "invoice_IV PK.xlsx")) and dlg.added == 4
 
 
 def _read_lot(win, store):

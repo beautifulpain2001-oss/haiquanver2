@@ -137,7 +137,7 @@ def test_reorganize_old_customer_folders_preview_move_and_undo(data_dir, tmp_pat
 
 
 def test_add_files_renames_pdfs_by_pxk_number_and_splits_folders(tmp_path):
-    """Thả file vào hồ sơ: PDF Bkav đặt tên theo số phiếu xuất kho, tờ khai giữ tên, Excel/PO gốc vào DO_PHAN_MEM_TAO."""
+    """Thả file vào hồ sơ: PDF Bkav đặt tên theo số phiếu xuất kho, tờ khai giữ tên, Excel/PO gốc cùng thư mục ngày."""
     src = tmp_path / "src"
     src.mkdir()
     pdfs = {}
@@ -170,6 +170,6 @@ def test_add_files_renames_pdfs_by_pxk_number_and_splits_folders(tmp_path):
     assert by["IV PK.xlsx"]["area"] == "tao" and by["poable113.pdf"]["new_name"] == "PO_goc_poable113.pdf"
     done = app.apply_add_files(plan)
     day = root / "Able" / "2026_Thang_04" / "2026-04-01"
-    assert (day / f"HĐ {no}.pdf").exists() and (day / "DO_PHAN_MEM_TAO" / "invoice_IV PK.xlsx").exists() and len(done) == len(plan)
+    assert (day / f"HĐ {no}.pdf").exists() and (day / "invoice_IV PK.xlsx").exists() and len(done) == len(plan)
     again = app.apply_add_files(app.plan_add_files(str(root), "Able", "2026-04-01", [str(src / "ivable113.pdf")], "")[1])
     assert os.path.basename(again[0]) == f"Invoice {no}_2.pdf"  # không ghi đè

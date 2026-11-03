@@ -114,7 +114,7 @@ def best_template(prof, doc):
 
 CUSTOMS_ROOT = "HAI_QUAN"
 DT_FILE = "DATA_TONG.json"
-GENERATED_DIR = "DO_PHAN_MEM_TAO"  # thư mục con của hồ sơ: chứng từ do phần mềm tạo (Excel) + PO gốc; bên ngoài là scan, PDF Bkav, file hải quan
+GENERATED_DIR = "DO_PHAN_MEM_TAO"  # thư mục con của hồ sơ KIỂU CŨ; hồ sơ mới để mọi file thẳng trong thư mục ngày (chỉ còn đọc thư mục này cho hồ sơ cũ)
 
 _OCR_OK = None
 
@@ -5355,7 +5355,7 @@ def plan_add_files(customs_root, cust_name, day, paths, pxk_no=""):
         elif kind == "XLS":
             area = "tao"
         out.append({"src": p, "kind": kind, "new_name": new, "area": area,
-                    "dst": os.path.join(folder, GENERATED_DIR if area == "tao" else "", new), "note": note})
+                    "dst": os.path.join(folder, new), "note": note})
     return no, out
 
 
@@ -5859,7 +5859,7 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
     if mode == "B11" and not (rec["customer"] == "tesa" or PROFILES.get(rec["customer"], {}).get("customs")):
         raise ValueError("Khách này chưa có thông tin tờ khai B11.")
     folder = store.get_record_folder_path(rec)
-    work_dir = os.path.join(folder, GENERATED_DIR)
+    work_dir = folder  # file do phần mềm tạo nằm thẳng trong thư mục ngày, cùng scan/PDF/file hải quan
     os.makedirs(work_dir, exist_ok=True)
     for src in rec.get("poFiles") or []:  # PO gốc khách gửi: lưu cùng chứng từ đã tạo
         try:
