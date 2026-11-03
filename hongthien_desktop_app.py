@@ -4768,6 +4768,70 @@ _PCS_ROW = re.compile(
 )
 
 
+_KIND_CN = (("纸滑板", "SLIP"), ("滑板", "SLIP"), ("纸筒", "ONG"), ("纸管", "ONG"), ("纸护角", "NEP"), ("护角", "NEP"), ("纸箱", "THUNG"), ("纸盖", "NAP"))
+_KIND_VI = (("ONG GIAY", "ONG"), ("SLIP", "SLIP"), ("THANH NEP", "NEP"), ("NEP GOC", "NEP"), ("NAP GIAY", "NAP"), ("THUNG", "THUNG"), ("KE GO", "KE"), ("KE GIAY", "KE"))
+
+
+def desc_kind(text):
+    """Loại hàng của một mô tả (chữ Hán hoặc tiếng Việt): ONG, SLIP, NEP, NAP, THUNG, KE hoặc ''."""
+    t = str(text or "")
+    for cn, k in _KIND_CN:
+        if cn in t:
+            return k
+    u = strip_accents_upper(t)
+    for vi, k in _KIND_VI:
+        if vi in u:
+            return k
+    return ""
+
+
+def desc_dims(text):
+    """Ba kích thước đầu trong mô tả, bỏ ký hiệu Φ/外/内/H và chữ Hán: '纸筒/外Φ43.5X内Φ39.5XH290mm' -> ['43.5', '39.5', '290']."""
+    t = re.sub(r"[φΦØ∅]|[\u4e00-\u9fff]|(?<=[Xx*])\s*H(?=\d)|^\s*H(?=\d)", " ", str(text or ""))
+    t = re.sub(r"(?<=\d)\s*[Xx×]\s*(?=H?\d)", "x", t)
+    t = re.sub(r"x\s*H(?=\d)", "x", t)
+    dims, _g = _name_dims(t)
+    return dims[:3]
+
+
+def resolve_po_item(row, catalog, erp_catalog=None):
+    """Tên và mã hàng cho một dòng PO (SL, mã liệu, mô tả chữ Hán...): thứ tự tin cậy
+    1) danh mục khách theo mã liệu, nhưng chỉ khi kích thước trong mô tả không mâu thuẫn (mã học nhầm thì bỏ);
+    2) danh mục ERP theo mã liệu ghi trong ngoặc tên hàng;
+    3) danh mục khách theo loại hàng + kích thước;
+    4) danh mục ERP theo loại hàng + kích thước.
+    Trả {name, code, item, src}: item là mục danh mục khách (có kg, SL/kiện) hoặc None; src khach/erp/''."""
+    code = str(row.get("code") or "").strip()
+    desc = str(row.get("desc") or row.get("name") or "")
+    dims, kind = desc_dims(desc), desc_kind(desc)
+    cat = list(catalog or [])
+    erp = list(erp_catalog or [])
+
+    def consistent(name):
+        d2 = _name_dims(name)[0][:3]
+        k2 = desc_kind(name)
+        return (not dims or not d2 or [float(x) for x in d2] == [float(x) for x in dims]) and (not kind or not k2 or kind == k2)
+
+    if code:
+        it = next((x for x in cat if str(x.get("code") or "") == code and consistent(x.get("name", ""))), None)
+        if it:
+            return {"name": it["name"], "code": code, "item": it, "src": "khach"}
+        e = next((x for x in erp if f"({code})" in str(x.get("ten_sp") or "").replace(" ", "")), None)
+        if e:
+            return {"name": re.sub(r"\s+", " ", e["ten_sp"]).strip(), "code": code, "item": None, "src": "erp"}
+    if dims:
+        want = [float(x) for x in dims]
+        for src_name, lst in (("khach", cat), ("erp", erp)):
+            for x in lst:
+                nm = x.get("name") if src_name == "khach" else x.get("ten_sp")
+                d2 = _name_dims(nm or "")[0][:3]
+                if len(d2) == len(want) and [float(v) for v in d2] == want and (not kind or desc_kind(nm) in ("", kind)):
+                    if src_name == "khach":
+                        return {"name": x["name"], "code": code or str(x.get("code") or ""), "item": x, "src": "khach"}
+                    return {"name": re.sub(r"\s+", " ", nm).strip(), "code": code, "item": None, "src": "erp"}
+    return {"name": "", "code": code, "item": None, "src": ""}
+
+
 _DATED_ROW = re.compile(
     r"(?P<code>(?<![A-Za-z0-9.])\d{6,12}(?![A-Za-z0-9]))(?P<desc>[^\n]{0,160}?)\s+(?P<date>20\d{2}-\d{2}-\d{2})\s+(?P<qty>\d[\d,]*(?:\.\d+)?)\s+(?P<unit>PCS?|EA|SET|PC|Chiếc|chiếc|Cái|cái)\s+"
     r"(?P<price>\d[\d,]*(?:\.\d+)?)\s+(?P<amt>\d[\d,]*(?:\.\d+)?)",
@@ -4908,6 +4972,18 @@ def lines_from_excel_table(rows, po_no, profile, catalog, data_store=None, tare_
         if not e["_matched"]:
             ln["read"], ln["read_note"] = "suy_ra", "Mặt hàng chưa có trong danh mục khách: kiểm tra mã, kg, SL/kiện"
     return lines
+
+
+def _po_pattern_hits(prof, text, po_no):
+    """Số PO đọc được có do mẫu nhận dạng của khách tìm ra không (mẫu hỏng hay không khớp thì số này chỉ là đoán)."""
+    pat = (prof or {}).get("po_pattern") or ""
+    if not pat or not po_no:
+        return False
+    try:
+        flat = re.sub(r"(?<=\d) (?=\d)", "", text or "")
+        return any(re.sub(r"\s+", "", m.group(0)) == po_no for m in re.finditer(pat, flat, re.I))
+    except re.error:
+        return False
 
 
 def find_po_after_label(text):
@@ -5308,8 +5384,8 @@ def lines_from_erp_rows(rows, po_no, profile, catalog_items, data_store=None, ta
     by_code = {str(it.get("code") or "").strip(): it for it in catalog_items if it.get("code")}
     lines = []
     for r in rows:
-        known = by_code.get(r["code"]) or {}
-        if not known:  # mã đọc hỏng: nhận mặt hàng theo quy cách trong mô tả (3 số cuối: phi x dày x cao)
+        known = r["_known"] if "_known" in r else (by_code.get(r["code"]) or {})
+        if not known and "_known" not in r:  # mã đọc hỏng: nhận mặt hàng theo quy cách trong mô tả (3 số cuối: phi x dày x cao)
             nums = re.findall(r"\d+(?:\.\d+)?", r["desc"])
             known = next((it for it in catalog_items if len(nums) >= 3 and _name_dims(it.get("name"))[0] == nums[-3:]), {}) if nums else {}
         name = known.get("name") or r["desc"] or r["code"]
@@ -5923,9 +5999,24 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
             lines = lines_from_excel_table(table_rows, po_no, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
             pcs_rows = []
         dated_rows = [] if (pcs_rows or able_rows or table_rows) else parse_dated_unit_rows(raw_text)
-        if dated_rows and not po_no:
-            po_no = find_po_after_label(raw_text) or po_no
-        erp_rows = [] if table_rows else (pcs_rows or able_rows or dated_rows or erp_rows_repaired(raw_text, store.items_for_customer(customer)))
+        labelled = find_po_after_label(raw_text)
+        if labelled and (dated_rows or table_rows) and not _po_pattern_hits(prof, raw_text, po_no):
+            po_no = labelled  # số PO ghi sau nhãn 'mã PO' / '采购订单编号'; mẫu nhận dạng đã học không khớp thì không tin số đoán được
+        if dated_rows:  # PO chữ Hán: tra tên/mã theo mã liệu + quy cách trong danh mục khách rồi danh mục ERP
+            cat = store.items_for_customer(customer)
+            resolved = [resolve_po_item(r, cat, store.erp_catalog) for r in dated_rows]
+            rows2 = [{"code": rv["code"] or r["code"], "desc": rv["name"] or r["desc"], "qty": r["qty"], "price": r["price"], "ship": r["ship"], "_known": rv["item"] or {}}
+                     for r, rv in zip(dated_rows, resolved)]
+            lines = lines_from_erp_rows(rows2, po_no, prof, cat, data_store=store, tare_val=tare_v)
+            for ln, rv in zip(lines, resolved):
+                if rv["code"]:
+                    ln["ma_sp"] = rv["code"]  # mã liệu ghi trên PO là mã khách dùng; mã học trước đó có thể là mã nội bộ khác
+                if rv["src"] == "erp":
+                    ln["read"], ln["read_note"] = "suy_ra", "Tên lấy từ danh mục ERP theo mã liệu/quy cách; chưa có kg, SL/kiện của khách"
+                elif not rv["src"]:
+                    ln["read"], ln["read_note"] = "suy_ra", "Chưa tìm được tên trong danh mục: kiểm tra mã liệu, quy cách"
+            pcs_rows = []
+        erp_rows = [] if (table_rows or dated_rows) else (pcs_rows or able_rows or erp_rows_repaired(raw_text, store.items_for_customer(customer)))
         if pcs_rows:  # PO kiểu Quang Ích: dòng hàng kèm ngày giao và đơn giá ở cột ghi chú
             pass
         if scan_rep and scan_rep["rows"]:

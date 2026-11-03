@@ -150,3 +150,30 @@ def test_excel_table_po_skips_empty_rows_matches_by_paren_code_or_dims_and_reads
     assert by["44A020101.0319"]["qty"] == 3496 and by["44A020101.0319"]["kien"] == 1166 and by["44A020101.0636"]["kien"] == 60
     unknown = res["items"][-1]
     assert unknown["qty"] == 10 and unknown["price"] == 500 and unknown.get("read") == "suy_ra"
+
+
+def test_po_item_names_resolved_by_material_code_and_spec_from_customer_then_erp(tmp_path):
+    store = app.DedicatedDataStore(base_dir=str(tmp_path / "d"))
+    items = [
+        # mã 203020046 bị học nhầm cho tấm slip: kích thước trong mô tả PO (ống 53x50x220) mâu thuẫn nên không được tin
+        {"name": "Tấm giấy Slip sheet 1240 x 1000 x 1.2mm", "code": "203020046", "unit": "chiếc", "price": 80800, "div": 408, "kg": 1.59},
+        {"name": "Ống giấy phi 53 x 50 x 220 mm", "code": "5121", "unit": "chiếc", "price": 2111, "div": 119, "kg": 0.04, "hs": "48229090"},
+    ]
+    store.save_learned_customer("richt2", {"name": "CTY RICH T2", "unit": "chiếc", "addr": "BN", "mst": "0100000012", "po_pattern": r"(?<!\\d)99\\d{8}(?!\\d)"}, items)
+    po = tmp_path / "po.txt"
+    po.write_text(
+        "mã PO :\n采购订单编号： 5100063442\n"
+        "10 203020046 纸筒φ53xφ50x220mm/两端+内黑 2026-10-12 260 PC 2,940 764,400\n"
+        "20 211000504 纸滑板/1145x1000x1.2mm/附图 2026-10-12 100 PC 75,430 7,543,000\n", encoding="utf-8")
+    res = app.lot_load_po(store, str(po), "richt2")
+    assert res["ok"] and res["po"] == "5100063442"  # mẫu số PO đã học không khớp: lấy số sau nhãn 'mã PO'
+    tube, slip = res["items"]
+    assert tube["ten_sp"] == "Ống giấy phi 53 x 50 x 220 mm" and tube["kg"] == 0.04 and tube["div"] == 119 and tube["ma_sp"] == "203020046"  # theo quy cách, không theo mã sai
+    assert "211000504" in slip["ten_sp"] and slip["ten_sp"].startswith("Tấm slip sheet") and slip["read"] == "suy_ra"  # tên lấy từ danh mục ERP theo mã liệu
+
+
+def test_desc_dims_and_kind_handle_chinese_descriptions():
+    assert app.desc_dims("纸筒/外Φ43.5X内Φ39.5XH290mm黑内孔") == ["43.5", "39.5", "290"]
+    assert app.desc_dims("纸筒φ53xφ50x220mm/两端+内黑") == ["53", "50", "220"] and app.desc_kind("纸筒φ53xφ50x220mm") == "ONG"
+    assert app.desc_dims("纸滑板/1145x1000x1.2mm/附图") == ["1145", "1000", "1.2"] and app.desc_kind("纸滑板/1145x1000x1.2mm") == "SLIP"
+    assert app.desc_kind("Thanh nẹp góc 1320x50x50x5mm") == "NEP" and app.desc_kind("Ống giấy phi 53 x 50 x 220 mm") == "ONG"
