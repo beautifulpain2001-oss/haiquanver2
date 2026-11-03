@@ -690,6 +690,17 @@ class DedicatedDataStore:
                         it["hs"] = hs
         self.save_catalog()
 
+    def add_tesa_item(self, name, code="", price=0, source="erp"):
+        """Thêm mặt hàng mới vào danh mục Tesa (mã mới chưa có trong dữ liệu nhưng tra được ở ERP hoặc đọc từ PO).
+        Đã có (trùng mã hoặc tên) thì trả mục cũ. kg/SL kiện để trống: lần đầu nhập tay, app nhớ cho các lần sau."""
+        for it in self.tesa_items:
+            if (code and it.get("code") == code) or it.get("name") == name:
+                return it
+        it = {"name": name, "price": price, "div": 0, "kg": 0, "code": code, "hs": "48229090", "unit": "ống", "ten_hq": name, "tare": 1.0, "src": source}
+        self.tesa_items.append(it)
+        self.save_catalog()
+        return it
+
     def remember_item_refs(self, cust_key, name, refs):
         """Nhớ mã vật liệu / Inquiry No / Customs No người dùng đã sửa, để lần quét PO sau dùng thay chữ OCR."""
         for it in self.custom_items.get(cust_key, []):
@@ -772,9 +783,14 @@ class DedicatedDataStore:
         """Nạp file dữ liệu học (định mức từng mặt hàng: SL/kiện, kg/cái, HS) vào bộ nhớ định mức.
         Mặc định không ghi đè định mức người dùng đã tự nhập. Trả {"them", "ghi_de", "bo_qua"}."""
         cust = data.get("khach_moi") if isinstance(data, dict) else None
-        if not isinstance(data, dict) or not (isinstance(data.get("item_mem"), dict) or isinstance(cust, dict)):
+        if not isinstance(data, dict) or not (isinstance(data.get("item_mem"), dict) or isinstance(cust, dict) or isinstance(data.get("tesa_items"), list)):
             raise ValueError("File này không phải file dữ liệu học của phần mềm (thiếu mục item_mem).")
         res = {"them": 0, "ghi_de": 0, "bo_qua": 0, "khach": "", "mau": 0}
+        for it in data.get("tesa_items") or []:  # mã Tesa mới (chưa có trong dữ liệu có sẵn, có ở ERP): chỉ bổ sung, không đụng mã cũ
+            if isinstance(it, dict) and str(it.get("name") or "").strip() and not any(
+                    x.get("name") == it["name"] or (it.get("code") and x.get("code") == it["code"]) for x in self.tesa_items):
+                self.tesa_items.append({"price": 0, "div": 0, "kg": 0, "code": "", "hs": "48229090", "unit": "ống", "ten_hq": "", "tare": 1.0, **it})
+                res["tesa"] = res.get("tesa", 0) + 1
         if isinstance(cust, dict):  # khách học sẵn (hồ sơ + danh mục hàng + file mẫu chứng từ)
             key = re.sub(r"[^a-z0-9_]", "", str(cust.get("key") or "").lower())
             pname = str((cust.get("profile") or {}).get("name") or "").strip().upper()
@@ -810,6 +826,13 @@ class DedicatedDataStore:
             self.item_mem[name] = new
         self.save_catalog()
         return res
+
+    def export_tesa_new(self):
+        """Mã Tesa đã thêm thêm sau khi cài (không nằm trong danh mục có sẵn) để máy khác nạp bằng "Nạp dữ liệu học"."""
+        base = {x["code"] for x in DEFAULT_TESA_ITEMS if x.get("code")} | {x["name"] for x in DEFAULT_TESA_ITEMS}
+        items = [dict(x) for x in self.tesa_items if x.get("name") not in base and (x.get("code") or "") not in base]
+        mem = {it["name"]: self.item_mem[it["name"]] for it in items if it.get("name") in self.item_mem}
+        return {"version": "hongthien-hoc-v1", "tesa_items": items, "item_mem": mem}
 
     def export_learned(self, key):
         """Dữ liệu học của một khách đã học/thêm mới (hồ sơ + danh mục hàng + định mức + file mẫu chứng từ) để máy khác nạp bằng "Nạp dữ liệu học"."""
@@ -2129,11 +2152,98 @@ def parse_tesa_po_page(t0):
     return {"po": po, "code": code, "qty": qty, "price": price, "net": net, "check": ok, "desc": desc_m.group(0).strip() if desc_m else ""}
 
 
+_TESA_ROW2 = re.compile(
+    r"^\s*(?P<item>\d{1,3})\s+(?P<qty>\d[\d,.]*)\s+(?P<unit>EA|PCS?|ST)\s+(?P<mat>.+?)\s+"
+    r"(?P<date>[A-Z][a-z]{2}\s+\d{1,2},\s*20\d{2})\s+(?P<price>\d[\d,]*\.\d{2})\s+(?P<per>\d{1,4})\s+(?:EA|PCS?|ST)\s+(?P<net>\d[\d,]*\.\d{2})",
+    re.M,
+)
+
+
+def parse_tesa_po_page_v2(t0):
+    """PO Tesa dạng mới: số PO 52xxxxxxxx, dòng 'Item | SL | ĐV | Material | Ngày giao | Đơn giá | Per | Thành tiền' và dòng
+    'Your Material No.: …' (mã vật tư của Tesa, hoặc chỉ là quy cách Ø153 x 15 x 1500mm khi không có mã). Trả danh sách
+    [{po, code, desc, qty, price, net, check}]; chỉ nhận dòng có SL x đơn giá = thành tiền."""
+    t = t0.split("@@HDR@@")[0]
+    hdr = t0.split("@@HDR@@")[1] if "@@HDR@@" in t0 else ""
+    m = re.search(r"Purchase\s*Order:?\s*(\d{10})", t, re.I) or re.search(r"Purchase\s*Order:?\s*(\d{10})", hdr, re.I)
+    if not m:
+        return []
+    po = m.group(1)
+    lines = t.splitlines()
+    out = []
+    for i, line in enumerate(lines):
+        r = _TESA_ROW2.match(line)
+        if not r:
+            continue
+        try:
+            qty = float(r.group("qty").replace(",", ""))
+            price = float(r.group("price").replace(",", "")) / (int(r.group("per")) or 1)
+            net = float(r.group("net").replace(",", ""))
+        except ValueError:
+            continue
+        mat_no = ""
+        for nxt in lines[i + 1:i + 5]:
+            mm = re.search(r"Your\s*Material\s*No\.?:?\s*(.+)", nxt, re.I)
+            if mm:
+                mat_no = mm.group(1).strip()
+                break
+            if _TESA_ROW2.match(nxt):
+                break
+        code_m = re.search(r"\b\d{5}-\d{5}-\d{2}\b", mat_no)
+        out.append({"po": po, "code": code_m.group(0) if code_m else "", "desc": mat_no or r.group("mat").strip(),
+                    "qty": int(qty) if qty == int(qty) else qty, "price": price, "net": net,
+                    "check": abs(qty * price - net) <= max(1.0, net * 1e-6)})
+    return out
+
+
+def resolve_tesa_item(res, tesa_catalog, erp_catalog=None):
+    """Mã/tên hàng cho dòng PO Tesa dạng mới: danh mục Tesa theo mã hoặc quy cách, rồi danh mục ERP.
+    Trả (item danh mục Tesa hoặc None, tên, mã, nguồn 'tesa'/'erp'/'')."""
+    r = resolve_po_item({"code": res.get("code"), "desc": res.get("desc")}, tesa_catalog, erp_catalog)
+    if r["item"]:
+        return r["item"], r["name"], r["code"] or str(r["item"].get("code") or ""), "tesa"
+    if r["src"] == "erp":
+        code = r["code"]
+        if not code:  # ERP: mã nằm ở ma_sp; lấy theo đúng tên đã khớp
+            hit = next((x for x in (erp_catalog or []) if re.sub(r"\s+", " ", str(x.get("ten_sp") or "")).strip() == r["name"]), None)
+            code = (hit or {}).get("ma_sp", "")
+        return None, r["name"], code, "erp"
+    return None, "", res.get("code", ""), ""
+
+
 def parse_tesa_po_text(text, tesa_catalog, data_store=None):
     pages = [p.strip() for p in text.split("@@PAGE@@") if p.strip()]
     if not pages:
         pages = [text]
     found_lines = []
+    for p in pages:
+        for r2 in parse_tesa_po_page_v2(p):
+            item, name, code, src = resolve_tesa_item(r2, tesa_catalog, getattr(data_store, "erp_catalog", None))
+            if not name:  # không có trong danh mục Tesa lẫn ERP: dựng tên từ quy cách trên PO, người dùng bổ sung kg/SL kiện
+                dims = desc_dims(r2["desc"])
+                name = ("Ống lõi giấy phi " + " x ".join(str(int(float(d))) if float(d) == int(float(d)) else d for d in dims) + "mm") if dims else (r2["desc"] or "Ống lõi giấy")
+            if item is None and data_store is not None and hasattr(data_store, "add_tesa_item"):
+                item = data_store.add_tesa_item(name, code, price=r2["price"], source=src or "po")
+            mem = data_store.get_item_norm(name) if data_store else None
+            div = (mem or {}).get("div") or (item or {}).get("div") or 0
+            kg = (mem or {}).get("kg") or (item or {}).get("kg") or 0
+            tare = (item or {}).get("tare", 1.0)
+            qty = r2["qty"]
+            price = r2["price"] or (item or {}).get("price", 0)
+            kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
+            net = round_half_up(qty * kg, 2) if kg > 0 else 0.0
+            found_lines.append({
+                "stt": len(found_lines) + 1, "po": r2["po"],
+                "hs": (mem or {}).get("hs") or (item or {}).get("hs") or "48229090",
+                "ma_sp": code, "ten_sp": name, "ten_hq": (item or {}).get("ten_hq", ""), "unit": (item or {}).get("unit", "ống"),
+                "qty": qty, "price": price, "amount": round(qty * price), "div": div, "kg": kg, "kien": kien,
+                "net": net, "gross": round_half_up(net + tare, 2) if net > 0 else 0.0, "tare": tare,
+                "read": "loi" if not r2["check"] else ("ok" if src == "tesa" else "suy_ra"),
+                "read_note": ("Mã/tên lấy từ ERP theo quy cách; mã mới đã thêm vào danh mục Tesa" if src == "erp" else
+                              "Quy cách trên PO chưa có trong danh mục Tesa lẫn ERP: đã thêm mới, cần nhập kg/SL kiện" if not src else ""),
+            })
+    if found_lines:
+        return found_lines[0]["po"], found_lines
     for p in pages:
         res = parse_tesa_po_page(p)
         if not res:

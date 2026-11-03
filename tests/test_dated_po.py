@@ -237,3 +237,41 @@ def test_po_number_generated_from_poGen_and_po_document_exports(tmp_path):
     ws = openpyxl.load_workbook(res["files"][0]["path"]).worksheets[0]
     cells = {c.value for row in ws.iter_rows() for c in row if c.value is not None}
     assert "HT20261101" in " ".join(str(v) for v in cells) and 1200 in cells and 22100 in cells
+
+
+TESA_V2 = """tesa Purchase Order: 5200049042 Page 2
+
+Item Order Quantity Unit Material Delivery Date: Net Price (VND) Per Price Unit Net Value: (VND)
+1 100 EA Paper core (1500) Oct 29, 2026 264,600.00 1 EA 26,460,000.00
+Ramp
+Your Material No.: Ø153 x 15 x 1500mm
+Ø153 x 15 x 1500mm
+Net Value: VND 26,460,000.00
+@@HDR@@
+tesa Purchase Order: 5200049042 Page 2
+"""
+
+
+def test_tesa_new_po_format_adds_code_from_erp(tmp_path):
+    store = app.DedicatedDataStore(base_dir=str(tmp_path / "d"))
+    n0 = len(store.tesa_items)
+    store.erp_catalog = [{"ma_sp": "TM91120-001-00099", "ten_sp": "Ống lõi giấy phi 153 x 15 x 1500mm", "mota": ""}]
+    po, lines = app.parse_tesa_po_text(TESA_V2, store.tesa_items, store)
+    assert po == "5200049042" and len(lines) == 1
+    ln = lines[0]
+    assert (ln["qty"], ln["price"], ln["amount"], ln["ma_sp"]) == (100, 264600, 26460000, "TM91120-001-00099")
+    assert ln["read"] == "suy_ra" and "ERP" in ln["read_note"]
+    assert len(store.tesa_items) == n0 + 1 and store.tesa_items[-1]["code"] == "TM91120-001-00099"
+    store.remember_item_norm(ln["ten_sp"], 10, 4.2, "48229090")  # nhập kg/SL kiện một lần, lần sau tự có
+    _po, again = app.parse_tesa_po_text(TESA_V2, store.tesa_items, store)
+    assert len(store.tesa_items) == n0 + 1 and again[0]["kg"] == 4.2 and again[0]["kien"] == 10 and again[0]["read"] == "ok"
+    exp = store.export_tesa_new()
+    assert [x["code"] for x in exp["tesa_items"]] == ["TM91120-001-00099"]
+    other = app.DedicatedDataStore(base_dir=str(tmp_path / "e"))
+    assert other.import_learned(exp)["tesa"] == 1 and other.import_learned(exp).get("tesa", 0) == 0
+
+
+def test_tesa_new_po_not_in_erp_still_reads(tmp_path):
+    store = app.DedicatedDataStore(base_dir=str(tmp_path / "d"))
+    po, lines = app.parse_tesa_po_text(TESA_V2, store.tesa_items, store)
+    assert lines[0]["ten_sp"] == "Ống lõi giấy phi 153 x 15 x 1500mm" and lines[0]["read"] == "suy_ra" and "đã thêm mới" in lines[0]["read_note"]
