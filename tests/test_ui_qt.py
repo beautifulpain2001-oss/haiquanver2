@@ -638,3 +638,40 @@ def test_finish_step_merges_info_and_export_and_flags_missing_numbers(win):
     e.setText("0000777")
     win.lot.step4.on_edit("pxk", "0000777")
     assert e.property("warn") is False
+
+
+def test_pxk_autofills_next_number_once_and_user_edit_sticks(win, store):
+    store.records = [{"id": "HS-X", "customer": "kodi", "pxkNo": "0000294", "docDate": "2026-10-01"}]
+    win.lot.step1.cards["kodi"].click()
+    win.lot.lot.form["pxk"] = ""
+    win.lot.go(3)
+    e = win.lot.step4.edits["pxk"]
+    assert e.text() == "0000295" and win.lot.lot.form["pxk"] == "0000295" and win.lot.lot.pxk_auto
+    win.lot.step4.on_edit("pxk", "0000999")  # người dùng sửa
+    e.setText("0000999")
+    win.lot.go(2)
+    win.lot.go(3)
+    assert e.text() == "0000999" and not win.lot.lot.pxk_auto
+    e.setText("")
+    win.lot.step4.on_edit("pxk", "")
+    win.lot.go(3)
+    assert e.text() == ""  # đã tự xóa thì không điền lại
+
+
+def test_pick_numbers_dialog_lists_numbers_and_saves_choice(win, tmp_path):
+    from ui_qt.dialogs import PickNumbersDialog
+    win.lot.step1.cards["kodi"].click()
+    lot = win.lot.lot
+    base = dict(lot.new_item_values(), ten_sp="Hàng A", qty=211000504, price=100, kg=0.1, div=5)
+    it = lot.core.lot_item_from_values(win.store, "kodi", base, "1.0")
+    it["src"] = "10 211000504 Hàng A 100 PC 75,430 7,543,000"
+    lot.items = [it]
+    d = PickNumbersDialog(lot, 0)
+    assert [d.boxes["qty"].itemText(i) for i in range(d.boxes["qty"].count())] == ["10", "211000504", "100", "75,430", "7,543,000"]
+    d.boxes["qty"].setEditText("0")
+    d.save()
+    assert not d.result() and "lớn hơn 0" in d.msg.text()  # lỗi báo ngay trong hộp thoại, không đóng
+    d.boxes["qty"].setEditText("100")
+    d.boxes["price"].setEditText("75,430")
+    d.save()
+    assert d.result() and lot.items[0]["qty"] == 100 and lot.items[0]["price"] == 75430 and lot.items[0]["read"] == "tay"

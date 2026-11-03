@@ -552,6 +552,7 @@ class DedicatedDataStore:
         self.kodi_items = list(DEFAULT_KODI_ITEMS)
         self.tesa_items = list(DEFAULT_TESA_ITEMS)
         self.item_mem = {}
+        self.read_fixes = []  # nhật ký các lần người dùng sửa số liệu máy đọc sai từ PO (khách, trường, đọc sai, đúng, dòng PO)
         self.custom_profiles = {}
         self.custom_items = {}
         self.company = {}  # thông tin công ty người dùng đã sửa (Cài đặt); trống = dùng mặc định
@@ -642,6 +643,7 @@ class DedicatedDataStore:
                     self.tesa_items = data["tesa_items"]
                 if data.get("item_mem"):
                     self.item_mem = data["item_mem"]
+                self.read_fixes = list(data.get("read_fixes") or [])
                 self.custom_profiles = data.get("custom_profiles") or {}
                 self.custom_items = data.get("custom_items") or {}
                 self.company = data.get("company_info") or {}
@@ -1244,7 +1246,11 @@ class DedicatedDataStore:
                             else:
                                 have.append(row)
                     self.custom_items = items
+                if disk:
+                    seen = {json.dumps(x, sort_keys=True) for x in self.read_fixes}
+                    self.read_fixes = [x for x in (disk.get("read_fixes") or []) if json.dumps(x, sort_keys=True) not in seen] + self.read_fixes
                 self._write_json(self.catalog_file, {
+                    "read_fixes": self.read_fixes[-300:],
                     "company": HT_NAME,
                     "address": ADDR_HT,
                     "tax_code": MST_HT,
@@ -1470,6 +1476,57 @@ class DedicatedDataStore:
                 o["label"] = PROFILES.get(r.get("customer", ""), {}).get("label", o["label"])
         out.sort(key=lambda o: (str((o["record"] or {}).get("docDate") or o["day"])[:10], o["path"]), reverse=True)
         return out
+
+    # ---- nhớ cách đọc PO: quy tắc vị trí số + nhật ký sửa lỗi ---------------------------------
+    def read_rules(self, cust_key):
+        """Quy tắc đọc đã học của khách: {'qty': -3, 'price': -2, 'n': 5} = SL là số thứ 3 tính từ cuối dòng, đơn giá thứ 2; áp khi dòng PO có đúng n số."""
+        return dict((self.custom_profiles.get(cust_key) or {}).get("readRules") or {})
+
+    def learn_read_rule(self, cust_key, rule, fixes):
+        """Lưu quy tắc (nếu có) vào hồ sơ khách và ghi nhật ký các chỗ máy đọc sai. `fixes`: [{field, read, correct, how, line, po, file}]."""
+        if rule and cust_key in self.custom_profiles:
+            self.custom_profiles[cust_key]["readRules"] = rule
+            if cust_key in PROFILES:
+                PROFILES[cust_key]["readRules"] = rule
+        stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        for f in fixes:
+            self.read_fixes.append({"time": stamp, "customer": cust_key, "machine": self.user_name() if hasattr(self, "user_name") else "", **f})
+        self.save_catalog()
+
+    def read_fix_log(self, cust_key=None, limit=20):
+        rows = [x for x in self.read_fixes if not cust_key or x.get("customer") == cust_key]
+        return rows[-limit:][::-1]
+
+    def pxk_numbers(self):
+        """Mọi số phiếu xuất kho đã dùng: từ hồ sơ đã lưu, từ tên file 'PXK 247.pdf' / tờ khai '<số PXK>_<số tờ khai>' trong thư mục hồ sơ.
+        Trả [(số nguyên, chuỗi gốc)]. Số phiếu xuất kho là dãy số chung của công ty (không riêng từng khách)."""
+        found = []
+        demo = {"HS-20261030-TESA-01", "HS-20261028-KODI-01", "HS-20261030-SHIRAI-01"}  # hồ sơ mẫu có sẵn của phần mềm: số PXK của chúng không tính
+        for r in self.records:
+            if r.get("id") in demo:
+                continue
+            m = re.fullmatch(r"\s*0*(\d{1,9})\s*", str(r.get("pxkNo") or ""))
+            if m:
+                found.append((int(m.group(1)), str(r["pxkNo"]).strip()))
+        try:
+            for o in self.declaration_folders():
+                for n in os.listdir(o["path"]):
+                    m = re.match(r"PXK\s+0*(\d{1,9})\b", n, re.I) or re.match(r"0*(\d{3,9})_\d{12}", n)
+                    if m:
+                        found.append((int(m.group(1)), m.group(1)))
+        except OSError:
+            pass
+        return found
+
+    def next_pxk(self):
+        """Số phiếu xuất kho kế tiếp = số lớn nhất đã có + 1, giữ cách viết (số 0 đầu) của số hồ sơ gần nhất. Chưa có số nào thì ''."""
+        nums = self.pxk_numbers()
+        if not nums:
+            return ""
+        top = max(n for n, _ in nums)
+        width = max((len(raw) for n, raw in nums if n == top and raw.startswith("0")), default=0)
+        width = width or max((len(str(r.get("pxkNo") or "")) for r in self.records if str(r.get("pxkNo") or "").startswith("0")), default=0)
+        return str(top + 1).zfill(width)
 
     def declaration_entries(self):
         """Mọi tờ khai đang có trên ổ đĩa dưới dạng hồ sơ để hiển thị (Danh mục theo tháng / theo khách dùng chung nguồn với 'Tờ khai đang có').
@@ -4936,6 +4993,75 @@ def read_report(lines, check=""):
     return {**n, "total": total, "bad_rows": bad, "warn_rows": warn, "text": text}
 
 
+_DATE_TOK = re.compile(r"20\d{2}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/20\d{2}")
+_NUM_TOK = re.compile(r"(?<![\w.,])\d[\d,]*(?:\.\d+)?(?![\w])")
+
+
+def line_numbers(text):
+    """Các số trong một dòng PO theo thứ tự xuất hiện (ngày yyyy-mm-dd hay dd/mm/yyyy tính là một mục, không tách thành nhiều số).
+    Trả [chuỗi số đúng như in trên PO]."""
+    flat = _DATE_TOK.sub(" ", str(text or ""))
+    return [m.group(0).rstrip(",") for m in _NUM_TOK.finditer(flat)]
+
+
+def source_line_for(raw_text, item):
+    """Dòng chữ của PO mà một dòng hàng được đọc ra (tìm theo mã hàng, rồi theo số lượng + đơn giá). '' nếu không tìm thấy."""
+    lines = [ln.strip() for ln in str(raw_text or "").splitlines() if ln.strip()]
+    code = str(item.get("ma_sp") or "").strip()
+    if len(code) >= 4:
+        for ln in lines:
+            if code in ln and len(line_numbers(ln)) >= 3:
+                return ln[:400]
+    qty, price = item.get("qty"), item.get("price")
+    if qty and price:
+        fq, fp = {f"{qty:,}", str(qty)} if isinstance(qty, int) else {str(qty)}, {f"{price:,}", str(price)} if isinstance(price, int) else {str(price)}
+        for ln in lines:
+            nums = line_numbers(ln)
+            if fq & set(nums) and fp & set(nums):
+                return ln[:400]
+    return ""
+
+
+def attach_sources(items, raw_text):
+    """Gắn dòng PO gốc (`src`) vào từng dòng hàng chưa có, để người dùng chọn lại số đúng khi máy đọc sai."""
+    for it in items:
+        if not it.get("src"):
+            src = source_line_for(raw_text, it)
+            if src:
+                it["src"] = src
+    return items
+
+
+def apply_read_rules(items, rules):
+    """Áp quy tắc vị trí số đã học (SL, đơn giá tính từ cuối dòng) cho dòng có đúng số lượng số như lúc học. Chỉ nhận khi SL x đơn giá = thành tiền (nếu có số thành tiền).
+    Trả số dòng đã sửa theo quy tắc."""
+    if not rules or "qty" not in rules or "price" not in rules:
+        return 0
+    n_fixed = 0
+    for it in items:
+        if it.get("read") == "tay" or not it.get("src"):
+            continue
+        nums = line_numbers(it["src"])
+        if rules.get("n") and len(nums) != rules["n"]:
+            continue
+        try:
+            qty = float(nums[rules["qty"]].replace(",", ""))
+            price = float(nums[rules["price"]].replace(",", ""))
+            amt_i = rules.get("amount")
+            if amt_i is not None and abs(qty * price - float(nums[amt_i].replace(",", ""))) > max(1.0, price * 1e-3):
+                continue
+        except (IndexError, ValueError):
+            continue
+        if qty <= 0 or price <= 0:
+            continue
+        qty, price = (int(qty) if qty == int(qty) else qty), (int(price) if price == int(price) else price)
+        if (it.get("qty"), it.get("price")) != (qty, price):
+            it["qty"], it["price"], it["amount"] = qty, price, round(qty * price)
+            n_fixed += 1
+        it["read"], it["read_note"] = "ok", "Đọc theo quy tắc đã học cho khách này"
+    return n_fixed
+
+
 def mark_read(items, catalog=None):
     """Gắn trạng thái đọc cho dòng chưa có (mọi khách): ok = có SL, đơn giá và nhận ra mặt hàng trong danh mục; suy_ra = mặt hàng/đơn giá chưa chắc;
     loi = thiếu số lượng. Dòng đã có trạng thái (đọc theo ô, nhập tay) giữ nguyên."""
@@ -5715,7 +5841,7 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
             p = str(x.get("po") or "")
             if p and p not in pos:
                 pos.append(p)
-        res.update(ok=True, items=items, po_dates=po_dates, po=" + ".join(pos) if pos else po_no)
+        res.update(ok=True, items=items, po_dates=po_dates, po=" + ".join(pos) if pos else po_no, raw_text=raw_text)
         res["msg"] = (f"Đã gộp PO {po_no} ({len(lines)} dòng) vào lô: {len(pos)} PO, {len(items)} dòng."
                       if append else f"Đã đọc PO {po_no or '(chưa rõ số)'} gồm {len(lines)} dòng hàng.")
         if res.get("read_report"):

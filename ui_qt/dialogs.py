@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QDialog, QGridLayout, QDialogButtonBox, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton,
+    QAbstractItemView, QComboBox, QDialog, QGridLayout, QPlainTextEdit, QDialogButtonBox, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton,
     QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
@@ -362,5 +362,79 @@ class LearnCustomerDialog(QDialog):
             self.key = self.store.save_learned_customer(k or self.edits["key"].text(), self.collect(), items)
         except ValueError as e:
             widgets.warn(self, "Chưa lưu được", str(e))
+            return
+        self.accept()
+
+
+class PickNumbersDialog(QDialog):
+    """Máy đọc sai số liệu của một dòng: hiện dòng PO gốc và các số máy đọc được trong dòng đó để chọn lại SL và đơn giá đúng.
+    Không số nào đúng thì gõ tay. Chọn đúng cả hai từ các số máy đọc thì máy nhớ cách đọc cho khách; gõ tay thì ghi nhật ký chỗ đọc sai."""
+
+    def __init__(self, lot, idx, parent=None):
+        super().__init__(parent)
+        self.lot, self.idx, self.message = lot, idx, ""
+        self.info = lot.pick_info(idx)
+        self.setWindowTitle("Chọn số đúng từ PO")
+        self.resize(760, 520)
+        lay = QVBoxLayout(self)
+        lay.addWidget(self._label("Dòng PO máy đã đọc (so với PO gốc):", "h2"))
+        self.src = QPlainTextEdit(self.info["src"])
+        self.src.setReadOnly(True)
+        self.src.setMaximumHeight(90)
+        lay.addWidget(self.src)
+        nums = self.info["numbers"]
+        cur = QLabel(f"Máy đang đọc: số lượng = {widgets.fmt_num(self.info['qty'])}, đơn giá = {widgets.fmt_num(self.info['price'])}. "
+                     f"Trong dòng có {len(nums)} số (theo thứ tự): " + "  ·  ".join(f"{i + 1}) {n}" for i, n in enumerate(nums)))
+        cur.setWordWrap(True)
+        cur.setObjectName("banner_info")
+        lay.addWidget(cur)
+        form = QFormLayout()
+        self.boxes = {}
+        for key, label in (("qty", "Số lượng đúng"), ("price", "Đơn giá đúng")):
+            cb = QComboBox()
+            cb.setEditable(True)
+            cb.addItems(nums)
+            now = widgets.fmt_num(self.info[key]).replace(",", "")
+            hit = next((i for i, n in enumerate(nums) if n.replace(",", "") == now), -1)
+            cb.setCurrentIndex(hit)
+            if hit < 0:
+                cb.setEditText(str(self.info[key]))
+            cb.setAccessibleName(label)
+            self.boxes[key] = cb
+            form.addRow(label + ":", cb)
+        lay.addLayout(form)
+        fixes = lot.store.read_fix_log(lot.customer, 3)
+        self.hist = QLabel("Đã sửa trước đây với khách này: " + "; ".join(f"{x['time']} {x.get('label', x.get('field'))} “{x.get('read')}” → “{x.get('correct')}”" for x in fixes)
+                           if fixes else "Chưa có lần sửa nào được ghi lại với khách này.")
+        self.hist.setObjectName("hint")
+        self.hist.setWordWrap(True)
+        lay.addWidget(self.hist)
+        self.msg = QLabel("Chọn số đúng trong danh sách (hoặc gõ tay nếu không số nào đúng), rồi bấm “Lưu và nhớ cách đọc”.")
+        self.msg.setWordWrap(True)
+        lay.addWidget(self.msg)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        cancel = QPushButton("Hủy")
+        cancel.setObjectName("sec")
+        cancel.clicked.connect(self.reject)
+        ok = QPushButton("💾  Lưu và nhớ cách đọc")
+        ok.setDefault(True)
+        ok.clicked.connect(self.save)
+        row.addWidget(cancel)
+        row.addWidget(ok)
+        lay.addLayout(row)
+
+    @staticmethod
+    def _label(text, name):
+        lb = QLabel(text)
+        lb.setObjectName(name)
+        return lb
+
+    def save(self):
+        try:
+            self.message = self.lot.apply_pick(self.idx, self.boxes["qty"].currentText(), self.boxes["price"].currentText())
+        except ValueError as e:
+            self.msg.setText(f"⚠ {e}")
+            self.msg.setStyleSheet("color: #9B1C1C; font-weight: 600;")
             return
         self.accept()

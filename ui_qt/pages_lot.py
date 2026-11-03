@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import theme, widgets
-from .dialogs import ItemDialog, LookupDialog
+from .dialogs import ItemDialog, LookupDialog, PickNumbersDialog
 from .po_viewer import PoViewer
 from .state import Lot
 
@@ -309,7 +309,7 @@ class ItemsStep(QWidget):
         self.lookup_btn.setToolTip("Gõ mã, tên hoặc quy cách (VD 467 250g) rồi chọn mặt hàng và nhập số lượng. Ctrl+F")
         self.lookup_btn.clicked.connect(self.lookup)
         bar.addWidget(self.lookup_btn)
-        for text, fn in (("➕  Thêm dòng trống", self.add), ("✏  Sửa dòng", self.edit), ("🗑  Xóa dòng", self.delete), ("🔄  Tính lại bì", self.recalc)):
+        for text, fn in (("➕  Thêm dòng trống", self.add), ("✏  Sửa dòng", self.edit), ("🎯  Chọn số đúng từ PO", self.pick), ("🗑  Xóa dòng", self.delete), ("🔄  Tính lại bì", self.recalc)):
             b = QPushButton(text)
             b.setObjectName("dng" if "Xóa" in text else "sec")  # nút xóa màu đỏ để khỏi bấm nhầm
             b.clicked.connect(fn)
@@ -562,6 +562,20 @@ class ItemsStep(QWidget):
             self.refresh()
             self.changed.emit()
 
+    def pick(self):
+        idx = self.selected()
+        if idx is None:
+            widgets.warn(self, "Chọn số đúng từ PO", "Hãy bấm chọn dòng máy đọc sai trên bảng trước.")
+            return
+        if self.lot.pick_info(idx) is None:
+            widgets.warn(self, "Chọn số đúng từ PO", "Dòng này không có dòng PO gốc đi kèm (thêm bằng tay hoặc PO đọc theo cách khác). Dùng “Sửa dòng” để gõ số đúng.")
+            return
+        dlg = PickNumbersDialog(self.lot, idx, self)
+        if dlg.exec():
+            self.refresh()
+            self.changed.emit()
+            widgets.info(self, "Đã lưu", dlg.message)
+
     def delete(self):
         idx = self.selected()
         if idx is None:
@@ -616,6 +630,8 @@ class InfoStep(QWidget):
         lay.addStretch(1)
 
     def on_edit(self, key, text):
+        if key == "pxk":
+            self.lot.pxk_touched, self.lot.pxk_auto = True, False
         self.lot.form[key] = text
         self.lot.saved = False
         self.mark_missing()
@@ -629,11 +645,14 @@ class InfoStep(QWidget):
             empty = not str(self.lot.form.get(k, "")).strip() and (k == "pxk" or self.lot.is_best)
             e.setProperty("warn", bool(empty))
             e.setPlaceholderText(hint if empty else "")
+            if k == "pxk":
+                e.setToolTip("Tự điền = số phiếu xuất kho lớn nhất đã có + 1. Sửa lại nếu khác." if self.lot.pxk_auto else "")
             e.style().unpolish(e)
             e.style().polish(e)
 
     def refresh(self):
         self.lot.fill_vehicle_defaults()
+        self.lot.fill_next_pxk()
         for k, e in self.edits.items():
             e.setText(str(self.lot.form.get(k, "")))
         self.groups["pay"].setVisible(self.lot.is_best)

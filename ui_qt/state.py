@@ -5,6 +5,7 @@ nên giao diện và các kiểm thử dùng chung một đường xử lý.
 """
 
 import datetime
+import os
 
 
 class Lot:
@@ -22,6 +23,8 @@ class Lot:
         self.record_id = None  # mã hồ sơ đang sửa (None = hồ sơ mới)
         self.po_files = []  # file PO gốc đã nạp (được lưu cùng chứng từ)
         self.read_text = ""  # câu tóm tắt kết quả đọc PO (hiện ở đầu bước ③)
+        self.rule_note = ""
+        self.pxk_auto, self.pxk_touched = False, False  # số PXK tự điền (số lớn nhất + 1) / người dùng đã tự sửa
         self.exported = {}  # ô chứng từ của hồ sơ (vat, pxk, pkl, tk) -> file
         self.files = []  # mọi file đã xuất trong lô này, để hiển thị
         self.saved = False
@@ -34,6 +37,14 @@ class Lot:
         d = self.core.lot_defaults(self.customer)
         self.form.update(xe=d["xe"], driver=d["driver"], ldd=d["ldd"], tare=d["tare"], pay_days=d["pay_days"],
                          delivery=d["delivery"], luong=d["luong"])
+
+    def fill_next_pxk(self):
+        """Số PXK còn trống thì điền số kế tiếp (lớn nhất đã có + 1); người dùng sửa tay thì không điền lại."""
+        if str(self.form.get("pxk", "")).strip() or self.pxk_touched or self.record_id:
+            return
+        nxt = self.store.next_pxk()
+        if nxt:
+            self.form["pxk"], self.pxk_auto = nxt, True
 
     def fill_vehicle_defaults(self):
         """Biển số, lái xe còn trống thì lấy từ thông tin khách (người dùng vừa lưu ở mục Khách hàng)."""
@@ -77,11 +88,19 @@ class Lot:
             self.po_files = (self.po_files if res.get("append") else []) + [res["path"]]
         self.items = res["items"]
         catalog = self.store.items_for_customer(self.customer) if self.customer else []
+        self.rule_note = ""
+        if res.get("raw_text") and self.customer and self.customer not in self.core.BUILTIN_CUSTOMERS:
+            self.core.attach_sources(self.items, res["raw_text"])  # dòng PO gốc của từng dòng hàng: để chọn lại số đúng khi máy đọc sai
+            rules = self.store.read_rules(self.customer)
+            if rules:
+                fixed = self.core.apply_read_rules(self.items, rules)
+                self.core.lot_recalc(self.items, self.customer, self.form.get("tare", ""))
+                self.rule_note = f"Đã đọc theo quy tắc đã học cho khách này (sửa {fixed} dòng)." if fixed else "Đã áp quy tắc đọc đã học cho khách này."
         self.core.mark_read(self.items, catalog)
         for it in self.items:  # nhớ file PO và trang của từng dòng để mở đúng chỗ khi cần soát
             it.setdefault("po_file", res.get("path") or "")
         rep = res.get("read_report") or self.core.read_report(self.items)
-        self.read_text = rep.get("text", "") if res.get("read_report") else ""
+        self.read_text = (rep.get("text", "") if res.get("read_report") else "") + ((" " + self.rule_note) if self.rule_note else "")
         self.po_dates = res["po_dates"]
         self.form["po"] = res["po"] or self.form["po"]
         if res["po_date"]:
@@ -159,6 +178,58 @@ class Lot:
         bad = [i for i, it in enumerate(self.items) if it.get("read") == "loi"]
         chk = [i for i, it in enumerate(self.items) if it.get("read") == "suy_ra"]
         return bad + chk
+
+    # ---- chọn lại số đúng từ các số máy đọc được trong dòng PO ------------------------------
+    def pick_info(self, idx):
+        """Thông tin để người dùng chọn lại số: dòng PO gốc, các số trong dòng (đúng như in trên PO), SL/đơn giá máy đang dùng. None nếu dòng không có dòng PO gốc."""
+        it = self.items[idx] if 0 <= idx < len(self.items) else None
+        if not it or not it.get("src"):
+            return None
+        return {"src": it["src"], "numbers": self.core.line_numbers(it["src"]), "qty": it.get("qty"), "price": it.get("price")}
+
+    def apply_pick(self, idx, qty_text, price_text):
+        """Người dùng chọn/gõ SL và đơn giá đúng. Chọn từ các số máy đọc được ở cả hai ô -> nhớ quy tắc vị trí cho khách (lần sau tự đọc đúng);
+        gõ tay thì chỉ ghi nhật ký chỗ máy đọc sai. Trả câu thông báo cho người dùng."""
+        info = self.pick_info(idx)
+        if info is None:
+            raise ValueError("Dòng này không có dòng PO gốc để chọn lại.")
+        nums = info["numbers"]
+        try:
+            qty = float(str(qty_text).replace(",", "").strip())
+            price = float(str(price_text).replace(",", "").strip())
+        except ValueError:
+            raise ValueError("Số lượng và đơn giá phải là số.")
+        if qty <= 0 or price <= 0:
+            raise ValueError("Số lượng và đơn giá phải lớn hơn 0.")
+        it = self.items[idx]
+        old_q, old_p = it.get("qty"), it.get("price")
+        def pos(txt):
+            t = str(txt).strip()
+            return nums.index(t) if t in nums else None
+        pq, pp = pos(qty_text), pos(price_text)
+        num = lambda v: int(v) if v == int(v) else v
+        it["qty"], it["price"], it["amount"] = num(qty), num(price), round(qty * price)
+        it["read"], it["read_note"] = "tay", "Đã chọn/sửa từ PO"
+        self.core.lot_recalc(self.items, self.customer, self.form.get("tare", ""))
+        self.saved = False
+        fixes = []
+        for field, label, old, new, p_ in (("qty", "Số lượng", old_q, num(qty), pq), ("price", "Đơn giá", old_p, num(price), pp)):
+            if str(old) != str(new):
+                fixes.append({"field": field, "label": label, "read": old, "correct": new, "how": "chọn từ số máy đọc" if p_ is not None else "gõ tay",
+                              "line": info["src"], "po": it.get("po", ""), "file": os.path.basename(it.get("po_file") or "")})
+        rule, msg = None, ""
+        if pq is not None and pp is not None and pq != pp and self.customer not in self.core.BUILTIN_CUSTOMERS:
+            n = len(nums)
+            rule = {"qty": pq - n, "price": pp - n, "n": n}
+            if pp + 1 < n and abs(qty * price - float(nums[pp + 1].replace(",", ""))) <= max(1.0, price * 1e-3):
+                rule["amount"] = pp + 1 - n  # số ngay sau đơn giá đúng là thành tiền: dùng để tự kiểm tra lần sau
+            msg = (f"Đã nhớ cách đọc cho khách này: SL là số thứ {abs(rule['qty'])} tính từ cuối dòng, đơn giá là số thứ {abs(rule['price'])}. "
+                   "Lần sau máy tự đọc theo cách này (dòng nào lệch cách bố trí thì máy bỏ qua).")
+        elif fixes:
+            msg = "Đã sửa dòng và ghi lại chỗ máy đọc sai (số bạn nhập không nằm trong các số máy đọc được nên chưa tạo quy tắc tự đọc)."
+        if fixes or rule:
+            self.store.learn_read_rule(self.customer, rule, fixes)
+        return msg or "Đã cập nhật dòng."
 
     # ---- tra mặt hàng để thêm dòng ---------------------------------------------
     def search_items(self, query, limit=60):
