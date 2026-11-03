@@ -131,3 +131,52 @@ def test_page_row_boxes_match_boxes_from_full_read(qapp, tmp_path):
     assert len(boxes) >= 36 and all(len(b) == 4 for b in boxes)
     ys = [b[0][1] for b in boxes]
     assert ys == sorted(ys) and 0.1 < ys[0] < 0.4 and ys[-1] < 0.95
+
+
+def _fake_cn_erp_pdf(path):
+    """Bản scan giả PO ERP chữ Hán: khung 9 cột, mỗi dòng cao khác nhau, số đúng kiểu AVG (không có chữ Hán vì chỉ cần số)."""
+    from PIL import Image, ImageDraw, ImageFont
+    W, H = 1654, 2339
+    img = Image.new("L", (W, H), 255)
+    dr = ImageDraw.Draw(img)
+    font = None
+    for f in ("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", "DejaVuSansMono.ttf", "arial.ttf"):
+        try:
+            font = ImageFont.truetype(f, 20)
+            break
+        except OSError:
+            continue
+    if font is None:
+        return False
+    xs = [int(v * 0.694) for v in (200, 380, 630, 855, 975, 1110, 1285, 1445, 1725, 2010)]
+    ys = [int(v * 0.694) for v in (900, 970, 1150, 1330, 1410)]
+    for y in ys:
+        dr.line((xs[0], y, xs[-1], y), fill=0, width=3)
+    for x in xs:
+        dr.line((x, ys[0], x, ys[-1]), fill=0, width=3)
+    dr.text((int(W * 0.15), int(ys[0] - 300)), "CGDD-2609-0207", fill=0, font=font)
+    rows = [("3.02.00162", "3000 94 6", "105", "91,800", "9,639,000"), ("3.02.00163", "600 94 6", "103", "18,360", "1,891,080")]
+    for r, (code, spec, qty, price, amt) in enumerate(rows):
+        y = ys[1 + r] + 60
+        dr.text((xs[0] + 12, y - 10), code[:-1], fill=0, font=font)  # mã liệu dài tự xuống dòng trong ô, như bản scan thật
+        dr.text((xs[0] + 12, y + 24), code[-1], fill=0, font=font)
+        for ci, txt in ((2, spec), (4, qty), (6, price), (7, amt)):
+            dr.text((xs[ci] + 12, y), txt, fill=0, font=font)
+    dr.text((xs[7] + 12, ys[3] + 25), "11,530,080", fill=0, font=font)
+    img.save(path, "PDF", resolution=200)
+    return True
+
+
+def test_cn_erp_scan_grid_reader_reads_rows_resolves_items_and_checks_total(qapp, tmp_path):
+    if not app.ocr_available():
+        pytest.skip("không có OCR")
+    pdf = tmp_path / "po_avg.pdf"
+    if not _fake_cn_erp_pdf(str(pdf)):
+        pytest.skip("không có font")
+    cat = [{"code": "3.02.00162", "name": "Ống lõi giấy 94x6x3000 mm,dùng để cuộn cỏ", "price": 91800, "div": 3, "kg": 4.83},
+           {"code": "3.02.00163", "name": "Ống lõi giấy 94x6x600 mm,dùng để cuộn cỏ", "price": 18360, "div": 3, "kg": 0.966},
+           {"code": "3.02.00155", "name": "Ống lõi giấy 94x6x2100 mm,dùng để cuộn cỏ", "price": 64260, "div": 3, "kg": 3.381}]
+    r = po_scan.read_cn_erp_pdf(app, str(pdf), cat, r"(?<![A-Za-z0-9])CGDD\-\d{4}\-\d{4}(?![A-Za-z0-9])")
+    got = [(x["po"], x["code"], x["qty"], x["price"], x["amount"], x["read"]) for x in r["rows"]]
+    assert got == [("CGDD-2609-0207", "3.02.00162", 105, 91800, 9639000, "ok"), ("CGDD-2609-0207", "3.02.00163", 103, 18360, 1891080, "ok")], got
+    assert "khớp PO" in r["check"] and all(len(x["box"]) == 4 for x in r["rows"])

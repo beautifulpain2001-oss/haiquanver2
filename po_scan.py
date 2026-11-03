@@ -398,3 +398,134 @@ def page_row_boxes(core, path, page_idx, scale=2.5):
         pts = [unrotate_point(x, y, angle, W, H) for x, y in ((xs[0], y0), (xs[-1], y0), (xs[-1], y1), (xs[0], y1))]
         boxes.append([[round(px / W, 4), round(py / H, 4)] for px, py in pts])
     return boxes
+
+
+# ------------------------------------------------------------------ PO scan kiểu ERP chữ Hán (AVG...): 物料编码 | 物料名称 | 规格型号 | 单位 | 数量 | 交货日期 | 单价 | 金额 | 价税合计
+def _digits(t):
+    return re.sub(r"\D", "", t or "")
+
+
+def _edit1(a, b):
+    """Hai chuỗi cùng độ dài, lệch tối đa 1 ký tự."""
+    return len(a) == len(b) and sum(x != y for x, y in zip(a, b)) <= 1
+
+
+def read_cn_erp_page(img, catalog, desc_dims, po_prefix="", page_no=1, on_row=None):
+    """Đọc một trang PO dạng bảng ERP chữ Hán có đường kẻ: mỗi dòng cao khác nhau, 9 cột. Trả (số PO, dòng, tổng tiền trên PO hoặc None, ghi chú)."""
+    angle = deskew_angle(img)
+    W, H = img.size
+    img = img.rotate(angle, resample=Image.BILINEAR, fillcolor=255) if abs(angle) > 1e-6 else img
+    prof = dark_profile(img, 0, 170, (int(W * 0.05), 0, int(W * 0.95), H))
+    ys = runs([p > 0.5 for p in prof], 4)
+    if len(ys) < 4:
+        return "", [], None, "không thấy khung bảng"
+    xs = runs([p > 0.6 for p in dark_profile(img, 1, 170, (0, ys[1] + 8, W, ys[2] - 8))], 5)
+    if len(xs) != 10:
+        return "", [], None, f"bảng có {len(xs) - 1} cột, không phải 9 cột"
+    col = {k: (xs[i], xs[i + 1]) for i, k in enumerate(("code", "name", "spec", "unit", "qty", "date", "price", "amount", "total"))}
+
+    def crop(key, y0, y1, shrink=8):
+        a, b = col[key]
+        return img.crop((a + shrink, y0 + 8, b - shrink, y1 - 8))
+
+    po = ""
+    try:  # số đơn ở phía trên bảng: 单据编号: CGDD-2609-0207
+        head = img.crop((int(W * 0.1), max(0, ys[0] - 520), int(W * 0.62), max(0, ys[0] - 90)))
+        head = head.resize((head.width * 2, head.height * 2), Image.LANCZOS)
+        txt = pytesseract.image_to_string(head, lang="eng", config="--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-:")
+        m = re.search(r"([A-Z0]{2,6})\s*-\s*(\d{4})\s*-\s*(\d{4})", txt)
+        if m:
+            pre = po_prefix or m.group(1).replace("0", "O")
+            po = f"{pre}-{m.group(2)}-{m.group(3)}"
+    except Exception:
+        po = ""
+    rows = []
+    for y0, y1 in zip(ys[1:-2], ys[2:-1]):
+        code_t = _ocr(crop("code", y0, y1), "--psm 6 -c tessedit_char_whitelist=0123456789.")
+        spec_t = _ocr(crop("spec", y0, y1), "--psm 6 -c tessedit_char_whitelist=0123456789")
+        qty_t = _ocr(crop("qty", y0, y1), INT)
+        price_t = _ocr(crop("price", y0, y1), "--psm 7 -c tessedit_char_whitelist=0123456789,.")
+        amt_t = _ocr(crop("amount", y0, y1), "--psm 7 -c tessedit_char_whitelist=0123456789,.")
+        rows.append({"code_t": re.sub(r"\s+", "", code_t), "spec_t": spec_t, "qty_t": qty_t, "price_t": price_t, "amount_t": amt_t, "y": (y0, y1)})
+        if on_row:
+            on_row()
+    total = None
+    try:
+        tt = _ocr(crop("amount", ys[-2], ys[-1]), "--psm 7 -c tessedit_char_whitelist=0123456789,.")
+        total = int(_digits(tt)) if _digits(tt) else None
+    except Exception:
+        total = None
+    out = []
+    by_code = {str(it.get("code") or ""): it for it in catalog if it.get("code")}
+    for i, r in enumerate(rows, 1):
+        qty = int(_digits(r["qty_t"]) or 0)
+        price = int(_digits(r["price_t"]) or 0)
+        amt = int(_digits(r["amount_t"]) or 0)
+        nums = re.findall(r"\d+", r["spec_t"].replace("\n", " "))
+        want = sorted(float(x) for x in nums)[:3] if len(nums) >= 3 else []
+        how = "ok"
+        if qty and price and not amt:
+            amt, how = qty * price, "suy_ra"
+        if qty and amt and (not price or qty * price != amt):
+            if amt % qty == 0:
+                price, how = amt // qty, "suy_ra"
+            elif price and amt % price == 0:
+                qty, how = amt // price, "suy_ra"
+        elif price and amt and not qty and amt % price == 0:
+            qty, how = amt // price, "suy_ra"
+        # mặt hàng: mã liệu (lệch tối đa 1 ký tự) nhưng kích thước trong quy cách phải khớp; không có mã thì theo kích thước
+        def dims_ok(it):
+            d2 = sorted(float(x) for x in desc_dims(it.get("name", "")))[:3]
+            return (not want) or (not d2) or d2 == want
+        code_n = r["code_t"]
+        item = by_code.get(code_n)
+        if item is None and code_n:
+            item = next((it for c, it in by_code.items() if _edit1(c, code_n)), None)
+        if item is not None and not dims_ok(item):
+            item = None
+        if item is None and want:
+            cands = [it for it in catalog if dims_ok(it) and desc_dims(it.get("name", ""))]
+            item = next((it for it in cands if it.get("price") and price and abs(float(it["price"]) - price) <= max(1, price * 0.02)), None) or (cands[0] if len(cands) == 1 else None)
+            if item is not None:
+                how = "suy_ra" if how == "ok" else how
+        y0, y1 = r["y"]
+        box = [[round(px / W, 4), round(py / H, 4)] for px, py in (unrotate_point(x, y, angle, W, H) for x, y in ((xs[0], y0), (xs[-1], y0), (xs[-1], y1), (xs[0], y1)))]
+        base = {"page": page_no, "idx": i, "po": po, "box": box, "spec_t": r["spec_t"], "ref": ""}
+        if item is not None and qty > 0 and price > 0:
+            out.append({**base, "code": str(item.get("code") or code_n), "name": item["name"], "qty": qty, "price": price, "amount": qty * price, "read": how,
+                        "read_note": "" if how == "ok" else "suy ra từ các ô còn lại, kiểm tra với PO", "_known": item})
+        else:
+            got = [t for t in (f"mã “{code_n}”" if code_n else "", f"quy cách {'x'.join(nums)}" if nums else "", f"SL {qty}" if qty else "", f"giá {price:,}" if price else "") if t]
+            out.append({**base, "code": code_n, "name": "", "qty": qty, "price": price, "amount": qty * price, "read": "loi",
+                        "read_note": "Không đọc được hoặc chưa có mặt hàng này trong danh mục khách" + (f" (máy thấy: {', '.join(got)})" if got else "")})
+    return po, out, total, ""
+
+
+def read_cn_erp_pdf(core, path, catalog, po_pattern="", scale=4, progress=None):
+    """PO scan kiểu ERP chữ Hán nhiều trang (mỗi trang một đơn). Trả {rows, pages, check} như read_able_pdf."""
+    if core.pdfium is None or pytesseract is None:
+        return {"rows": [], "pages": 0, "check": ""}
+    prefix = ""
+    m = re.match(r"(?:\(\?<![^)]*\))?([A-Za-z]{2,6})", po_pattern or "")
+    if m:
+        prefix = m.group(1)
+    doc = core.pdfium.PdfDocument(path)
+    n_pages = len(doc)
+    rows, notes, pages = [], [], 0
+    for n in range(n_pages):
+        if progress:
+            progress(f"Đang đọc trang {n + 1}/{n_pages}…", n / n_pages)
+        img = core.auto_rotate_scan(doc[n].render(scale=scale).to_pil()).convert("L")
+        po, got, total, why = read_cn_erp_page(img, catalog, core.desc_dims, prefix, n + 1)
+        if not got:
+            continue
+        pages += 1
+        s = sum(r["amount"] for r in got)
+        if total and s == total and not any(r["read"] == "loi" for r in got):
+            notes.append(f"Trang {n + 1} ({po}): {len(got)} dòng, tổng tiền khớp PO ✓")
+        elif total:
+            notes.append(f"Trang {n + 1} ({po}): tổng đọc được {s:,} ≠ tổng trên PO {total:,}: có dòng sai hoặc chưa đọc")
+        rows += got
+    if progress:
+        progress("Đã đọc xong, đang kiểm tra…", 1.0)
+    return {"rows": rows, "pages": pages, "check": "; ".join(notes)}

@@ -5282,8 +5282,10 @@ def lines_from_able_scan(rows, prof, catalog, store, tare_val=0.0):
                           "unit": prof.get("unit", "cái"), "qty": 0, "price": 0, "amount": 0, "div": 0, "kg": 0, "kien": 0, "net": 0.0, "gross": 0.0,
                           "tare": tare_val, "read": "loi", "read_note": r["read_note"], "ref": r.get("ref", ""), "page": r.get("page", 0), "box": r.get("box")})
             continue
-        one = lines_from_erp_rows([{"code": r["code"], "desc": r["name"], "qty": r["qty"], "price": r["price"]}], r.get("po", ""), prof, catalog,
-                                  data_store=store, tare_val=tare_val)[0]
+        one_row = {"code": r["code"], "desc": r["name"], "qty": r["qty"], "price": r["price"]}
+        if "_known" in r:
+            one_row["_known"] = r["_known"]
+        one = lines_from_erp_rows([one_row], r.get("po", ""), prof, catalog, data_store=store, tare_val=tare_val)[0]
         one.update({"stt": len(lines) + 1, "read": r["read"], "read_note": r["read_note"], "ref": r.get("ref", ""), "page": r.get("page", 0), "box": r.get("box")})
         lines.append(one)
     return lines
@@ -5988,8 +5990,11 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
         except Exception:
             tare_v = 0.0
         scan_rep = None
-        if is_able(prof) and ext == ".pdf" and po_scan is not None and not _pdf_has_text(path):
+        scan_ok = ext == ".pdf" and po_scan is not None and not _pdf_has_text(path)
+        if scan_ok and is_able(prof):
             scan_rep = po_scan.read_able_pdf(sys.modules[__name__], path, store.items_for_customer(customer), progress=progress)  # PO scan: đọc từng ô của bảng, mỗi trang một PO
+        elif scan_ok and prof.get("poGrid") == "cn_erp":  # PO scan kiểu ERP chữ Hán (AVG): 9 cột, đọc từng ô
+            scan_rep = po_scan.read_cn_erp_pdf(sys.modules[__name__], path, store.items_for_customer(customer), prof.get("po_pattern", ""), progress=progress)
         raw_text = "" if (scan_rep and scan_rep["rows"]) else read_document_text(path)  # đọc được theo ô rồi thì khỏi OCR cả trang
         po_no, po_date, lines = parse_generic_po_text(raw_text, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
         pcs_rows = parse_pcs_note_rows(raw_text)
@@ -6030,6 +6035,12 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
         if able_rows and lines and not (scan_rep and scan_rep["rows"]):
             for ln in lines:
                 ln.setdefault("read", "ok")  # PO có lớp chữ: SL x giá đã đối chiếu thành tiền khi đọc
+        if not lines and scan_ok and not (scan_rep and scan_rep["rows"]):  # đọc cả trang không ra dòng nào: thử đọc theo ô bảng ERP chữ Hán
+            scan_rep = po_scan.read_cn_erp_pdf(sys.modules[__name__], path, store.items_for_customer(customer), prof.get("po_pattern", ""), progress=progress)
+            if scan_rep["rows"]:
+                lines = lines_from_able_scan(scan_rep["rows"], prof, store.items_for_customer(customer), store, tare_v)
+                po_no = lines[0].get("po") or po_no
+                res["read_report"] = read_report(lines, scan_rep.get("check", ""))
         if lines:
             store.dt_fill_lines(customer, lines)  # thiếu kg/chiếc hoặc SL/kiện: lấy từ data tổng dùng chung
         if not lines:
