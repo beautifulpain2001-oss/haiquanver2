@@ -2392,7 +2392,7 @@
    "A49": {
     "b": false,
     "fmt": "General",
-    "v": "Mã HS đã điền cho mọi dòng"
+    "v": "Trọng lượng cả bì >= tịnh và có số kiện"
    },
    "A5": {
     "b": false,
@@ -2402,14 +2402,9 @@
    "A50": {
     "b": false,
     "fmt": "General",
-    "v": "Trọng lượng cả bì >= tịnh và có số kiện"
-   },
-   "A51": {
-    "b": false,
-    "fmt": "General",
     "v": "Số PXK ghi trên invoice = số PXK ghi chú tờ khai"
    },
-   "A52": {
+   "A51": {
     "b": false,
     "fmt": "General",
     "v": "Mã số thuế người nhập khẩu"
@@ -2639,11 +2634,6 @@
     "fmt": "General",
     "v": "ĐẠT"
    },
-   "B52": {
-    "b": true,
-    "fmt": "General",
-    "v": "ĐẠT"
-   },
    "B6": {
     "b": true,
     "fmt": "General",
@@ -2754,17 +2744,17 @@
     "fmt": "General",
     "v": "8 dòng"
    },
-   "C50": {
+   "C49": {
     "b": false,
     "fmt": "General",
     "v": "Cần nhập kg/đơn vị và SL/kiện cho từng mã"
    },
-   "C51": {
+   "C50": {
     "b": false,
     "fmt": "General",
     "v": "00000287"
    },
-   "C52": {
+   "C51": {
     "b": false,
     "fmt": "General",
     "v": "0202090415"

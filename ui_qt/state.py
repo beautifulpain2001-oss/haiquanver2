@@ -262,8 +262,6 @@ class Lot:
             out.append("Thiếu kg/chiếc")
         if float(it.get("div") or 0) <= 0:
             out.append("Thiếu SL/kiện")
-        if not it.get("hs"):
-            out.append("Thiếu mã HS")
         return out
 
     # ---- hồ sơ, kiểm tra, xuất, lưu -------------------------------------------

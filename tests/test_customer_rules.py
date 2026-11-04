@@ -160,11 +160,6 @@ class TestTesa:
         lines = [r[0] for r in ws.iter_rows(values_only=True) if isinstance(r[0], str) and r[0].startswith("<")]
         assert lines == [f"<{i:02d}>" for i in range(1, len(seed["tesa"]["items"]) + 1)]
 
-    def test_b11_missing_hs_is_flagged(self, seed):
-        items = [dict(seed["tesa"]["items"][0], hs="")]
-        ws = app.build_customs_b11_sheet(new_wb(), dict(seed["tesa"], items=items))
-        res = {r[0]: r[1] for r in ws.iter_rows(values_only=True) if r[1] in ("ĐẠT", "CẦN SỬA")}
-        assert res["Mã HS đã điền cho mọi dòng"] == "CẦN SỬA"
 
 
 # --- Điểm tài liệu bàn giao mô tả nhưng mã nguồn hiện tại chưa có -------------------------

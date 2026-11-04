@@ -1386,7 +1386,7 @@ class DedicatedDataStore:
         for m, lbl in (("PKL", "Invoice (scan)"), ("PLX", "PLX (scan)"), ("VAT", "Hóa đơn Bkav (PDF)"), ("PXK", "PXK Bkav (PDF)")):
             if m in modes:
                 out.append(lbl)
-        return made, out + ["DSH hải quan", "Tờ khai"]
+        return made, out + ["Tờ khai"]
 
     @classmethod
     def folder_activity(cls, path, modes=None):
@@ -3591,7 +3591,6 @@ def build_customs_b11_sheet(wb, rec, sheet_name="ToKhai_B11"):
     write_chk("Số lượng x đơn giá = thành tiền từng dòng", all(abs(x.get("qty", 0) * x.get("price", 0) - x.get("amount", 0)) < 1e-6 for x in items), "")
     write_chk("Tổng trị giá = tổng các dòng", abs(tot_amt - (rec.get("totalAmount") or tot_amt)) < 1e-6, f"{tot_amt:,.0f}")
     write_chk("Tổng số dòng hàng tờ khai = số dòng PO", True, f"{len(items)} dòng")
-    write_chk("Mã HS đã điền cho mọi dòng", all(bool(x.get("hs")) for x in items), "Còn dòng chưa có HS" if any(not x.get("hs") for x in items) else "")
     write_chk("Trọng lượng cả bì >= tịnh và có số kiện", all((x.get("gross") or 0) >= (x.get("net") or 0) and (x.get("kien") or 0) > 0 for x in items), "Cần nhập kg/đơn vị và SL/kiện cho từng mã")
     write_chk("Số PXK ghi trên invoice = số PXK ghi chú tờ khai", bool(str(pxk_no).strip()), pxk_no)
     write_chk("Mã số thuế người nhập khẩu", bool(prof["mst"]), prof["mst"])
@@ -3787,8 +3786,6 @@ def check_lot(rec):
         if div <= 0:
             out.append(f"{tag}: chưa có SL/kiện.")
         # Kiện lẻ là bình thường: số kiện luôn làm tròn LÊN (1000/75 = 13,33 -> 14; 13,09 -> 14), nên không cảnh báo.
-        if not it.get("hs"):
-            out.append(f"{tag}: chưa có mã HS.")
         if prof.get("linePo") and not str(it.get("po") or "").strip():
             out.append(f"{tag}: chưa có số PO.")
     if is_best_docset(prof):
@@ -4206,27 +4203,6 @@ def build_dntt_best_sheet(wb, rec, sheet_name="DNTT"):
     put("G18", "G18:J18", "请款单位（签名，盖章）", 11, align_h="center")
     put("G19", "G19:J19", "Đơn vị xin thanh toán (ký tên, đóng dấu)", 11, align_h="center")
     _fit_page(ws, landscape=False)
-    return ws
-
-
-ECUS_DSH_HEADS = ["STT", "Mã hàng", "Tên hàng (mô tả chi tiết)", "Mã HS", "Xuất xứ", "Lượng", "Đơn vị tính", "Lượng 2", "Đơn vị tính 2",
-                  "Đơn giá hóa đơn", "Trị giá hóa đơn", "Trị giá tính thuế", "TS XK(%)", "Tiền thuế XK", "Đơn giá tính thuế"]
-
-
-def build_ecus_dsh_sheet(wb, rec, sheet_name="Sheet1"):
-    """Danh sách hàng (dsh) 15 cột để import vào ECUS: Lượng 2 = trọng lượng tịnh (KGM)."""
-    ws = wb.create_sheet(title=sheet_name[:31])
-    prof = PROFILES.get(rec["customer"], PROFILES["shirai"])
-    hs_default = (prof.get("customs") or {}).get("hs", "")
-    for i, h in enumerate(ECUS_DSH_HEADS, 1):
-        c = ws.cell(row=1, column=i, value=h)
-        c.font = Font(name="Arial", size=10, bold=True)
-        ws.column_dimensions[get_column_letter(i)].width = 45 if i == 3 else 14
-    for idx, it in enumerate(rec.get("items", []), 1):
-        vals = [idx, None, customs_desc(it), it.get("hs") or hs_default, "VN", it.get("qty", 0), customs_unit(prof, it),
-                it.get("net", 0), "KGM", it.get("price", 0), it.get("amount", 0)]
-        for i, v in enumerate(vals, 1):
-            ws.cell(row=idx + 1, column=i, value=v).font = Font(name="Arial", size=10)
     return ws
 
 
@@ -5934,9 +5910,6 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
         build_dccn_best_sheet(wb, rec, f"DCCN_{s_key}")
         build_dntt_sheet(wb, rec, "DNTT")
         fname = f"Mau_Best_{rec['customer']}_{clean_po}_{s_key}.xlsx"
-    elif mode == "DSH":
-        build_ecus_dsh_sheet(wb, rec)
-        fname = f"dsh_{rec['pxkNo'] or rec['customer']}.xlsx"
     elif mode == "SO":
         build_so_shirai_sheet(wb, rec, f"SO_{clean_po}_{s_key}")
         fname = f"SO_{rec['customer']}_{clean_po}_{s_key}.xlsx"
@@ -5966,21 +5939,13 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
     if mau_chung_tu:
         mau_chung_tu.autofit_workbook(wb)  # chữ dài tự xuống dòng, dòng tự cao, cột số vừa đủ: mở ra là in được
     wb.save(out_path)
-    dsh = None
-    if mode == "ALL" and rec["customer"] not in BUILTIN_CUSTOMERS:
-        # Danh sách hàng để import ECUS đi kèm trọn bộ của khách mới
-        wb_dsh = openpyxl.Workbook()
-        wb_dsh.remove(wb_dsh.active)
-        build_ecus_dsh_sheet(wb_dsh, rec)
-        dsh = f"dsh_{rec['pxkNo'] or rec['customer']}.xlsx"
-        wb_dsh.save(os.path.join(work_dir, dsh))
-    return {"path": out_path, "fname": fname, "problems": problems, "dsh": dsh}
+    return {"path": out_path, "fname": fname, "problems": problems, "dsh": None}
 
 
 LOT_MODE_LABELS = {
     "SO": "Phiếu SO", "PKL": "Invoice / Packing List", "PACK": "Chi tiết đóng gói", "VAT": "Hóa đơn VAT", "PXK": "Phiếu xuất kho",
     "B11": "Tờ khai B11", "PLX": "Phụ lục X", "PGH": "Phiếu giao hàng", "DCCN": "Đối chiếu công nợ", "DNTT": "Đề nghị thanh toán",
-    "DSH": "Danh sách hàng ECUS", "CHECK": "Kiểm tra chéo", "BBGH": "Biên bản bàn giao", "PO": "Đơn đặt hàng (PO)",
+    "CHECK": "Kiểm tra chéo", "BBGH": "Biên bản bàn giao", "PO": "Đơn đặt hàng (PO)",
 }
 
 
@@ -6004,8 +5969,6 @@ def lot_bundle_modes(rec):
     if best:
         modes += ["PGH", "DCCN"]
     modes.append("DNTT")
-    if cust not in BUILTIN_CUSTOMERS:
-        modes.append("DSH")
     modes.append("CHECK")
     return modes
 

@@ -243,17 +243,6 @@ def test_pay_days_and_delivery_date_are_editable(store, best_customer):
     assert "送货单号/Số phiếu giao hàng：XKTLGH-261102" in cells(wb["PGH"])
 
 
-def test_ecus_dsh_sheet(store, best_customer):
-    rec = make_rec(store, best_customer)
-    wb = openpyxl.Workbook()
-    wb.remove(wb.active)
-    ws = app.build_ecus_dsh_sheet(wb, rec)
-    rows = list(ws.iter_rows(values_only=True))
-    assert list(rows[0]) == app.ECUS_DSH_HEADS
-    assert rows[1][:11] == (1, None, "Ống giấy chống bụi 40 x 3.3 x 1650mm. Hàng mới 100%", "48229090", "VN", 1200, "PIP", 720.0, "KGM", 10000, 12000000)
-    assert len(rows) == 4
-
-
 def test_check_lot_reports_problems(store, best_customer):
     rec = make_rec(store, best_customer)
     rec["items"][0]["kg"] = 0
@@ -299,7 +288,7 @@ def test_learn_dialog_then_two_pos_one_lot(qapp, store, best_invoice, tmp_path):
     assert not res["problems"]
     out_dir = store.get_record_folder_path(rec)
     files = os.listdir(out_dir)
-    assert "dsh_00000999.xlsx" in files or any(f.startswith("dsh_") for f in files)
+    assert not any(f.startswith("dsh_") for f in files)  # không còn tạo danh sách hàng ECUS
     names = {f["mode"] for f in res["files"]}
     assert {"PKL", "PACK", "VAT", "PXK", "PGH", "DCCN", "B11"} <= names
 

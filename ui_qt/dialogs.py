@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 from . import widgets
 
 FIELDS = [
-    ("po", "Số PO của dòng"), ("ma_sp", "Mã hàng"), ("ten_sp", "Tên hàng hóa"), ("hs", "Mã HS"), ("unit", "Đơn vị tính"),
+    ("po", "Số PO của dòng"), ("ma_sp", "Mã hàng"), ("ten_sp", "Tên hàng hóa"), ("unit", "Đơn vị tính"),
     ("qty", "Số lượng"), ("price", "Đơn giá (VNĐ)"), ("div", "Số lượng mỗi kiện"), ("kg", "Trọng lượng mỗi chiếc (kg)"),
 ]
 BEST_FIELDS = [("inquiry", "Inquiry No (Số đơn đặt hàng trên phiếu giao)"), ("customsNo", "Customs No (ghi chú phiếu giao)")]
@@ -198,7 +198,7 @@ class LearnCustomerDialog(QDialog):
               ("sample_po", "Số PO trong file mẫu"), ("po_pattern", "Mẫu nhận dạng số PO"), ("docSet", "Bộ mẫu (chuan / best)"),
               ("payDays", "Hạn thanh toán (ngày)"), ("nameCn", "Tên khách tiếng Trung"), ("deliveryPlace", "Điểm giao hàng"),
               ("buyerContact", "Người liên hệ bên mua"), ("sellerContact", "Người liên hệ bên bán")]
-    COLS = [("code", "Mã hàng"), ("name", "Tên hàng"), ("unit", "ĐVT"), ("price", "Đơn giá"), ("div", "SL/kiện"), ("kg", "kg/chiếc"), ("hs", "Mã HS")]
+    COLS = [("code", "Mã hàng"), ("name", "Tên hàng"), ("unit", "ĐVT"), ("price", "Đơn giá"), ("div", "SL/kiện"), ("kg", "kg/chiếc")]
 
     def __init__(self, core, store, paths, parent=None, draft=None):
         super().__init__(parent)

@@ -97,7 +97,7 @@ def test_customs_b11_cross_checks(seed):
     for row in ws.iter_rows(values_only=True):
         if row[1] in ("ĐẠT", "CẦN SỬA"):
             checks[row[0]] = row[1]
-    assert len(checks) == 9
+    assert len(checks) == 8
     # Lô mẫu 30/10 có dòng "nợ po" nên kiểm tra số PO phải báo CẦN SỬA
     assert checks["Số PO đúng 10 chữ số, bắt đầu 8600"] == "CẦN SỬA"
     assert checks["Số lượng x đơn giá = thành tiền từng dòng"] == "ĐẠT"
