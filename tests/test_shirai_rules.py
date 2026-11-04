@@ -302,3 +302,10 @@ def test_arizon_ids_vat_and_pxk_follow_customer_sample(store):
     assert v.cell(6, 3).value == "3609100570001\nỐng 1" and v.cell(6, 4).value in (None, "") and v.cell(6, 31).value == "hưng yên"
     assert v.cell(7, 19).value is None and v.cell(7, 13).value is None  # thông tin người mua chỉ ở dòng đầu
     assert p.cell(3, 5).value == "3609100570001\nỐng 1" and p.cell(3, 21).value == "Ô tô tải:99C-1" and p.cell(4, 21).value is None
+
+
+def test_arizon_always_has_plx_even_with_other_extra_docs(store):
+    store.save_learned_customer("arz2", {"name": "CÔNG TY TNHH CÔNG NGHỆ ARIZON VIỆT NAM", "unit": "Chiếc", "addr": "BN", "mst": "0100000015", "extraDocs": "DNTT"},
+                                [{"name": "Ống giấy 40 x 3 x 500mm", "code": "A1", "unit": "Chiếc", "price": 1000, "div": 10, "kg": 0.5}])
+    assert app.customer_extra_docs(app.PROFILES["arz2"]) == ["PLX", "DNTT"]
+    assert app.lot_bundle_modes({"customer": "arz2"}) == ["PKL", "VAT", "PXK", "PLX", "DNTT"]

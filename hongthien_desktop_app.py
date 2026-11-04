@@ -3200,8 +3200,8 @@ def customer_extra_docs(prof):
     """Chứng từ làm thêm ngoài bộ mặc định (Invoice + Hóa đơn VAT + Phiếu xuất kho) của khách đã học. Arizon: Phụ lục X."""
     raw = str((prof or {}).get("extraDocs") or "")
     codes = [c for c in re.split(r"[,;\s]+", raw.upper()) if c in EXTRA_DOC_CODES]
-    if not codes and "ARIZON" in str((prof or {}).get("name") or "").upper():
-        codes = ["PLX"]
+    if "ARIZON" in str((prof or {}).get("name") or "").upper() and "PLX" not in codes:
+        codes = ["PLX"] + codes  # Arizon luôn có Phụ lục X, kể cả khi mục "chứng từ làm thêm" đã ghi chứng từ khác
     return codes
 
 

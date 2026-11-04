@@ -784,7 +784,7 @@ class ExportStep(QWidget):
         self.one.setEnabled(ok)
         self.btns["BEST"].setVisible(self.lot.is_best)
         self.btns["PO"].setVisible(bool(self.lot.customer) and "PO" in self.lot.core.lot_bundle_modes({"customer": self.lot.customer}))
-        self.btns["PLX"].setVisible(self.lot.customer in ("tesa", "kodi", "shirai") or bool(self.lot.customer and self.lot.profile.get("customs")))
+        self.btns["PLX"].setVisible(self.lot.customer in ("tesa", "kodi", "shirai") or bool(self.lot.customer and "PLX" in self.lot.core.lot_bundle_modes({"customer": self.lot.customer})))
         self.save_btn.setEnabled(ok)
         self.open_btn.setEnabled(ok)
         self.done_lines = [f"✅  {f['label']}: {f['name']}  ({f['time']})" for f in self.lot.files] or ["Chưa xuất file nào."]
