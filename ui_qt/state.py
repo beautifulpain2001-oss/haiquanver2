@@ -297,7 +297,7 @@ class Lot:
     def _note_file(self, mode, name, path, now):
         entry = {"mode": mode, "label": self.core.LOT_MODE_LABELS.get(mode, mode), "name": name, "path": path, "time": now}
         self.files = [f for f in self.files if f["mode"] != mode] + [entry]
-        slot = {"VAT": "vat", "PXK": "pxk", "PKL": "pkl", "B11": "tk", "ALL": None}.get(mode)
+        slot = {"VAT": "vat", "PXK": "pxk", "PKL": "pkl", "ALL": None}.get(mode)
         if slot:
             self.exported[slot] = {"name": name, "path": path, "time": now}
         if mode == "PLX" and "tk" not in self.exported:

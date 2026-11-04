@@ -193,7 +193,7 @@ def test_best_bundle_documents(store, best_customer):
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
     app.build_full_bundle(wb, rec, "29.10")
-    assert wb.sheetnames == ["Invoice_29.10", "DongGoi_29.10", "VAT_BKAV_29.10", "PXK_29.10", "ToKhai_B11_29.10", "PGH_29.10", "DCCN_29.10", "DNTT"]
+    assert wb.sheetnames == ["Invoice_29.10", "DongGoi_29.10", "VAT_BKAV_29.10", "PXK_29.10", "PGH_29.10", "DCCN_29.10", "DNTT"]
 
     inv = cells(wb["Invoice_29.10"])
     assert "Số ĐĐH: POS269990001" in inv and "Số ĐĐH: POS269990002" in inv and "Ngày:08/10/2026" in inv
@@ -204,15 +204,6 @@ def test_best_bundle_documents(store, best_customer):
 
     vat = wb["VAT_BKAV_29.10"]
     assert [vat.cell(row=r, column=4).value for r in (6, 7, 8)] == ["POS269990001", "POS269990001", "POS269990002"]
-
-    tk = {r[0]: r[1] for r in wb["ToKhai_B11_29.10"].iter_rows(values_only=True) if r[0]}
-    assert tk["Mã số hàng hóa đại diện"] == "4822" and tk["Số lượng kiện"] == 95
-    assert tk["Ký hiệu và số hiệu"] == "P/O: POS269990001 + POS269990002"
-    assert tk["Số hóa đơn"] == "B - 00000999"
-    assert tk["Địa điểm đích cho vận chuyển bảo thuế"] == "03PJCPJ"
-    assert tk["Người nhập khẩu: mã"] == "0100000001"
-    line1 = next(r for r in wb["ToKhai_B11_29.10"].iter_rows(values_only=True) if r[0] == "<01>")
-    assert line1[2] == "Ống giấy chống bụi 40 x 3.3 x 1650mm. Hàng mới 100%" and line1[4] == "PIP" and line1[5] == 720.0
 
     pgh = cells(wb["PGH_29.10"])
     assert "送货单号/Số phiếu giao hàng：XKTLGH-261030" in pgh  # mặc định ngày CT + 1
@@ -290,7 +281,7 @@ def test_learn_dialog_then_two_pos_one_lot(qapp, store, best_invoice, tmp_path):
     files = os.listdir(out_dir)
     assert not any(f.startswith("dsh_") for f in files)  # không còn tạo danh sách hàng ECUS
     names = {f["mode"] for f in res["files"]}
-    assert {"PKL", "PACK", "VAT", "PXK", "PGH", "DCCN", "B11"} <= names
+    assert {"PKL", "PACK", "VAT", "PXK", "PGH", "DCCN"} <= names
 
     # Sửa mã vật liệu / Inquiry trên dòng 3: nhớ cho lần sau, trường khác giữ nguyên
     vals = {k: str(lot.items[2].get(k, "")) for k in ("po", "ma_sp", "ten_sp", "hs", "unit", "qty", "price", "div", "kg", "inquiry", "customsNo")}

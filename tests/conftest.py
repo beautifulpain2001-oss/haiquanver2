@@ -69,7 +69,6 @@ def build_full_workbook(rec):
     app.build_vat_bkav_sheet(wb, rec, f"VAT_BKAV_{s_key}")
     app.build_pxk_bkav_sheet(wb, rec, f"PXK_{s_key}")
     if rec["customer"] == "tesa":
-        app.build_customs_b11_sheet(wb, rec, f"ToKhai_B11_{s_key}")
         app.build_plx_sheet(wb, rec, f"PLX_{s_key}")
     app.build_dntt_sheet(wb, rec, "DNTT")
     return wb

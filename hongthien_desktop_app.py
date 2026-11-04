@@ -263,7 +263,7 @@ CUSTOMER_FIELDS = [
     ("addrKho", "Địa chỉ kho nhận hàng"), ("emails", "Email nhận hóa đơn (ngăn cách bằng dấu ;)"),
     ("driver", "Lái xe thường dùng"), ("xe", "Biển số xe thường dùng"),
     ("owner", "Nhân viên phụ trách khách này (để trống = ai cũng làm được)"),
-    ("extraDocs", "Chứng từ làm thêm khi xuất trọn bộ (mã PLX, DNTT, B11; cách nhau dấu phẩy)"),
+    ("extraDocs", "Chứng từ làm thêm khi xuất trọn bộ (mã PLX, DNTT, BBGH, DCCN, PO; cách nhau dấu phẩy)"),
 ]
 
 
@@ -1351,7 +1351,7 @@ class DedicatedDataStore:
                      ("ToKhai_B11", "Dữ liệu tờ khai B11"), ("PhieuGiaoHang", "Phiếu giao hàng"), ("DoiChieuCongNo", "Đối chiếu công nợ"),
                      ("DNTT", "Đề nghị thanh toán"), ("dsh_", "Danh sách hàng ECUS (Excel)"), ("KiemTraCheo", "Kiểm tra chéo"),
                      ("Bo_Ho_So_Xuat_Hang", "Bộ hồ sơ"), ("00_HO_SO_", "Hồ sơ lưu"), ("PLX_", "PLX (Excel)"), ("SO_", "Đơn đặt hàng"), ("PO_goc_", "PO gốc"), ("BienBanBanGiao", "Biên bản bàn giao"), ("DonDatHang", "Đơn đặt hàng (PO)"), ("dccn", "Đối chiếu công nợ"))
-    MODE_TO_MADE = {"PKL": "Invoice (Excel)", "PACK": "Đóng gói (Excel)", "VAT": "Hóa đơn Bkav (Excel)", "PXK": "PXK Bkav (Excel)", "B11": "Dữ liệu tờ khai B11",
+    MODE_TO_MADE = {"PKL": "Invoice (Excel)", "PACK": "Đóng gói (Excel)", "VAT": "Hóa đơn Bkav (Excel)", "PXK": "PXK Bkav (Excel)",
                     "PGH": "Phiếu giao hàng", "DCCN": "Đối chiếu công nợ", "DNTT": "Đề nghị thanh toán", "PLX": "PLX (Excel)", "SO": "Đơn đặt hàng",
                     "BBGH": "Biên bản bàn giao", "DSH": "Danh sách hàng ECUS (Excel)", "PO": "Đơn đặt hàng (PO)"}
     PREPARED_PREFIXES = MADE_PREFIXES  # tên cũ
@@ -3193,7 +3193,7 @@ def build_dntt_sheet(wb, rec, sheet_name="DNTT"):
     return ws
 
 
-EXTRA_DOC_CODES = ("PLX", "DNTT", "B11", "BBGH", "DCCN", "PO")
+EXTRA_DOC_CODES = ("PLX", "DNTT", "BBGH", "DCCN", "PO")
 
 
 def customer_extra_docs(prof):
@@ -3465,135 +3465,6 @@ def build_plx_sheet(wb, rec, sheet_name="PLX"):
     put(f"A{t+1}", f"A{t+1}:E{t+1}", "Công ty cam kết thông tin khai báo trên là đúng và chịu trách nhiệm trước pháp luật về thông tin đã khai", 11, align_h="left")
     put(f"B{t+2}", f"B{t+2}:E{t+2}", f"   Bắc Ninh, ngày {dd} tháng {mm}  năm {yy}", 11, italic=True, align_h="center")
     put(f"B{t+4}", f"B{t+4}:E{t+4}", "Người đại diện theo pháp luật của thương nhân", 11, align_h="center")
-    return ws
-
-
-def build_customs_b11_sheet(wb, rec, sheet_name="ToKhai_B11"):
-    ws = wb.create_sheet(title=sheet_name[:31])
-    is_tesa = rec.get("customer", "tesa") == "tesa"
-    prof = PROFILES["tesa"] if is_tesa else PROFILES.get(rec["customer"], PROFILES["tesa"])
-    c_cfg = prof.get("customs") or PROFILES["tesa"]["customs"]
-    dt_parts = (rec.get("docDate") or datetime.date.today().strftime("%Y-%m-%d")).split("-")
-    dt_vn = f"{dt_parts[2]}/{dt_parts[1]}/{dt_parts[0]}" if len(dt_parts) == 3 else rec.get("docDate", "")
-    pxk_no = rec.get("pxkNo") or "00000287"
-    items = rec.get("items", [])
-
-    widths = [34, 26, 70, 16, 14, 16, 16, 20]
-    for i, w in enumerate(widths, 1):
-        ws.column_dimensions[get_column_letter(i)].width = w
-
-    r = 1
-
-    def write_title(text):
-        nonlocal r
-        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=8)
-        c = ws.cell(row=r, column=1, value=text)
-        c.font = Font(name="Arial", size=12, bold=True)
-        c.fill = make_fill("CCFFFF")
-        r += 1
-
-    def write_kv(k, v, note=""):
-        nonlocal r
-        ws.cell(row=r, column=1, value=k).font = Font(name="Arial", size=11)
-        ws.cell(row=r, column=2, value=v).font = Font(name="Arial", size=11, bold=True)
-        if note:
-            ws.cell(row=r, column=3, value=note).font = Font(name="Arial", size=10, italic=True, color="9B1C1C")
-        r += 1
-
-    tot_kien = sum(x.get("kien", 0) for x in items) if is_tesa else lot_totals(rec)["kien"]
-    tot_gross = sum(x.get("gross") or x.get("net") or 0 for x in items)
-    tot_amt = sum(x.get("amount", 0) for x in items)
-    pos = [p for p, _ in rec_po_list(rec)]
-
-    write_title("1. THÔNG TIN CHUNG TỜ KHAI (nhập vào VNACCS)")
-    write_kv("Mã loại hình", c_cfg["type"])
-    write_kv("Cơ quan hải quan tiếp nhận", c_cfg["office"])
-    write_kv("Mã bộ phận xử lý", c_cfg["dept"])
-    write_kv("Mã số hàng hóa đại diện", c_cfg["hsGroup"])
-    write_kv("Người xuất khẩu: mã", c_cfg["exporterCode"])
-    write_kv("Người xuất khẩu: tên", HT_NAME, "Viết hoa đồng nhất, không lẫn chữ thường")
-    write_kv("Người xuất khẩu: địa chỉ", ADDR_HT)
-    write_kv("Người xuất khẩu: mã bưu chính", "", "Điền mã bưu chính đúng hoặc để trống; không dùng mã vùng điện thoại")
-    write_kv("Người nhập khẩu: mã", prof["mst"], "Bắt buộc điền (lỗi thường gặp: để trống)")
-    write_kv("Người nhập khẩu: tên", strip_accents_upper(prof["name"]))
-    write_kv("Người nhập khẩu: địa chỉ", strip_accents_upper(prof["addr"]))
-    write_kv("Mã nước", "VN")
-    write_kv("Số vận đơn", "", "Nhập theo chứng từ vận chuyển của lô")
-    write_kv("Số lượng kiện", tot_kien, c_cfg["pack"])
-    write_kv("Tổng trọng lượng (Gross)", tot_gross, c_cfg["unitWt"])
-    write_kv("Địa điểm lưu kho", c_cfg["warehouse"], f"Tên ghi trên mẫu: {c_cfg['warehouseName']}; tra danh mục mã địa điểm cho đúng")
-    write_kv("Địa điểm nhận hàng cuối cùng", f"{c_cfg['loadPlace']} · {strip_accents_upper(prof['name'])}")
-    write_kv("Địa điểm xếp hàng", f"{c_cfg['loadPlace']} · CTY CO PHAN GIAY BAO BI HONG THIEN")
-    write_kv("Địa điểm xếp hàng lên xe chở hàng", f"{c_cfg['warehouse']} · CONG TY CO PHAN GIAY BAO BI HONG THIEN")
-    write_kv("Phương tiện vận chuyển", c_cfg["transport"])
-    write_kv("Điều kiện giao hàng / tiền tệ", f"{c_cfg['incoterm']} - VND")
-    write_kv("Tổng trị giá hóa đơn", tot_amt)
-    write_kv("Tổng trị giá tính thuế", tot_amt)
-    write_kv("Phân loại nộp thuế", "A")
-    write_kv("Tổng số dòng hàng của tờ khai", len(items), "Phải bằng số dòng PO/invoice (lỗi thường gặp: khai thừa)")
-    if is_tesa:
-        write_kv("Phần ghi chú", f"Phuong thuc thanh toan: TT. PXKKVCNB {pxk_no}. Ký hiệu {prof['symbol']} ngày  {dt_vn}")
-    else:
-        write_kv("Ký hiệu và số hiệu", "P/O: " + " + ".join(pos))
-        write_kv("Số hóa đơn", f"B - {pxk_no}", "Ghi số PXKKVCNB (không phải số hóa đơn VAT)")
-        write_kv("Phương thức thanh toán", "KC")
-        write_kv("Phần ghi chú", f"Phuong thuc thanh toan: TT .PXKKVCNB số: {pxk_no} Ky hieu {prof.get('symbol', '6C26NAA')} ngày {dt_vn}")
-    write_kv("Số quản lý nội bộ doanh nghiệp", c_cfg["internalNo"])
-    write_kv("Thời hạn vận chuyển bảo thuế / ngày hàng đi", dt_vn)
-    write_kv("Địa điểm đích cho vận chuyển bảo thuế", c_cfg["bondDest"], f"ngày đến {dt_vn}")
-
-    r += 1
-    write_title("2. CHI TIẾT DÒNG HÀNG")
-    heads = ["Dòng", "Mã HS", "Mô tả hàng hóa", "Số lượng (1)", "ĐVT", "Số lượng (2) kg", "Đơn giá HĐ", "Trị giá hóa đơn"]
-    for i, h in enumerate(heads, 1):
-        c = ws.cell(row=r, column=i, value=h)
-        c.font = Font(name="Arial", size=11, bold=True)
-        c.fill = make_fill("FFFFCC")
-        c.border = BOX_BORDER
-        c.alignment = Alignment(horizontal="center", wrap_text=True)
-    r += 1
-    for idx, it in enumerate(items, 1):
-        if is_tesa:
-            desc = f"{(it.get('ten_hq') or it['ten_sp']).strip()} ,PO:{it.get('po', '')}. Mới 100% "
-            u_val = c_cfg["unitQty"] if strip_accents_upper(it.get("unit", "")) == "CAI" else it.get("unit", "ống")
-        else:
-            desc = customs_desc(it)
-            u_val = customs_unit(prof, it)
-        vals = [f"<{idx:02d}>", it.get("hs", ""), desc, it.get("qty", 0), u_val, it.get("net", ""), it.get("price", 0), it.get("amount", 0)]
-        for c_i, v in enumerate(vals, 1):
-            c = ws.cell(row=r, column=c_i, value=v)
-            c.font = Font(name="Arial", size=11)
-            c.border = BOX_BORDER
-            c.alignment = Alignment(vertical="top", wrap_text=(c_i == 3))
-            if c_i >= 4 and isinstance(v, (int, float)):
-                c.number_format = "#,##0.###"
-        if not it.get("hs"):
-            ws.cell(row=r, column=2).fill = make_fill("FDE8E8")
-        r += 1
-
-    r += 1
-    write_title("3. KIỂM TRA CHÉO TRƯỚC KHI ĐĂNG KÝ")
-
-    def write_chk(name, ok, detail):
-        nonlocal r
-        ws.cell(row=r, column=1, value=name).font = Font(name="Arial", size=11)
-        d = ws.cell(row=r, column=2, value="ĐẠT" if ok else "CẦN SỬA")
-        d.font = Font(name="Arial", size=11, bold=True, color="03543F" if ok else "9B1C1C")
-        ws.cell(row=r, column=3, value=detail).font = Font(name="Arial", size=11)
-        r += 1
-
-    if is_tesa:
-        pos = [str(x.get("po", "")) for x in items]
-        write_chk("Số PO đúng 10 chữ số, bắt đầu 8600", all(re.match(r"^8600\d{6}$", p) for p in pos), ", ".join(pos))
-        write_chk("Không trùng số PO giữa các dòng", len(set(pos)) == len(pos), "")
-    else:
-        write_chk("Mọi dòng hàng đều có số PO", all(str(x.get("po") or "").strip() for x in items), " + ".join(pos))
-    write_chk("Số lượng x đơn giá = thành tiền từng dòng", all(abs(x.get("qty", 0) * x.get("price", 0) - x.get("amount", 0)) < 1e-6 for x in items), "")
-    write_chk("Tổng trị giá = tổng các dòng", abs(tot_amt - (rec.get("totalAmount") or tot_amt)) < 1e-6, f"{tot_amt:,.0f}")
-    write_chk("Tổng số dòng hàng tờ khai = số dòng PO", True, f"{len(items)} dòng")
-    write_chk("Trọng lượng cả bì >= tịnh và có số kiện", all((x.get("gross") or 0) >= (x.get("net") or 0) and (x.get("kien") or 0) > 0 for x in items), "Cần nhập kg/đơn vị và SL/kiện cho từng mã")
-    write_chk("Số PXK ghi trên invoice = số PXK ghi chú tờ khai", bool(str(pxk_no).strip()), pxk_no)
-    write_chk("Mã số thuế người nhập khẩu", bool(prof["mst"]), prof["mst"])
     return ws
 
 
@@ -4220,8 +4091,6 @@ def build_full_bundle(wb, rec, s_key, skip_h=False):
     build_pxk_bkav_sheet(wb, rec, f"PXK_{s_key}")
     if cust not in BUILTIN_CUSTOMERS and not is_best_docset(prof):  # khách đã học: bộ mặc định + chứng từ làm thêm
         extra = customer_extra_docs(prof)
-        if "B11" in extra:
-            build_customs_b11_sheet(wb, rec, f"ToKhai_B11_{s_key}")
         if "PLX" in extra:
             build_plx_sheet(wb, rec, f"PLX_{s_key}")
         if "DNTT" in extra:
@@ -4234,10 +4103,7 @@ def build_full_bundle(wb, rec, s_key, skip_h=False):
             build_dccn_best_sheet(wb, rec, f"DCCN_{s_key}")
         return wb
     if cust == "tesa":
-        build_customs_b11_sheet(wb, rec, f"ToKhai_B11_{s_key}")
         build_plx_sheet(wb, rec, f"PLX_{s_key}")
-    elif prof.get("customs"):
-        build_customs_b11_sheet(wb, rec, f"ToKhai_B11_{s_key}")
     if is_best_docset(prof):
         build_pgh_best_sheet(wb, rec, f"PGH_{s_key}")
         build_dccn_best_sheet(wb, rec, f"DCCN_{s_key}")
@@ -5864,8 +5730,6 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
         raise ValueError("Khách này chưa đặt bộ mẫu 'best'. Thêm khách bằng nút 'Thêm Khách Mới' và chọn bộ mẫu best.")
     if mode == "SO" and rec["customer"] != "shirai":
         raise ValueError("Phiếu SO chỉ dùng cho khách Shirai.")
-    if mode == "B11" and not (rec["customer"] == "tesa" or PROFILES.get(rec["customer"], {}).get("customs")):
-        raise ValueError("Khách này chưa có thông tin tờ khai B11.")
     folder = store.get_record_folder_path(rec)
     work_dir = folder  # file do phần mềm tạo nằm thẳng trong thư mục ngày, cùng scan/PDF/file hải quan
     os.makedirs(work_dir, exist_ok=True)
@@ -5913,9 +5777,6 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
     elif mode == "SO":
         build_so_shirai_sheet(wb, rec, f"SO_{clean_po}_{s_key}")
         fname = f"SO_{rec['customer']}_{clean_po}_{s_key}.xlsx"
-    elif mode == "B11":
-        build_customs_b11_sheet(wb, rec, f"ToKhai_B11_{s_key}")
-        fname = f"ToKhai_B11_{rec['customer']}_{s_key}.xlsx"
     elif mode == "PACK":
         build_packing_best_sheet(wb, rec, f"DongGoi_{s_key}")
         fname = f"DongGoi_{rec['customer']}_{s_key}.xlsx"
@@ -5944,7 +5805,7 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
 
 LOT_MODE_LABELS = {
     "SO": "Phiếu SO", "PKL": "Invoice / Packing List", "PACK": "Chi tiết đóng gói", "VAT": "Hóa đơn VAT", "PXK": "Phiếu xuất kho",
-    "B11": "Tờ khai B11", "PLX": "Phụ lục X", "PGH": "Phiếu giao hàng", "DCCN": "Đối chiếu công nợ", "DNTT": "Đề nghị thanh toán",
+    "PLX": "Phụ lục X", "PGH": "Phiếu giao hàng", "DCCN": "Đối chiếu công nợ", "DNTT": "Đề nghị thanh toán",
     "CHECK": "Kiểm tra chéo", "BBGH": "Biên bản bàn giao", "PO": "Đơn đặt hàng (PO)",
 }
 
@@ -5963,9 +5824,7 @@ def lot_bundle_modes(rec):
         modes.append("PACK")
     modes += ["VAT", "PXK"]
     if cust == "tesa":
-        modes += ["B11", "PLX"]
-    elif prof.get("customs"):
-        modes.append("B11")
+        modes.append("PLX")
     if best:
         modes += ["PGH", "DCCN"]
     modes.append("DNTT")
@@ -6409,7 +6268,6 @@ def run_self_test():
         build_vat_bkav_sheet(wb, rec, "VAT_BKAV")
         build_pxk_bkav_sheet(wb, rec, "PXK_BKAV")
         if rec["customer"] == "tesa":
-            build_customs_b11_sheet(wb, rec, "ToKhai_B11")
             build_plx_sheet(wb, rec, "PLX")
         build_dntt_sheet(wb, rec, "DNTT")
         out_dir = os.path.join(store.customs_root(), "_KIEM_TRA")

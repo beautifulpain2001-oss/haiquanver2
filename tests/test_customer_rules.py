@@ -146,19 +146,6 @@ class TestTesa:
         ws = app.build_pkl_standard_sheet(new_wb(), seed["tesa"])
         assert ws["C13"].value == "8600226354" and ws["D13"].value == "ống"
 
-    def test_b11_part1_headers_and_row_count(self, seed):
-        ws = app.build_customs_b11_sheet(new_wb(), seed["tesa"])
-        kv = {r[0]: r[1] for r in ws.iter_rows(values_only=True) if r[0]}
-        assert kv["Mã loại hình"] == "B11"
-        assert kv["Cơ quan hải quan tiếp nhận"] == "HQBACNINH"
-        assert kv["Tổng số dòng hàng của tờ khai"] == len(seed["tesa"]["items"])
-        assert kv["Địa điểm đích cho vận chuyển bảo thuế"] == "03PACGD"
-        assert kv["Người nhập khẩu: tên"] == "CONG TY TNHH TESA SITE HAI PHONG"
-
-    def test_b11_detail_rows_numbered(self, seed):
-        ws = app.build_customs_b11_sheet(new_wb(), seed["tesa"])
-        lines = [r[0] for r in ws.iter_rows(values_only=True) if isinstance(r[0], str) and r[0].startswith("<")]
-        assert lines == [f"<{i:02d}>" for i in range(1, len(seed["tesa"]["items"]) + 1)]
 
 
 

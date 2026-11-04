@@ -25,7 +25,7 @@ def test_full_workbook_matches_snapshot(customer, seed, full_workbook, snapshot,
     [
         ("shirai", ["SO_202637HT_30.10", "30,10", "VAT_BKAV_30.10", "PXK_30.10", "DNTT"]),  # invoice Shirai: tên sheet = ngày "d,m"
         ("kodi", ["Invoice_28.10", "VAT_BKAV_28.10", "PXK_28.10", "DNTT"]),
-        ("tesa", ["Invoice_30.10", "VAT_BKAV_30.10", "PXK_30.10", "ToKhai_B11_30.10", "PLX_30.10", "DNTT"]),
+        ("tesa", ["Invoice_30.10", "VAT_BKAV_30.10", "PXK_30.10", "PLX_30.10", "DNTT"]),
     ],
 )
 def test_full_workbook_sheet_set(customer, sheets, seed, full_workbook):
@@ -89,19 +89,6 @@ def test_dntt_amount_in_words(seed):
     ws = app.build_dntt_sheet(new_wb(), seed["kodi"])
     assert ws["F18"].value == 76_350_000
     assert ws["C22"].value == "Bảy mươi sáu triệu ba trăm năm mươi nghìn đồng"
-
-
-def test_customs_b11_cross_checks(seed):
-    ws = app.build_customs_b11_sheet(new_wb(), seed["tesa"])
-    checks = {}
-    for row in ws.iter_rows(values_only=True):
-        if row[1] in ("ĐẠT", "CẦN SỬA"):
-            checks[row[0]] = row[1]
-    assert len(checks) == 8
-    # Lô mẫu 30/10 có dòng "nợ po" nên kiểm tra số PO phải báo CẦN SỬA
-    assert checks["Số PO đúng 10 chữ số, bắt đầu 8600"] == "CẦN SỬA"
-    assert checks["Số lượng x đơn giá = thành tiền từng dòng"] == "ĐẠT"
-    assert checks["Tổng trị giá = tổng các dòng"] == "ĐẠT"
 
 
 @pytest.mark.parametrize("customer", ["kodi", "tesa"])

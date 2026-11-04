@@ -109,7 +109,7 @@ def test_exporting_again_replaces_entry_not_duplicates(kodi_lot):
 @pytest.mark.parametrize("customer,expected", [
     ("shirai", ["SO", "PKL", "VAT", "PXK", "DNTT", "CHECK"]),
     ("kodi", ["PKL", "VAT", "PXK", "DNTT", "CHECK"]),
-    ("tesa", ["PKL", "VAT", "PXK", "B11", "PLX", "DNTT", "CHECK"]),
+    ("tesa", ["PKL", "VAT", "PXK", "PLX", "DNTT", "CHECK"]),
 ])
 def test_bundle_modes_match_full_bundle_per_customer(store, seed, customer, expected):
     assert app.lot_bundle_modes(seed[customer]) == expected
@@ -117,7 +117,7 @@ def test_bundle_modes_match_full_bundle_per_customer(store, seed, customer, expe
 
 def test_single_modes_reject_wrong_customer(store, seed):
     rec = app.lot_build_record(store, {"customer": "kodi", "po": "P"}, seed["kodi"]["items"])
-    for mode in ("SO", "B11", "PACK", "PGH", "DCCN"):
+    for mode in ("SO", "PACK", "PGH", "DCCN"):
         with pytest.raises(ValueError):
             app.lot_export(store, rec, mode)
 
