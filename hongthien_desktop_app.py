@@ -938,15 +938,19 @@ class DedicatedDataStore:
         return out
 
     def kho_add(self, src_path, loai, khach):
-        """Nạp một file Word/Excel mẫu vào kho, tự đặt tên <LOẠI>_<Khách>_<số>. Trả (tên file, ô nhận ra, ô lạ)."""
-        import mau_rieng
+        """Nạp một file Word/Excel mẫu (đã có sẵn ô {{...}}) vào kho. Trả (tên file, ô nhận ra, ô lạ)."""
         ext = os.path.splitext(src_path)[1].lower()
         if ext not in (".docx", ".xlsx"):
             raise ValueError("Chỉ nhận file Word (.docx) hoặc Excel (.xlsx).")
+        with open(src_path, "rb") as f:
+            return self.kho_add_bytes(f.read(), ext, loai, khach)
+
+    def kho_add_bytes(self, data, ext, loai, khach):
+        """Nạp nội dung mẫu vào kho, tự đặt tên <LOẠI>_<Khách>_<số>. Trả (tên file, ô nhận ra, ô lạ)."""
+        import mau_rieng
+        ext = "." + ext.lower().lstrip(".")
         loai = re.sub(r"[^A-Z0-9]", "", str(loai or "KHAC").upper()) or "KHAC"
         khach = re.sub(r"[^0-9A-Za-zÀ-ỹ]+", "", str(khach or "").strip()) or "Chung"
-        with open(src_path, "rb") as f:
-            data = f.read()
         known, unknown = mau_rieng.template_tokens(ext, data)
         if not known:
             raise ValueError("Trong file chưa có ô thay thế nào. Hãy gõ vào file mẫu các ô dạng {{so_po}}, {{ngay}}, {{ten}}, {{sl}}… rồi nạp lại.")
@@ -959,6 +963,12 @@ class DedicatedDataStore:
         with open(os.path.join(folder, name), "wb") as f:
             f.write(data)
         return name, known, unknown
+
+    def detect_context(self, khach_label=""):
+        """Thông tin để nhận biết tên/địa chỉ/MST bên bán và khách trong chứng từ nạp vào (khách theo tên gọi, không có thì để máy đoán)."""
+        prof = next((p for k, p in PROFILES.items() if khach_label and (str(p.get("label") or "").lower() == khach_label.lower() or k == khach_label.lower())), None)
+        cust = {"name": prof.get("name", ""), "addr": prof.get("addr", ""), "mst": prof.get("mst", "")} if prof else None
+        return {"seller": {"name": HT_NAME, "addr": ADDR_HT, "mst": MST_HT}, "customer": cust}
 
     def kho_remove(self, name):
         path = os.path.join(self.kho_folder(), os.path.basename(name))

@@ -80,23 +80,26 @@ def test_preview_shapes(store):
     assert grid["kind"] == "grid" and grid["rows"][0][0] == "PHỤ LỤC X" and grid["rows"][10][:4] == ["{{stt}}", "{{ma}}", "{{ten}}", "{{sl}}"]
 
 
-def test_kho_page_shows_images_only_and_edit_tool(qapp, store, tmp_path):
-    """Tab Kho mẫu chỉ hiện hình mẫu (không chọn); công cụ sửa mẫu đổi chữ thành ô, hoàn tác, lưu vào kho."""
-    from ui_qt.pages_kho import EditTemplateDialog, MauPage, kho_cards
+def test_kho_page_image_left_list_right_and_edit_tool(qapp, store):
+    """Tab Kho mẫu: hình bên trái (vừa khung), danh sách có thanh cuộn bên phải; công cụ sửa mẫu đổi chữ thành ô, hoàn tác, lưu vào kho."""
+    from PySide6.QtCore import Qt
+    from ui_qt.pages_kho import EditTemplateDialog, MauPage
     page = MauPage(app, store)
-    page.resize(1100, 800)
+    page.resize(1200, 800)
+    page.show()
     page.refresh()
     names = [it["file"] for it in page.items]
-    assert {"PLX_Arizon_01.xlsx", "PLX_Sunlu_01.docx"} <= set(names) and not hasattr(page, "use_btn") and not hasattr(page, "table")
-    cards = kho_cards(page.items, store)
-    assert all(c["image"] is not None and not c["image"].isNull() for c in cards)  # thẻ có hình mẫu
-    page.flow.set_current(names.index("PLX_Sunlu_01.docx"), animate=False)
-    page.show_current()
-    assert not page.view.image.isNull() and "PLX_Sunlu_01" in page.title.text() and page.view.image.height() > 500  # trang Word cao
-    page.flow.set_current(names.index("PLX_Arizon_01.xlsx"), animate=False)
-    page.show_current()
-    assert not page.view.image.isNull() and page.view.image.width() > 500
-    # công cụ sửa mẫu
+    assert {"PLX_Arizon_01.xlsx", "PLX_Sunlu_01.docx"} <= set(names) and not hasattr(page, "use_btn")
+    assert page.listw.verticalScrollBarPolicy() == Qt.ScrollBarAlwaysOn and page.listw.x() > page.view.x()  # danh sách bên phải, hình bên trái
+    assert not page.listw.item(0).icon().isNull()
+    page.listw.setCurrentRow(names.index("PLX_Sunlu_01.docx"))
+    assert not page.view.image.isNull() and "PLX_Sunlu_01" in page.title.text()
+    pm = page.view.label.pixmap()
+    assert pm.height() <= page.view.viewport().height() and pm.width() <= page.view.viewport().width()  # vừa khung: thấy cả trang
+    page.view.toggle_fit()  # bấm hình: phóng to cỡ thật
+    assert page.view.label.pixmap().height() == page.view.image.height()
+    page.listw.setCurrentRow(names.index("PLX_Arizon_01.xlsx"))
+    assert not page.view.image.isNull()
     dlg = EditTemplateDialog(app, store, "PLX_Sunlu_01.docx")
     dlg.find.setText("Bắc Ninh")
     dlg.token.setCurrentIndex(dlg.token.findData("khach_ten"))
@@ -169,3 +172,132 @@ def test_coverflow_navigation_and_hit_test(qapp, store):
     assert flow.index == 2
     assert not flow.grab().isNull()  # vẽ được không lỗi
     flow.close()
+
+
+def make_filled_workbook(path):
+    """Chứng từ ĐÃ ĐIỀN SẴN (dữ liệu giả) có cấu trúc giống file thật: 3 sheet, bảng hàng có dòng mẫu thừa, ô tổng cộng, số PO, ngày, tên công ty."""
+    wb = openpyxl.Workbook()
+    po = wb.active
+    po.title = "Đơn đặt hàng"
+    po["A1"] = "CÔNG TY TNHH KHO MẪU THỬ"
+    po["D3"] = "Ngày 03 tháng  06 năm 2026"
+    po["A5"] = "Số:YNCGDD2606030001"
+    po["A6"] = f"Kính gửi: {app.HT_NAME}"
+    for col, h in zip("ABCDEF", ("STT", "TÊN SẢN PHẨM", "ĐVT", "SỐ LƯỢNG", "ĐƠN GIÁ", "THÀNH TIỀN")):
+        po[f"{col}9"] = h
+    po["A10"], po["B10"], po["C10"], po["D10"], po["E10"], po["F10"] = 1, "Ống lõi giấy phi 50x55x40mm", "chiếc", 32000, 1060, "=D10*E10"
+    for r in range(11, 16):
+        po[f"C{r}"] = "ống"
+    po["B16"], po["D16"], po["F16"] = "Tổng cộng", "=SUM(D10:D10)", "=SUM(F10:F10)"
+    po["A17"] = "Thời gian giao hàng: vào ngày 19/06/2026"
+    po["A19"] = "Ghi chú cuối"
+    po.merge_cells("A19:F19")
+    bb = wb.create_sheet("BBGH")
+    bb["A2"] = "Số:06/2026SL"
+    bb["A13"], bb["B13"], bb["C13"], bb["E13"], bb["F13"], bb["G13"] = "Ngày hạch toán", "Số  hóa đơn", "Diễn giải", "Số lượng", "Đơn giá", "Số Tiền"
+    bb["A15"], bb["B15"], bb["C15"], bb["E15"], bb["F15"], bb["G15"] = "19/06/2026", "00001558", "Ống A", 32000, 1060, "=E15*F15"
+    for r in range(16, 20):
+        bb[f"B{r}"] = "00002149"
+    bb["A20"], bb["G20"] = "Cộng", "=SUM(G15:G19)"
+    bb["A22"] = "Ký tên"
+    wb.create_sheet("invoice")["A1"] = "Invoice dùng chung"
+    wb.save(path)
+
+
+def test_detect_proposes_changeable_spots_and_user_decides(tmp_path):
+    import mau_detect
+    src = tmp_path / "chung_tu.xlsx"
+    make_filled_workbook(src)
+    data = src.read_bytes()
+    ctx = {"seller": {"name": app.HT_NAME, "addr": app.ADDR_HT, "mst": app.MST_HT}, "customer": {"name": "CÔNG TY TNHH KHO MẪU THỬ", "addr": "", "mst": ""}}
+    c = {d["id"]: d for d in mau_detect.detect_xlsx(data, ctx, "Đơn đặt hàng")}
+    assert c["Đơn đặt hàng!A5#0"]["token"] == "so_po" and c["Đơn đặt hàng!A5#0"]["value"] == "YNCGDD2606030001"
+    assert [c[f"Đơn đặt hàng!{x}10"]["token"] for x in "ABCDEF"] == ["stt", "ten", "dvt", "sl", "gia", "thanh_tien"]
+    assert c["Đơn đặt hàng!D16"]["token"] == "tong_sl" and c["Đơn đặt hàng!F16"]["token"] == "tong_tri_gia" and c["Đơn đặt hàng!drop"]["count"] == 5
+    assert c["Đơn đặt hàng!A1#0"]["token"] == "khach_ten" and c["Đơn đặt hàng!A6#0"]["token"] == "ben_ban_ten"
+    assert [c[f"Đơn đặt hàng!D3#{k}"]["token"] for k in range(3)] == ["dd", "mm", "yyyy"] and c["Đơn đặt hàng!A17#0"]["token"] == "ngay"
+    bb = {d["id"]: d for d in mau_detect.detect_xlsx(data, ctx, "BBGH")}
+    assert bb["BBGH!B15"]["token"] == "so_hd" and bb["BBGH!A15"]["token"] == "ngay" and bb["BBGH!drop"]["count"] == 4  # dòng trống dưới tiêu đề vẫn tìm đúng dòng hàng đầu
+    assert [bb[f"BBGH!A2#{k}"]["token"] for k in range(2)] == ["mm", "yyyy"]
+    # người dùng quyết định: chỉ chọn số PO và tên hàng, các chỗ khác giữ nguyên chữ
+    out = mau_detect.apply_xlsx(data, {"Đơn đặt hàng!A5#0": "so_po", "Đơn đặt hàng!B10": "ten"}, "Đơn đặt hàng", ctx)
+    wb = openpyxl.load_workbook(io.BytesIO(out))
+    assert wb.sheetnames == ["Đơn đặt hàng"] and wb.active["A5"].value == "Số:{{so_po}}" and wb.active["B10"].value == "{{ten}}" and wb.active["D10"].value == 32000
+
+
+def test_detect_full_convert_then_fill_with_lot_data(store, tmp_path):
+    """Chấp nhận mọi gợi ý: bảng hàng nhân lên theo số mặt hàng, dòng mẫu thừa bị xóa, công thức bên dưới dời đúng chỗ."""
+    import mau_detect
+    src = tmp_path / "chung_tu.xlsx"
+    make_filled_workbook(src)
+    data = src.read_bytes()
+    ctx = store.detect_context("")
+    ch = {d["id"]: d["token"] for d in mau_detect.detect_xlsx(data, ctx, "Đơn đặt hàng") if d["token"]}
+    tpl = mau_detect.apply_xlsx(data, ch, "Đơn đặt hàng", ctx)
+    ws = openpyxl.load_workbook(io.BytesIO(tpl)).active
+    assert ws["A10"].value == "{{stt}}" and ws["D11"].value == "{{tong_sl}}" and ws["A12"].value == "Thời gian giao hàng: vào ngày {{ngay}}" and ws.max_row < 20  # đã xóa 5 dòng thừa
+    assert any(str(r) == "A14:F14" for r in ws.merged_cells.ranges)  # ô gộp phía dưới dời lên theo
+    rec_items = [{"ma_sp": "A1", "ten_sp": "Ống A", "unit": "chiếc", "qty": 100, "price": 10, "amount": 1000}, {"ma_sp": "A2", "ten_sp": "Ống B", "unit": "chiếc", "qty": 50, "price": 20, "amount": 1000}]
+    prof = {"name": "KHÁCH X", "addr": "ĐC", "mst": "0100000001"}
+    consts = {"name": app.HT_NAME, "addr": app.ADDR_HT, "mst": app.MST_HT, "date": app._iso_to_date, "words": app.num_to_vn_words}
+    rec = {"docDate": "2026-11-05", "poNumber": "PO-NEW", "items": rec_items}
+    out, unknown = mau_rieng.fill_xlsx(tpl, mau_rieng.batch_values(rec, prof, consts), mau_rieng.item_values(rec))
+    ws = openpyxl.load_workbook(io.BytesIO(out)).active
+    assert unknown == [] and ws["A5"].value == "Số:PO-NEW" and [ws[f"B{r}"].value for r in (10, 11)] == ["Ống A", "Ống B"]
+    assert ws["D12"].value == "150" and ws["A13"].value.endswith("05/11/2026")  # tổng cộng và dòng bên dưới dời xuống đúng chỗ khi thêm dòng hàng
+
+
+def test_detect_dialog_adds_each_sheet_as_named_template(qapp, store, tmp_path):
+    from PySide6.QtCore import Qt
+    from ui_qt.pages_kho import DetectDialog
+    src = tmp_path / "chung_tu.xlsx"
+    make_filled_workbook(src)
+    dlg = DetectDialog(None, store, str(src), "Sunlu")
+    names = [pg["sheet"] for pg in dlg.pages]
+    assert names == ["Đơn đặt hàng", "BBGH", "invoice"] and [pg["inc"].isChecked() for pg in dlg.pages] == [True, True, False]  # Invoice dùng chung: mặc định không nạp
+    assert [pg["loai"].currentData() for pg in dlg.pages] == ["PO", "BBGH", "KHAC"]
+    po = dlg.pages[0]
+    assert po["table"].verticalScrollBarPolicy() == Qt.ScrollBarAlwaysOn and po["table"].rowCount() >= 12
+    assert "3 mẫu" not in dlg.ok.text() and "2 mẫu" in dlg.ok.text()
+    # người dùng bỏ tích một chỗ và đổi một chỗ sang ô khác
+    ids = [d["id"] for d in po["cands"]]
+    i_po = ids.index("Đơn đặt hàng!A5#0")
+    po["table"].item(i_po, 0).setCheckState(Qt.Unchecked)
+    i_ten = ids.index("Đơn đặt hàng!B10")
+    po["combos"][i_ten].setCurrentIndex(po["combos"][i_ten].findData("ma_hang"))
+    assert po["table"].item(i_ten, 0).checkState() == Qt.Checked
+    dlg.accept()
+    assert dlg.names == ["PO_Sunlu_01.xlsx", "BBGH_Sunlu_01.xlsx"]
+    ws = openpyxl.load_workbook(io.BytesIO(store.kho_read("PO_Sunlu_01.xlsx"))).active
+    assert ws["A5"].value == "Số:YNCGDD2606030001" and ws["B10"].value == "{{ma_hang}}" and ws["D10"].value == "{{sl}}"  # chỗ bỏ tích giữ nguyên chữ
+    assert "BBGH_Sunlu_01.xlsx" in [m["file"] for m in store.kho_list()]
+    dlg.close()
+
+
+def test_detect_dialog_blocks_empty_template(qapp, store, tmp_path, monkeypatch):
+    from PySide6.QtCore import Qt
+    from ui_qt import pages_kho
+    shown = []
+    monkeypatch.setattr(pages_kho.widgets, "warn", lambda parent, title, text: shown.append(text))
+    src = tmp_path / "chung_tu.xlsx"
+    make_filled_workbook(src)
+    dlg = pages_kho.DetectDialog(None, store, str(src), "Sunlu")
+    for pg in dlg.pages:
+        for i in range(pg["table"].rowCount()):
+            pg["table"].item(i, 0).setCheckState(Qt.Unchecked)
+    dlg.accept()
+    assert dlg.names == [] and shown and "ô thay thế" in shown[0]
+    dlg.close()
+
+
+def test_detect_docx_candidates_and_apply():
+    import kho_mau
+    import mau_detect
+    filled = mau_rieng.fill_docx(kho_mau.plx_sunlu_docx(), {"tong_sl": "20.000", "ten_hang": "ống A", "tong_tri_gia": "21.200.000", "so_tk": "308935585730", "ngay": "09/10/2026", "so_hd": "00003964",
+                                                            "ben_ban_ten": app.HT_NAME, "dd": "09", "mm": "10", "yyyy": "2026", "hs": "48229090", "ben_ban_dia_chi": "Lô CN-15.1, KCN Thuận Thành II, Bắc Ninh"}, [])[0]
+    ctx = {"seller": {"name": app.HT_NAME, "addr": app.ADDR_HT, "mst": app.MST_HT}, "customer": None}
+    c = {d["value"]: d for d in mau_detect.detect_docx(filled, ctx)}
+    assert c["308935585730"]["token"] == "so_tk" and c["00003964"]["token"] == "so_hd" and c["20.000"]["token"] == "tong_sl" and c["21.200.000"]["token"] == "tong_tri_gia"
+    out = mau_detect.apply_docx(filled, {d["id"]: d["token"] for d in c.values() if d["token"] in ("so_tk", "tong_sl")}, ctx)
+    text = mau_rieng.preview("docx", out)["text"]
+    assert "{{so_tk}}" in text and "{{tong_sl}}" in text and "21.200.000" in text  # chỉ đổi chỗ đã chọn

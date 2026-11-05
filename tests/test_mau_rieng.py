@@ -124,8 +124,9 @@ def test_customers_page_add_form_and_export_button(qapp, store, rec, tmp_path):
     page.refresh(select="maurieng")
     src = tmp_path / "Mau X.docx"
     src.write_bytes(make_docx())
-    page.add_form(str(src))
-    assert "Đã thêm mẫu" in page.msg.text() and store.custom_forms("maurieng") == ["Mau X.docx"]
+    names = [store.kho_add(str(src), "PLX", "MauRieng")[0]]  # hộp thoại nhận diện chỗ đổi được thay bằng việc nạp sẵn vào kho (file đã có ô {{...}})
+    page.add_form(names=names)
+    assert "Khách đã có 1 mẫu riêng" in page.msg.text() and store.custom_forms("maurieng") == ["PLX_MauRieng_01.docx"]
     page.close()
 
 

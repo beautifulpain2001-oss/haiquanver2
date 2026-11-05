@@ -1,12 +1,13 @@
 """Kho mẫu chung: mẫu Word/Excel dùng lại giữa các khách (đặt tên <LOẠI>_<Khách>_<số>, VD PLX_Arizon_01). Có xem mẫu ngay trong phần mềm."""
 
 import os
+import re
 
-from PySide6.QtCore import QEasingCurve, QRectF, Qt, QUrl, QVariantAnimation, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QImage, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtCore import QEasingCurve, QRectF, QSize, Qt, QUrl, QVariantAnimation, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QDialog, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit,
-    QPushButton, QScrollArea, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QCheckBox, QComboBox, QDialog, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit,
+    QPushButton, QScrollArea, QStackedWidget, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from . import widgets
@@ -310,23 +311,187 @@ class TemplatePreview(QWidget):
         self.caption.setText("Chọn một mẫu để xem.")
 
 
+class DetectDialog(QDialog):
+    """Nạp chứng từ đã điền sẵn thành mẫu: phần mềm nhận ra các chỗ có thể thay đổi (số PO, hóa đơn, ngày, tên hàng, bảng hàng…) và ĐỀ XUẤT ô thay thế;
+    người dùng quyết định chỗ nào thành ô. Excel nhiều sheet: mỗi sheet tích chọn thành một mẫu riêng. Kết quả: `names` (các mẫu đã vào kho)."""
+
+    KEEP, DROP = "(giữ nguyên)", "(xóa dòng)"
+
+    def __init__(self, core, store, path, khach_label="Chung", parent=None):
+        super().__init__(parent)
+        import mau_detect
+        import mau_rieng
+        self.core, self.store, self.md, self.mr = core, store, mau_detect, mau_rieng
+        self.path, self.names = path, []
+        self.ext = os.path.splitext(path)[1].lower().lstrip(".")
+        with open(path, "rb") as f:
+            self.data = f.read()
+        self.setWindowTitle("Nạp mẫu vào kho — phân tích chứng từ")
+        self.resize(1360, 820)
+        self.khach = QLineEdit(khach_label)
+        self.ctx = store.detect_context(khach_label)
+        lay = QVBoxLayout(self)
+        head = QLabel(f"File: {os.path.basename(path)}. Phần mềm đã nhận ra các chỗ có thể thay đổi. Bạn tích chỗ nào muốn thành ô, đổi ô nếu cần; chỗ không tích giữ nguyên chữ.")
+        head.setWordWrap(True)
+        head.setObjectName("hint")
+        lay.addWidget(head)
+        self.tabs = QTabWidget()
+        lay.addWidget(self.tabs, 1)
+        self.pages = []
+        names = mau_detect.sheet_names(self.data) if self.ext in ("xlsx", "xlsm") else [""]
+        for sh in names:
+            pg = self._page(sh)
+            self.pages.append(pg)
+            self.tabs.addTab(pg["widget"], sh or "Văn bản")
+        self.tabs.tabBar().setVisible(len(names) > 1)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Khách nguồn (đặt tên mẫu):"))
+        self.khach.setMaximumWidth(220)
+        self.khach.textChanged.connect(self._names)
+        row.addWidget(self.khach)
+        self.msg = QLabel("")
+        self.msg.setObjectName("hint")
+        row.addWidget(self.msg, 1)
+        cancel = QPushButton("Hủy")
+        cancel.setObjectName("sec")
+        cancel.clicked.connect(self.reject)
+        self.ok = QPushButton("📎  Nạp vào kho")
+        self.ok.clicked.connect(self.accept)
+        row.addWidget(cancel)
+        row.addWidget(self.ok)
+        lay.addLayout(row)
+        self._names()
+
+    def _page(self, sheet):
+        from . import mau_render
+        w = QWidget()
+        h = QHBoxLayout(w)
+        left = QVBoxLayout()
+        h.addLayout(left, 5)
+        top = QHBoxLayout()
+        inc = QCheckBox("Nạp thành mẫu")
+        inc.setChecked("INVOICE" not in self.md._UP(sheet))  # Invoice dùng chung cho mọi khách nên mặc định không nạp
+        inc.toggled.connect(lambda _c: self._names())
+        top.addWidget(inc)
+        top.addWidget(QLabel("Loại chứng từ:"))
+        loai = QComboBox()
+        for code, text in LOAI_TEXT.items():
+            loai.addItem(f"{code} — {text}", code)
+        loai.setCurrentIndex(loai.findData(self.md.guess_loai(sheet or os.path.basename(self.path))))
+        loai.currentIndexChanged.connect(lambda _i: self._names())
+        top.addWidget(loai)
+        name = QLabel("")
+        top.addWidget(name)
+        top.addStretch(1)
+        left.addLayout(top)
+        view = ImageView(fit=True)
+        try:
+            one = self.md.split_sheet(self.data, sheet) if sheet else self.data
+            from . import mau_render as mr
+            view.show_image(mr.render_template(self.ext, one, 900))
+        except Exception as e:  # noqa: BLE001
+            view.show_image(None, f"Không vẽ được hình: {e}")
+        left.addWidget(view, 1)
+        cap = QLabel("Hình mẫu gốc (chưa sửa); bấm vào hình để phóng to. Sau khi nạp, chỗ đã tích thành ô {{…}} tô vàng.")
+        cap.setObjectName("hint")
+        left.addWidget(cap)
+        right = QVBoxLayout()
+        h.addLayout(right, 6)
+        cands = self.md.detect(self.ext, self.data, self.ctx, sheet or None)
+        right.addWidget(QLabel(f"<b>{len(cands)} chỗ máy nhận ra</b> — dòng nền vàng nhạt là chỗ máy chưa rõ là gì, bạn tự chọn ô hoặc để nguyên."))
+        table = QTableWidget(len(cands), 5)
+        table.setHorizontalHeaderLabels(["Dùng", "Vị trí", "Đang là", "Đổi thành ô", "Vì sao đề xuất"])
+        table.verticalHeader().hide()
+        table.setAlternatingRowColors(True)
+        table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        hh = table.horizontalHeader()
+        hh.setSectionResizeMode(QHeaderView.ResizeToContents)
+        hh.setSectionResizeMode(2, QHeaderView.Stretch)
+        hh.setSectionResizeMode(4, QHeaderView.Stretch)
+        toks = list(self.mr.TOKENS) + list(self.mr.ITEM_TOKENS)
+        combos = []
+        for r, d in enumerate(cands):
+            it = QTableWidgetItem()
+            it.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            it.setCheckState(Qt.Checked if d["token"] else Qt.Unchecked)
+            table.setItem(r, 0, it)
+            where = d["where"].replace(" (dòng hàng đầu tiên)", " · dòng hàng").replace(" (dòng tổng cộng)", " · tổng cộng")
+            for c, v in ((1, where), (2, d["value"].replace("\n", " ")[:60]), (4, d["why"])):
+                table.setItem(r, c, QTableWidgetItem(v))
+                if not d["token"]:
+                    table.item(r, c).setBackground(QColor("#FEF3C7"))
+            cb = QComboBox()
+            cb.addItem(self.KEEP, "")
+            for k, desc in toks:
+                cb.addItem(f"{{{{{k}}}}}  —  {desc}", k)
+            if d["kind"] == "drop_rows":
+                cb.addItem(self.DROP, "(xóa)")
+            cb.setCurrentIndex(max(0, cb.findData(d["token"])))
+            cb.currentIndexChanged.connect(lambda _i, row=r, t=table: t.item(row, 0).setCheckState(Qt.Checked if t.cellWidget(row, 3).currentData() else Qt.Unchecked))
+            table.setCellWidget(r, 3, cb)
+            combos.append(cb)
+        right.addWidget(table, 1)
+        rr = QHBoxLayout()
+        b1 = QPushButton("✔  Tích tất cả gợi ý")
+        b1.setObjectName("sec")
+        b2 = QPushButton("✖  Bỏ tích hết")
+        b2.setObjectName("sec")
+        b1.clicked.connect(lambda: [table.item(i, 0).setCheckState(Qt.Checked if cands[i]["token"] else Qt.Unchecked) for i in range(len(cands))])
+        b2.clicked.connect(lambda: [table.item(i, 0).setCheckState(Qt.Unchecked) for i in range(len(cands))])
+        rr.addWidget(b1)
+        rr.addWidget(b2)
+        rr.addStretch(1)
+        right.addLayout(rr)
+        return {"widget": w, "sheet": sheet, "inc": inc, "loai": loai, "name": name, "table": table, "combos": combos, "cands": cands, "view": view}
+
+    def _names(self):
+        n = 0
+        for pg in self.pages:
+            label = f"{pg['loai'].currentData()}_{re.sub(r'[^0-9A-Za-zÀ-ỹ]+', '', self.khach.text()) or 'Chung'}_…"
+            pg["name"].setText(f"<b>{label}</b>" if pg["inc"].isChecked() else "<i>(không nạp)</i>")
+            n += pg["inc"].isChecked()
+        self.ok.setText(f"📎  Nạp {n} mẫu vào kho" if n else "📎  Nạp vào kho")
+        self.ok.setEnabled(n > 0)
+
+    def choices(self, pg):
+        out = {}
+        for i, d in enumerate(pg["cands"]):
+            if pg["table"].item(i, 0).checkState() == Qt.Checked and pg["combos"][i].currentData():
+                out[d["id"]] = pg["combos"][i].currentData()
+        return out
+
+    def accept(self):
+        added = []
+        for pg in self.pages:
+            if not pg["inc"].isChecked():
+                continue
+            ch = self.choices(pg)
+            try:
+                if ch:
+                    data = self.md.apply(self.ext, self.data, ch, pg["sheet"] or None, self.ctx)
+                else:  # không tích chỗ nào: chỉ nạp được nếu file đã có sẵn ô {{...}}
+                    data = self.md.split_sheet(self.data, pg["sheet"]) if pg["sheet"] else self.data
+                name, _k, _u = self.store.kho_add_bytes(data, self.ext, pg["loai"].currentData(), self.khach.text())
+                added.append(name)
+            except ValueError as e:
+                widgets.warn(self, "Chưa nạp được mẫu", f"{pg['sheet'] or os.path.basename(self.path)}: {e}")
+                self.names = added
+                return
+        self.names = added
+        super().accept()
+
+
 def add_template_to_kho(parent, store, khach_label, path=None):
-    """Hỏi loại chứng từ rồi nạp file mẫu vào kho. Trả tên mẫu trong kho hoặc None (hủy/lỗi)."""
-    import kho_mau
+    """Chọn file Word/Excel rồi mở hộp thoại nhận diện chỗ đổi được; trả danh sách tên mẫu đã nạp vào kho (rỗng nếu hủy)."""
     if not path:
-        path, _ = QFileDialog.getOpenFileName(parent, "Chọn file Word/Excel mẫu", "", "Mẫu (*.docx *.xlsx)")
+        path, _ = QFileDialog.getOpenFileName(parent, "Chọn file Word/Excel chứng từ hoặc mẫu", "", "Chứng từ (*.docx *.xlsx)")
     if not path:
-        return None
-    names = [f"{code} — {text}" for code, text in kho_mau.LOAI.items()]
-    pick, ok = QInputDialog.getItem(parent, "Loại chứng từ", "Mẫu này là chứng từ gì?", names, 0, False)
-    if not ok:
-        return None
-    try:
-        name, known, unknown = store.kho_add(path, pick.split(" — ")[0], khach_label)
-    except ValueError as e:
-        widgets.warn(parent, "Chưa nạp được mẫu", str(e))
-        return None
-    return name
+        return []
+    if os.path.splitext(path)[1].lower() not in (".docx", ".xlsx"):
+        widgets.warn(parent, "Chưa nạp được mẫu", "Chỉ nhận file Word (.docx) hoặc Excel (.xlsx).")
+        return []
+    dlg = DetectDialog(None, store, path, khach_label, parent)
+    return dlg.names if dlg.exec() else []
 
 
 class KhoPicker(QWidget):
@@ -397,32 +562,55 @@ class KhoPicker(QWidget):
             self.preview.clear()
 
     def add_new(self, path=None):
-        name = add_template_to_kho(self, self.store, self.khach_label(), path if isinstance(path, str) else None)
-        if name:
-            self.refresh(check=[name])
-            self.flow.set_current([it["file"] for it in self.items].index(name), animate=False)
+        names = add_template_to_kho(self, self.store, self.khach_label(), path if isinstance(path, str) else None)
+        if names:
+            self.refresh(check=names)
+            self.flow.set_current([it["file"] for it in self.items].index(names[0]), animate=False)
             self.on_row(self.flow.index)
 
 
 class ImageView(QScrollArea):
-    """Khung cuộn hiện hình mẫu cỡ lớn."""
+    """Khung hiện hình mẫu. Mặc định VỪA KHUNG (thấy cả trang); bấm vào hình để phóng to cỡ thật (cuộn được), bấm lần nữa để thu lại."""
 
-    def __init__(self):
+    def __init__(self, fit=True):
         super().__init__()
+        self.fit = fit
         self.setWidgetResizable(True)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.label = QLabel("Chọn một mẫu để xem hình.")
-        self.label.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+        self.label.setAlignment(Qt.AlignCenter)
+        self.label.setStyleSheet("background:#E2E8F0")
         self.setWidget(self.label)
         self.image = QImage()
+        self.label.mousePressEvent = lambda e: self.toggle_fit()
 
     def show_image(self, img, note=""):
-        self.image = img
-        if img is None or img.isNull():
+        self.image = img if img is not None else QImage()
+        if self.image.isNull():
             self.label.setPixmap(QPixmap())
             self.label.setText(note or "Không vẽ được hình mẫu này. Bấm “Mở bằng Word/Excel” để xem.")
         else:
-            self.label.setPixmap(QPixmap.fromImage(img))
-            self.label.setText("")
+            self._apply()
+
+    def _apply(self):
+        if self.image.isNull():
+            return
+        if self.fit:
+            vp = self.viewport().size()
+            pm = QPixmap.fromImage(self.image).scaled(max(100, vp.width() - 4), max(100, vp.height() - 4), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        else:
+            pm = QPixmap.fromImage(self.image)
+        self.label.setPixmap(pm)
+        self.label.setText("")
+
+    def toggle_fit(self):
+        self.fit = not self.fit
+        self._apply()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if self.fit:
+            self._apply()
 
     def clear(self):
         self.image = QImage()
@@ -444,7 +632,7 @@ class EditTemplateDialog(QDialog):
         self.history = []
         self.dirty = False
         lay = QHBoxLayout(self)
-        self.view = ImageView()
+        self.view = ImageView(fit=False)
         lay.addWidget(self.view, 3)
         side = QVBoxLayout()
         lay.addLayout(side, 2)
@@ -562,7 +750,8 @@ class EditTemplateDialog(QDialog):
 
 
 class MauPage(QWidget):
-    """Tab "Kho mẫu": chỉ để XEM hình các mẫu (băng chuyền + hình cỡ lớn). Có công cụ sửa mẫu, nạp mẫu mới, xóa; việc chọn mẫu cho khách làm ở bước thêm khách."""
+    """Tab "Kho mẫu": hình mẫu đang chọn nằm BÊN TRÁI (vừa khung, thấy cả trang), danh sách mẫu BÊN PHẢI (có thanh cuộn). Chỉ để xem;
+    có nút Sửa mẫu, Nạp mẫu mới, Mở bằng Word/Excel, Xóa. Việc chọn mẫu cho khách làm ở bước thêm khách mới."""
 
     def __init__(self, core, store):
         super().__init__()
@@ -573,22 +762,31 @@ class MauPage(QWidget):
         lay.setSpacing(10)
         t = QLabel("Kho mẫu chứng từ")
         t.setObjectName("title")
-        h = QLabel("Hình các mẫu Word/Excel đang có, đặt tên LOẠI_Khách_số (VD PLX_Arizon_01). Chuyển mẫu bằng ❮ ❯, phím mũi tên hoặc bấm thẻ bên cạnh. "
-                   "Ô tô vàng là chỗ phần mềm điền số liệu. Cần chỉnh thì dùng “Sửa mẫu”.")
+        h = QLabel("Chọn một mẫu ở danh sách bên phải để xem hình bên trái. Ô tô vàng là chỗ phần mềm điền số liệu. Bấm vào hình để phóng to. Cần chỉnh thì bấm “Sửa mẫu”.")
         h.setObjectName("hint")
         h.setWordWrap(True)
         lay.addWidget(t)
         lay.addWidget(h)
-        self.flow = CoverFlow()
-        self.flow.setMinimumHeight(300)
-        self.flow.current_changed.connect(self.on_flow)
-        lay.addWidget(self.flow)
+        body = QHBoxLayout()
+        lay.addLayout(body, 1)
+        left = QVBoxLayout()
+        body.addLayout(left, 3)
         self.title = QLabel("")
         self.title.setObjectName("h2")
-        lay.addWidget(self.title)
-        self.view = ImageView()
-        lay.addWidget(self.view, 1)
-        row = QHBoxLayout()
+        left.addWidget(self.title)
+        self.view = ImageView(fit=True)
+        left.addWidget(self.view, 1)
+        right = QVBoxLayout()
+        body.addLayout(right, 1)
+        rt = QLabel("Danh sách mẫu")
+        rt.setObjectName("h2")
+        right.addWidget(rt)
+        self.listw = QListWidget()
+        self.listw.setIconSize(QSize(96, 124))
+        self.listw.setSpacing(4)
+        self.listw.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.listw.currentRowChanged.connect(self.on_row)
+        right.addWidget(self.listw, 1)
         self.edit_btn = QPushButton("✏  Sửa mẫu…")
         self.edit_btn.clicked.connect(self.edit)
         self.add_btn = QPushButton("📎  Nạp mẫu mới vào kho…")
@@ -601,29 +799,33 @@ class MauPage(QWidget):
         self.del_btn.setObjectName("dng")
         self.del_btn.clicked.connect(self.remove)
         for b in (self.edit_btn, self.add_btn, self.open_btn, self.del_btn):
-            row.addWidget(b)
-        row.addStretch(1)
-        lay.addLayout(row)
+            right.addWidget(b)
         self.msg = QLabel("")
         self.msg.setObjectName("hint")
         self.msg.setWordWrap(True)
-        lay.addWidget(self.msg)
-        self.show_current()
+        right.addWidget(self.msg)
+        self.on_row(-1)
 
     def refresh(self, select=None):
+        keep = self.listw.currentRow()
         self.items = self.store.kho_list()
         names = [it["file"] for it in self.items]
-        keep = names.index(select) if select in names else (self.flow.index if self.flow.cards else 0)
-        self.flow.set_cards(kho_cards(self.items, self.store), keep)
-        self.show_current()
+        self.listw.blockSignals(True)
+        self.listw.clear()
+        for it in self.items:
+            img = template_image(self.store, it, 300)
+            icon = QIcon(QPixmap.fromImage(img).scaled(96, 124, Qt.KeepAspectRatio, Qt.SmoothTransformation)) if not img.isNull() else QIcon()
+            self.listw.addItem(QListWidgetItem(icon, f"{os.path.splitext(it['file'])[0]}\n{loai_text(it['loai'])} · {ext_text(it['ext'])} · {len(it['tokens'])} ô"))
+        self.listw.blockSignals(False)
+        row = names.index(select) if select in names else (keep if 0 <= keep < len(names) else (0 if names else -1))
+        self.listw.setCurrentRow(row)
+        self.on_row(row)
 
     def current(self):
-        return self.items[self.flow.index] if self.items and 0 <= self.flow.index < len(self.items) else None
+        i = self.listw.currentRow()
+        return self.items[i] if 0 <= i < len(self.items) else None
 
-    def on_flow(self, _i):
-        self.show_current()
-
-    def show_current(self):
+    def on_row(self, _i):
         it = self.current()
         for b in (self.edit_btn, self.open_btn, self.del_btn):
             b.setEnabled(bool(it))
@@ -632,13 +834,13 @@ class MauPage(QWidget):
             self.view.clear()
             return
         self.title.setText(f"{os.path.splitext(it['file'])[0]}  —  {loai_text(it['loai'])}, {ext_text(it['ext'])}, {len(it['tokens'])} ô thay thế")
-        self.view.show_image(template_image(self.store, it, 860))
+        self.view.show_image(template_image(self.store, it, 1000))
 
     def add_new(self, path=None):
-        name = add_template_to_kho(self, self.store, "Chung", path if isinstance(path, str) else None)
-        if name:
-            self.msg.setText(f"✅  Đã nạp mẫu “{name}” vào kho.")
-            self.refresh(select=name)
+        names = add_template_to_kho(self, self.store, "Chung", path if isinstance(path, str) else None)
+        if names:
+            self.msg.setText("✅  Đã nạp vào kho: " + ", ".join(os.path.splitext(n)[0] for n in names) + ".")
+            self.refresh(select=names[0])
 
     def edit(self):
         it = self.current()

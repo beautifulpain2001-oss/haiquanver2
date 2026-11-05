@@ -1056,22 +1056,27 @@ class CustomersPage(_Page):
             json.dump(data, f, ensure_ascii=False)
         self.msg.setText(f"✅  Đã xuất {len(data['khach_moi']['items'])} mặt hàng và {len(data['khach_moi']['mau'])} file mẫu ra: {path}. Máy khác: Cài đặt → Nạp dữ liệu học.")
 
-    def add_form(self, path=None):
+    def add_form(self, path=None, names=None):
+        """Thêm mẫu riêng cho khách: file nào cũng qua hộp thoại nhận diện chỗ đổi được, vào kho mẫu rồi dùng luôn cho khách này."""
         key = self.current_key()
         if not key:
             return
-        if not path:
-            path, _ = QFileDialog.getOpenFileName(self, "Chọn file Word/Excel mẫu của khách", "", "Mẫu (*.docx *.xlsx)")
-        if not path:
+        if names is None:
+            from .pages_kho import add_template_to_kho
+            names = add_template_to_kho(self, self.store, self.core.PROFILES[key].get("label") or key, path)
+        if not names:
             return
-        try:
-            fname, known, unknown = self.store.add_custom_form(key, path)
-        except ValueError as e:
-            widgets.warn(self, "Chưa thêm được mẫu", str(e))
-            return
-        note = f" Ô lạ (sẽ để nguyên): {', '.join('{{' + u + '}}' for u in unknown)}." if unknown else ""
-        self.msg.setText(f"✅  Đã thêm mẫu “{fname}” ({len(known)} ô thay thế nhận ra).{note} Mẫu nằm trong bộ chứng từ của khách và có nút xuất riêng ở bước xuất.")
-        self.changed.emit()
+        done, bad = [], []
+        for n in names:
+            try:
+                done.append(self.store.kho_borrow(key, n)[0])
+            except ValueError as e:
+                bad.append(f"{n}: {e}")
+        if bad:
+            widgets.warn(self, "Một số mẫu chưa thêm được cho khách", "\n".join(bad))
+        if done:
+            self.msg.setText(f"✅  Khách đã có {len(done)} mẫu riêng: {', '.join(done)}. Mẫu nằm trong bộ chứng từ và có nút xuất riêng ở bước xuất (cũng có trong tab Kho mẫu).")
+            self.changed.emit()
 
     def show_tokens(self):
         import mau_rieng
