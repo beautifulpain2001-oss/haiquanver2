@@ -3530,73 +3530,76 @@ _ACC = '_(* #,##0_);_(* \\(#,##0\\);_(* "-"??_);_(@_)'
 
 
 def build_pkl_sunlu_sheet(wb, rec, sheet_name="Invoice"):
-    """HÓA ĐƠN THƯƠNG MẠI - BẢNG KÊ CHI TIẾT theo mẫu Sunlu: Số ĐĐH + ngày PO, ĐVT chiếc, kg/chiếc, cả bì = tịnh + bì, kiện = SL / SL mỗi kiện."""
+    """HÓA ĐƠN THƯƠNG MẠI - BẢNG KÊ CHI TIẾT theo sheet 'invoice' mẫu Sunlu: 11 cột A-K (không còn cột trống ngăn cách), khung viền kín từ tiêu đề
+    đến dòng Tổng, Số ĐĐH + ngày PO, ĐVT chiếc, kg/chiếc, cả bì = tịnh + bì, kiện = SL / SL mỗi kiện."""
     ws = wb.create_sheet(title=sheet_name[:31])
     prof = PROFILES.get(rec["customer"], {})
     put = _sheet_put(ws)
     items = rec.get("items", [])
     d = _iso_to_date(rec.get("docDate"))
-    for col, w in zip("ABCDEFGHIJKL", (13.9, 15.6, 44.9, 13.6, 12.1, 10.2, 12.6, 1.0, 12.4, 8.9, 10.0, 20.4)):
+    for col, w in zip("ABCDEFGHIJK", (13.9, 15.6, 44.9, 13.6, 12.1, 10.2, 12.6, 12.4, 8.9, 10.0, 20.4)):
         ws.column_dimensions[col].width = w
     po_no = rec.get("poNumber") or (rec_po_list(rec) or [("", "")])[0][0]
     po_d = rec.get("poDate") or ""
-    put("A1", "A1:L1", "HÓA ĐƠN THƯƠNG MẠI - BẢNG KÊ CHI TIẾT", 20, True, "center")
-    put("A2", "A2:D2", "Người Xuất khẩu: ", 16, True)
-    put("E2", "E2:I2", f"PXKKVCNB :{rec.get('pxkNo', '')}", 16, True)
-    put("J2", "J2:L2", f"Ngày:{_dmy(d)}", 16, True)
+    put("A1", "A1:K1", "HÓA ĐƠN THƯƠNG MẠI - BẢNG KÊ CHI TIẾT", 20, True, "center", wrap=True)
+    put("A2", "A2:D2", "Người Xuất khẩu: ", 16)
+    put("E2", "E2:H2", f"PXKKVCNB :{rec.get('pxkNo', '')}", 16)
+    put("I2", "I2:K2", f"Ngày:{_dmy(d)}", 16)
     put("A3", "A3:D3", HT_NAME, 16, True, wrap=True)
-    put("E3", "E3:I3", f"Số ĐĐH:{po_no}", 16, True)
-    put("J3", "J3:L3", f"Ngày: {po_d}", 16, True)
-    put("A4", "A4:D4", ADDR_HT, 14, wrap=True)
-    put("E4", "E4:L4", "Phương thức thanh toán: ", 16)
-    put("E5", "E5:L5", "Chuyển khoản", 16)
-    put("A6", "A6:D6", "Người nhận hàng:", 16, True)
-    put("E6", "E6:L6", "Người nhập khẩu", 16, True)
+    put("E3", "E3:H3", f"Số ĐĐH:{po_no}", 16, wrap=True)
+    put("I3", "I3:K3", f"Ngày: {po_d}", 16)
+    put("A4", "A4:D4", ADDR_HT, 16, wrap=True)
+    put("E4", "E4:K4", "Phương thức thanh toán: ", 16)
+    ws.merge_cells("A5:D5")
+    put("E5", "E5:K5", "Chuyển khoản", 16)
+    put("A6", "A6:D6", "Người nhận hàng:", 16)
+    put("E6", "E6:K6", "Người nhập khẩu", 16)
     put("A7", "A7:D7", prof.get("name", ""), 16, True, wrap=True)
-    put("E7", "E7:L7", "=A7", 16, True, wrap=True)
-    put("A8", "A8:D8", prof.get("addrKho") or prof.get("addr", ""), 14, wrap=True)
-    put("E8", "E8:L8", "=A8", 14, wrap=True)
+    put("E7", "E7:K7", "=A7", 16, True, wrap=True)
+    put("A8", "A8:D8", prof.get("addrKho") or prof.get("addr", ""), 16, wrap=True)
+    put("E8", "E8:K8", "=A8", 16, wrap=True)
     put("A9", "A9:D9", "Phương tiện vận tải: Xe Ôtô", 16)
-    put("E9", "E9:L9", f"Phương thức giao hàng: {(prof.get('customs') or {}).get('incoterm', 'DAP')}", 16)
-    put("A10", "A10:L10", f"Từ:{HT_NAME}\nĐến: {prof.get('name', '')}", 16, wrap=True)
-    ws.row_dimensions[10].height = 42
+    put("E9", "E9:K9", f"Phương thức giao hàng: {(prof.get('customs') or {}).get('incoterm', 'DAP')}", 16)
+    put("A10", "A10:K10", f"Từ:{HT_NAME}\nĐến: {prof.get('name', '')}", 16, wrap=True)
     put("A11", "A11:C11", "Diễn giải:", 16)
-    heads = ["STT", "Mã hàng", "Tên Hàng", "ĐVT", "Số \nLượng", "Trọng lượng(kg)", "Trọng lượng\n cả bì(kg)", "", "Trọng lượng\n tịnh(kg)",
-             "Số kiện", "Đơn Giá \nVND", "Thành Tiền \nVND"]
-    ws.row_dimensions[12].height = 45
+    for r, h in {1: 46.5, 2: 36, 3: 60, 4: 60, 5: 24, 6: 30, 7: 50, 8: 69, 9: 36.75, 10: 57.75, 11: 30, 12: 60}.items():
+        ws.row_dimensions[r].height = h
+    heads = ["STT", "Mã hàng", "Tên Hàng", "ĐVT", "Số \nLượng", "Trọng lượng(kg)", "Trọng lượng\n cả bì(kg)", "Trọng lượng\n tịnh(kg)", "Số kiện", "Đơn Giá \nVND", "Thành Tiền \nVND"]
     for i, h in enumerate(heads, 1):
-        c = put(f"{get_column_letter(i)}12", None, h or None, 16, True, "center", wrap=True)
-        c.border = BOX_BORDER
+        put(f"{get_column_letter(i)}12", None, h, 16, True, "center", wrap=True)
     r0 = 13
     for i, it in enumerate(items):
         r = r0 + i
-        ws.row_dimensions[r].height = 45
+        ws.row_dimensions[r].height = 59.25
         net, gross = float(it.get("net") or 0), float(it.get("gross") or 0)
         tare = round(gross - net, 3) if gross > 0 else 0
         div = float(it.get("div") or 0)
-        vals = [(f"=ROW()-{r0 - 1}", "center", None), ("", "center", None), (it.get("ten_sp", ""), "left", None), (it.get("unit") or prof.get("unit", ""), "center", None),
+        vals = [(f"=ROW()-{r0 - 1}", "center", None), (it.get("ma_sp", ""), "center", "@"), (it.get("ten_sp", ""), "left", None), (it.get("unit") or prof.get("unit", ""), "center", None),
                 (it.get("qty", 0), "right", "#,##0"), (it.get("kg", 0), "right", '_(* #,##0.000_);_(* \\(#,##0.000\\);_(* "-"??_);_(@_)'),
-                (f"=I{r}+{tare:g}", "right", _ACC), (None, "center", None), (f"=E{r}*F{r}", "right", _ACC),
-                (f"=ROUNDUP(E{r}/{div:g},0)" if div > 0 else it.get("kien", 0), "right", _ACC), (it.get("price", 0), "center", _ACC), (f"=K{r}*E{r}", "center", _ACC)]
+                (f"=H{r}+{tare:g}", "right", _ACC), (f"=E{r}*F{r}", "right", _ACC),
+                (f"=ROUNDUP(E{r}/{div:g},0)" if div > 0 else it.get("kien", 0), "right", _ACC), (it.get("price", 0), "center", _ACC), (f"=J{r}*E{r}", "center", _ACC)]
         for c_i, (v, al, fmt) in enumerate(vals, 1):
-            c = put(f"{get_column_letter(c_i)}{r}", None, v, 16, False, al, wrap=(c_i == 3))
-            c.border = BOX_BORDER
+            c = put(f"{get_column_letter(c_i)}{r}", None, v, 16, False, al, wrap=(c_i in (2, 3)))
             if fmt:
                 c.number_format = fmt
     last = r0 + max(len(items), 1) - 1
     t = last + 1
-    for c_i in range(1, 13):
-        ws.cell(row=t, column=c_i).border = BOX_BORDER
-    put(f"C{t}", None, "Tổng", 16, True, "center").border = BOX_BORDER
-    for col in "EGIJL":
+    ws.row_dimensions[t].height = 51.75
+    put(f"C{t}", None, "Tổng", 16, True, "center")
+    for col in "EGHIK":
         c = put(f"{col}{t}", None, f"=SUM({col}{r0}:{col}{last})", 16, True, "right")
         c.number_format = "#,##0" if col == "E" else _ACC
-        c.border = BOX_BORDER
-    put(f"C{t + 1}", None, "Tổng:", 16, True, "right")
-    put(f"D{t + 1}", None, f"=J{t}", 16, True, "center").number_format = _ACC
+    for row in ws.iter_rows(min_row=1, max_row=t, min_col=1, max_col=11):  # khung viền kín từ tiêu đề đến dòng Tổng (cả ô gộp)
+        for c in row:
+            c.border = BOX_BORDER
+    ws.row_dimensions[t + 1].height = 28.5
+    ws.row_dimensions[t + 2].height = 33
+    put(f"C{t + 1}", None, "Tổng:", 16, True, "left")
+    put(f"D{t + 1}", None, f"=I{t}", 16, True, "center").number_format = _ACC
     put(f"E{t + 1}", None, "kiện", 16, True)
-    put(f"C{t + 2}", None, "Hàng được sản xuất tại Việt Nam, mới 100 %", 16, italic=True)
-    put(f"D{t + 4}", f"D{t + 4}:L{t + 4}", HT_NAME, 16, True, "center")
+    put(f"C{t + 2}", None, "Hàng được sản xuất tại Việt Nam, mới 100 %", 16, True)
+    put(f"D{t + 3}", f"D{t + 3}:K{t + 4}", HT_NAME, 13, True, "center", wrap=True)
+    ws.print_area = f"A1:K{t + 5}"
     _fit_page(ws, landscape=False)
     return ws
 
