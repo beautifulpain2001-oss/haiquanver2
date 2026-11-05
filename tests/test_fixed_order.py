@@ -96,7 +96,8 @@ def test_export_each_documents(store, cust):
     assert ws["A2"].value == "Số:10/2026MM" and ws["B15"].value == "00003964" and ws["G15"].value == "=E15*F15"
     ws = openpyxl.load_workbook(path["BDC"]).active  # cả tháng 10: lô đã lưu + lô đang làm
     assert "tháng 10/2026" in ws["A3"].value
-    assert [ws[f"B{r}"].value for r in (12, 13)] == ["ABCDE2609190001", "ABCDE2609190002"]
+    assert [ws[f"B{r}"].value for r in (12, 13)] == ["90000001", "90000001"]  # cột B: mã liệu hiện hành, không phải số PO
+    assert all(ws[a].font.b and ws[a].alignment.horizontal == "left" for a in ("A6", "A7"))  # địa chỉ / MST bên bán: đậm, căn trái
     assert (ws["D12"].value, ws["E12"].value) == ("Ống lõi giấy phi", "50x55x40mm")
     assert ws["I14"].value == "=SUM(I12:I13)" and "triệu" in ws["D17"].value
     ws = openpyxl.load_workbook(path["PLX"]).active

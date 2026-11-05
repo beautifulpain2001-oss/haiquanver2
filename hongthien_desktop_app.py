@@ -3717,7 +3717,7 @@ def build_bbgh_sunlu_sheet(wb, rec, sheet_name="BBGH"):
 
 def bdc_month_rows(store, rec):
     """Các dòng của BẢNG ĐỐI CHIẾU HÀNG HÓA tháng của lô `rec`: mọi hồ sơ đã lưu của khách trong cùng tháng
-    (ngày chứng từ) cộng lô đang làm (thay bản đã lưu cùng mã hồ sơ / cùng số PO). Mỗi dòng: {po, date, ten_sp, qty, unit, price}."""
+    (ngày chứng từ) cộng lô đang làm (thay bản đã lưu cùng mã hồ sơ / cùng số PO). Mỗi dòng: {po, code (mã liệu hiện hành), date, ten_sp, qty, unit, price}."""
     month = str(rec.get("docDate") or "")[:7]
     same = lambda r: (r.get("id") and r.get("id") == rec.get("id")) or (r.get("poNumber") and r.get("poNumber") == rec.get("poNumber"))
     lots = [r for r in (store.records if store else []) if r.get("customer") == rec.get("customer") and str(r.get("docDate") or "")[:7] == month and not same(r)]
@@ -3725,7 +3725,7 @@ def bdc_month_rows(store, rec):
     rows = []
     for r in sorted(lots, key=lambda x: str(x.get("docDate") or "")):
         for it in r.get("items") or []:
-            rows.append({"po": it.get("po") or r.get("poNumber", ""), "date": _iso_to_date(r.get("docDate")), "ten_sp": it.get("ten_sp", ""),
+            rows.append({"po": it.get("po") or r.get("poNumber", ""), "code": str(it.get("ma_sp") or "").strip(), "date": _iso_to_date(r.get("docDate")), "ten_sp": it.get("ten_sp", ""),
                          "qty": it.get("qty", 0), "unit": it.get("unit", ""), "price": it.get("price", 0)})
     return rows
 
@@ -3745,8 +3745,8 @@ def build_bdc_sheet(wb, rec, sheet_name="BDC", rows=None):
     put("A3", "A3:I3", f"Bảng đối chiếu hàng hóa tháng {d.month:02d}/{d.year} - {d.year}年{d.month}月对账单", 18, True, "center")
     put("A4", "A4:I4", f"NCC供应商: {HT_NAME}", 16, True, "center", wrap=True)
     put("A5", "A5:I5", "洪天纸管經營生產股份有限公司.", 14, True, "center")
-    put("A6", "A6:I6", f"Địa chỉ 地址：{ADDR_HT.rstrip('.')}", 12, align_h="center", wrap=True)
-    put("A7", "A7:I7", f"MST 税号：{MST_HT}", 12, align_h="center")
+    put("A6", "A6:I6", f"Địa chỉ 地址：{ADDR_HT.rstrip('.')}", 12, True, "left", wrap=True)
+    put("A7", "A7:I7", f"MST 税号：{MST_HT}", 12, True, "left")
     put("A8", "A8:I8", f"Bên mua: {prof.get('name', '')}", 12, True)
     put("A9", "A9:I9", f"Địa chỉ/地址：{prof.get('addr', '')}", 12, wrap=True)
     ws.row_dimensions[9].height = 32
@@ -3759,7 +3759,8 @@ def build_bdc_sheet(wb, rec, sheet_name="BDC", rows=None):
     for i, x in enumerate(rows):
         r = r0 + i
         base, spec = _fixed_name_spec(x["ten_sp"])
-        for col, v, fmt in (("A", i + 1, None), ("B", x["po"], "@"), ("C", x["date"], "dd/mm/yyyy"), ("D", base, None), ("E", spec, None),
+        # cột B là mã liệu hiện hành của hàng (không phải số PO)
+        for col, v, fmt in (("A", i + 1, None), ("B", x.get("code") or x["po"], "@"), ("C", x["date"], "dd/mm/yyyy"), ("D", base, None), ("E", spec, None),
                             ("F", x["qty"], _ACC), ("G", _cap(x["unit"]), None), ("H", x["price"], "#,##0"), ("I", f"=H{r}*F{r}", "#,##0")):
             c = put(f"{col}{r}", None, v, 12, False, "center", wrap=(col in "BD"))
             c.border = BOX_BORDER
