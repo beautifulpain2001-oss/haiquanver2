@@ -80,19 +80,48 @@ def test_preview_shapes(store):
     assert grid["kind"] == "grid" and grid["rows"][0][0] == "PHỤ LỤC X" and grid["rows"][10][:4] == ["{{stt}}", "{{ma}}", "{{ten}}", "{{sl}}"]
 
 
-def test_kho_page_preview_and_use_for_customer(qapp, store, rec):
-    from ui_qt.pages_kho import MauPage
+def test_kho_page_shows_images_only_and_edit_tool(qapp, store, tmp_path):
+    """Tab Kho mẫu chỉ hiện hình mẫu (không chọn); công cụ sửa mẫu đổi chữ thành ô, hoàn tác, lưu vào kho."""
+    from ui_qt.pages_kho import EditTemplateDialog, MauPage, kho_cards
     page = MauPage(app, store)
+    page.resize(1100, 800)
     page.refresh()
-    assert page.table.rowCount() >= 2
     names = [it["file"] for it in page.items]
-    page.table.selectRow(names.index("PLX_Sunlu_01.docx"))
-    assert "Phụ lục X" in page.preview.text.toPlainText() and "tong_sl" in page.preview.caption.text()
-    page.table.selectRow(names.index("PLX_Arizon_01.xlsx"))
-    assert page.preview.grid.item(0, 0).text() == "PHỤ LỤC X"
-    page.use_for_customer("khothu")
-    assert store.custom_forms("khothu") == ["PLX_Arizon_01.xlsx"] and "Đã có mẫu" not in page.msg.text() and "PLX_Arizon_01.xlsx" in page.msg.text()
+    assert {"PLX_Arizon_01.xlsx", "PLX_Sunlu_01.docx"} <= set(names) and not hasattr(page, "use_btn") and not hasattr(page, "table")
+    cards = kho_cards(page.items, store)
+    assert all(c["image"] is not None and not c["image"].isNull() for c in cards)  # thẻ có hình mẫu
+    page.flow.set_current(names.index("PLX_Sunlu_01.docx"), animate=False)
+    page.show_current()
+    assert not page.view.image.isNull() and "PLX_Sunlu_01" in page.title.text() and page.view.image.height() > 500  # trang Word cao
+    page.flow.set_current(names.index("PLX_Arizon_01.xlsx"), animate=False)
+    page.show_current()
+    assert not page.view.image.isNull() and page.view.image.width() > 500
+    # công cụ sửa mẫu
+    dlg = EditTemplateDialog(app, store, "PLX_Sunlu_01.docx")
+    dlg.find.setText("Bắc Ninh")
+    dlg.token.setCurrentIndex(dlg.token.findData("khach_ten"))
+    dlg.apply()
+    assert dlg.dirty and "Đã đổi 1 chỗ" in dlg.msg.text() and dlg.save_btn.isEnabled()
+    dlg.undo()
+    assert not dlg.dirty and not dlg.undo_btn.isEnabled()
+    dlg.find.setText("không có chữ này")
+    dlg.apply()
+    assert "Không thấy chữ" in dlg.msg.text()
+    dlg.find.setText("Bắc Ninh")
+    dlg.apply()
+    dlg.save()
+    assert "{{khach_ten}}" in __import__("mau_rieng").preview("docx", store.kho_read("PLX_Sunlu_01.docx"))["text"]
+    dlg.close()
     page.close()
+
+
+def test_replace_text_tool_word_and_excel(store):
+    word = mau_rieng.replace_text("docx", store.kho_read("PLX_Sunlu_01.docx") if store.kho_list() else b"", "PCS", "dvt")
+    assert word[1] == 1 and "{{dvt}}" in mau_rieng.preview("docx", word[0])["text"]
+    xl, n = mau_rieng.replace_text("xlsx", store.kho_read("PLX_Arizon_01.xlsx"), "VNĐ", "dvt")
+    assert n == 1 and openpyxl.load_workbook(io.BytesIO(xl)).active["D7"].value == "{{dvt}}"
+    with pytest.raises(ValueError):
+        mau_rieng.replace_text("xlsx", xl, "", "dvt")
 
 
 def test_new_customer_flow_three_files_then_pick_template(qapp, store, tmp_path):

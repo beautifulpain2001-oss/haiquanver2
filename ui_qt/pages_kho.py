@@ -3,10 +3,10 @@
 import os
 
 from PySide6.QtCore import QEasingCurve, QRectF, Qt, QUrl, QVariantAnimation, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QListWidget, QListWidgetItem, QPlainTextEdit, QPushButton, QSplitter,
-    QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QComboBox, QDialog, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit,
+    QPushButton, QScrollArea, QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from . import widgets
@@ -181,6 +181,21 @@ class CoverFlow(QWidget):
         f.setPointSizeF(11.5)
         p.setFont(f)
         p.setPen(QColor("#0F172A"))
+        img = card.get("image")
+        if img is not None and not img.isNull():  # thẻ có hình mẫu: tiêu đề một dòng, hình mẫu chiếm phần giữa (cắt theo chiều cao thẻ)
+            p.drawText(QRectF(body.left() + 14, body.top() + 34, w - 28, 20), Qt.AlignLeft | Qt.AlignVCenter, card.get("title", ""))
+            area = QRectF(body.left() + 12, body.top() + 60, w - 24, h - 60 - 46)
+            sc = area.width() / img.width()
+            p.save()
+            p.setClipRect(area)
+            p.setPen(QPen(QColor("#E2E8F0"), 1))
+            p.fillRect(area, QColor("#FFFFFF"))
+            p.drawImage(QRectF(area.left(), area.top(), area.width(), min(area.height(), img.height() * sc)), img,
+                        QRectF(0, 0, img.width(), min(img.height(), area.height() / sc)))
+            p.restore()
+            p.drawRect(area)
+            self._draw_foot(p, card, body, w, front)
+            return
         p.drawText(QRectF(body.left() + 14, body.top() + 36, w - 28, 48), Qt.AlignLeft | Qt.TextWordWrap, card.get("title", ""))
         p.setPen(QPen(QColor("#E2E8F0"), 1, Qt.DashLine))
         p.drawLine(body.left() + 14, body.top() + 92, body.right() - 14, body.top() + 92)
@@ -194,25 +209,54 @@ class CoverFlow(QWidget):
         for line in card.get("lines", [])[:5]:
             p.drawText(QRectF(body.left() + 14, y, w - 28, 14), Qt.AlignLeft | Qt.AlignVCenter, "• " + line)
             y += 17
+        self._draw_foot(p, card, body, w, front)
+
+    def _draw_foot(self, p, card, body, w, front):
         foot = QRectF(body.left() + 12, body.bottom() - 36, w - 24, 26)
         p.setPen(QPen(QColor("#E2E8F0"), 1))
         p.setBrush(QColor("#F8FAFC"))
         p.drawRoundedRect(foot, 8, 8)
+        f = QFont(self.font())
+        f.setPointSizeF(8)
+        p.setFont(f)
         p.setPen(QColor("#64748B"))
         p.drawText(foot.adjusted(10, 0, -10, 0), Qt.AlignLeft | Qt.AlignVCenter, card.get("foot", ""))
         p.setPen(QColor("#4F46E5"))
         p.drawText(foot.adjusted(10, 0, -10, 0), Qt.AlignRight | Qt.AlignVCenter, "Đang xem ●" if front else "Bấm để xem")
 
 
-def kho_cards(items):
-    """Nội dung thẻ băng chuyền cho các mẫu trong kho."""
+_IMG_CACHE = {}
+
+
+def template_image(store, it, width=900):
+    """Hình ảnh mẫu (QImage), nhớ theo (file, thời điểm sửa) để không vẽ lại mỗi lần. Lỗi thì trả QImage rỗng."""
+    from . import mau_render
+    try:
+        key = (it["path"], os.path.getmtime(it["path"]), width)
+    except OSError:
+        return QImage()
+    if key not in _IMG_CACHE:
+        try:
+            with open(it["path"], "rb") as f:
+                _IMG_CACHE[key] = mau_render.render_template(it["ext"], f.read(), width)
+        except Exception:  # noqa: BLE001 - mẫu hỏng: thẻ hiện không hình
+            _IMG_CACHE[key] = QImage()
+        if len(_IMG_CACHE) > 40:
+            _IMG_CACHE.pop(next(iter(_IMG_CACHE)))
+    return _IMG_CACHE[key]
+
+
+def kho_cards(items, store=None):
+    """Nội dung thẻ băng chuyền cho các mẫu trong kho. Có `store` thì thẻ hiện HÌNH ảnh của mẫu; không thì hiện danh sách ô dữ liệu."""
     import mau_rieng
     desc = dict(mau_rieng.TOKENS) | dict(mau_rieng.ITEM_TOKENS)
     out = []
-    for n, it in enumerate(items, 1):
-        out.append({"code": f"{it['loai']} • {loai_text(it['loai']).upper()}", "title": f"{os.path.splitext(it['file'])[0]}", "color": CARD_COLOR.get(it["loai"], "#64748B"),
-                    "lines": [desc.get(t, t) for t in it["tokens"][:5]] or ["(chưa có ô thay thế)"],
-                    "foot": f"{ext_text(it['ext'])} · {len(it['tokens'])} ô"})
+    for it in items:
+        card = {"code": f"{it['loai']} • {loai_text(it['loai']).upper()}", "title": os.path.splitext(it["file"])[0], "color": CARD_COLOR.get(it["loai"], "#64748B"),
+                "lines": [desc.get(t, t) for t in it["tokens"][:5]] or ["(chưa có ô thay thế)"], "foot": f"{ext_text(it['ext'])} · {len(it['tokens'])} ô"}
+        if store is not None:
+            card["image"] = template_image(store, it, 420)
+        out.append(card)
     return out
 
 
@@ -322,7 +366,7 @@ class KhoPicker(QWidget):
         self.items = self.store.kho_list()
         self.chosen &= {it["file"] for it in self.items}
         keep = self.flow.index if self.flow.cards else 0
-        self.flow.set_cards(kho_cards(self.items), keep)
+        self.flow.set_cards(kho_cards(self.items, self.store), keep)
         self._sync()
         self.on_row(self.flow.index)
 
@@ -360,10 +404,165 @@ class KhoPicker(QWidget):
             self.on_row(self.flow.index)
 
 
-class MauPage(QWidget):
-    """Tab "Kho mẫu": mọi mẫu Word/Excel dùng chung, xem từng mẫu, nạp mẫu mới, xóa, dùng cho một khách."""
+class ImageView(QScrollArea):
+    """Khung cuộn hiện hình mẫu cỡ lớn."""
 
-    changed = None
+    def __init__(self):
+        super().__init__()
+        self.setWidgetResizable(True)
+        self.label = QLabel("Chọn một mẫu để xem hình.")
+        self.label.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+        self.setWidget(self.label)
+        self.image = QImage()
+
+    def show_image(self, img, note=""):
+        self.image = img
+        if img is None or img.isNull():
+            self.label.setPixmap(QPixmap())
+            self.label.setText(note or "Không vẽ được hình mẫu này. Bấm “Mở bằng Word/Excel” để xem.")
+        else:
+            self.label.setPixmap(QPixmap.fromImage(img))
+            self.label.setText("")
+
+    def clear(self):
+        self.image = QImage()
+        self.label.setPixmap(QPixmap())
+        self.label.setText("Chọn một mẫu để xem hình.")
+
+
+class EditTemplateDialog(QDialog):
+    """Công cụ sửa mẫu: đổi một đoạn chữ/số trong mẫu thành ô {{...}}, xem hình ngay, hoàn tác, lưu; hoặc mở bằng Word/Excel để sửa tự do rồi tải lại."""
+
+    def __init__(self, core, store, name, parent=None):
+        super().__init__(parent)
+        import mau_rieng
+        self.core, self.store, self.name, self.mr = core, store, name, mau_rieng
+        self.ext = os.path.splitext(name)[1].lstrip(".")
+        self.setWindowTitle(f"Sửa mẫu — {os.path.splitext(name)[0]}")
+        self.resize(1100, 720)
+        self.data = store.kho_read(name)
+        self.history = []
+        self.dirty = False
+        lay = QHBoxLayout(self)
+        self.view = ImageView()
+        lay.addWidget(self.view, 3)
+        side = QVBoxLayout()
+        lay.addLayout(side, 2)
+        t = QLabel("Đổi chữ trong mẫu thành ô thay thế")
+        t.setObjectName("h2")
+        side.addWidget(t)
+        hint = QLabel("Gõ đúng đoạn chữ (hoặc số) đang có trong mẫu rồi chọn ô sẽ thay vào đó. Ô thay thế được tô vàng trên hình.")
+        hint.setObjectName("hint")
+        hint.setWordWrap(True)
+        side.addWidget(hint)
+        self.find = QLineEdit()
+        self.find.setPlaceholderText("Chữ hoặc số cần đổi, ví dụ 21.200.000")
+        side.addWidget(self.find)
+        self.token = QComboBox()
+        for k, d in list(mau_rieng.TOKENS) + list(mau_rieng.ITEM_TOKENS):
+            self.token.addItem(f"{{{{{k}}}}}  —  {d}", k)
+        side.addWidget(self.token)
+        row = QHBoxLayout()
+        self.apply_btn = QPushButton("✏  Đổi thành ô")
+        self.apply_btn.clicked.connect(self.apply)
+        self.undo_btn = QPushButton("↩  Hoàn tác")
+        self.undo_btn.setObjectName("sec")
+        self.undo_btn.clicked.connect(self.undo)
+        row.addWidget(self.apply_btn)
+        row.addWidget(self.undo_btn)
+        side.addLayout(row)
+        t2 = QLabel("Chèn ô thay thế khi sửa bằng Word/Excel")
+        t2.setObjectName("h2")
+        side.addWidget(t2)
+        self.copy_list = QListWidget()
+        for k, d in list(mau_rieng.TOKENS) + list(mau_rieng.ITEM_TOKENS):
+            li = QListWidgetItem(f"{{{{{k}}}}}  —  {d}")
+            li.setData(Qt.UserRole, k)
+            self.copy_list.addItem(li)
+        self.copy_list.itemDoubleClicked.connect(self.copy_token)
+        side.addWidget(self.copy_list, 1)
+        self.msg = QLabel("Bấm đúp một ô trong danh sách để chép {{ô}} vào bộ nhớ, rồi dán vào file đang sửa.")
+        self.msg.setObjectName("hint")
+        self.msg.setWordWrap(True)
+        side.addWidget(self.msg)
+        row2 = QHBoxLayout()
+        self.open_btn = QPushButton("📂  Mở bằng Word/Excel")
+        self.open_btn.setObjectName("sec")
+        self.open_btn.clicked.connect(self.open_external)
+        self.reload_btn = QPushButton("🔄  Tải lại từ file")
+        self.reload_btn.setObjectName("sec")
+        self.reload_btn.clicked.connect(self.reload)
+        row2.addWidget(self.open_btn)
+        row2.addWidget(self.reload_btn)
+        side.addLayout(row2)
+        row3 = QHBoxLayout()
+        row3.addStretch(1)
+        cancel = QPushButton("Đóng")
+        cancel.setObjectName("sec")
+        cancel.clicked.connect(self.reject)
+        self.save_btn = QPushButton("💾  Lưu vào kho")
+        self.save_btn.clicked.connect(self.save)
+        row3.addWidget(cancel)
+        row3.addWidget(self.save_btn)
+        side.addLayout(row3)
+        self.redraw()
+
+    def redraw(self):
+        from . import mau_render
+        try:
+            self.view.show_image(mau_render.render_template(self.ext, self.data, 760))
+        except Exception as e:  # noqa: BLE001
+            self.view.show_image(None, f"Không vẽ được hình: {e}")
+        self.undo_btn.setEnabled(bool(self.history))
+        self.save_btn.setEnabled(self.dirty)
+
+    def apply(self):
+        try:
+            data, n = self.mr.replace_text(self.ext, self.data, self.find.text(), self.token.currentData())
+        except ValueError as e:
+            self.msg.setText(str(e))
+            return
+        if not n:
+            self.msg.setText("Không thấy chữ đó trong mẫu (gõ đúng từng ký tự, kể cả dấu chấm).")
+            return
+        self.history.append(self.data)
+        self.data, self.dirty = data, True
+        self.msg.setText(f"Đã đổi {n} chỗ thành {{{{{self.token.currentData()}}}}}. Bấm “Lưu vào kho” để giữ lại.")
+        self.find.clear()
+        self.redraw()
+
+    def undo(self):
+        if self.history:
+            self.data = self.history.pop()
+            self.dirty = bool(self.history)
+            self.msg.setText("Đã hoàn tác một lần đổi.")
+            self.redraw()
+
+    def copy_token(self, item):
+        QGuiApplication.clipboard().setText("{{" + item.data(Qt.UserRole) + "}}")
+        self.msg.setText(f"Đã chép {{{{{item.data(Qt.UserRole)}}}}}: dán vào chỗ cần điền trong file mẫu.")
+
+    def open_external(self):
+        QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.join(self.store.kho_folder(), self.name)))
+        self.msg.setText("Đã mở file bằng Word/Excel. Sửa xong thì lưu file, đóng lại rồi bấm “Tải lại từ file”.")
+
+    def reload(self):
+        self.data, self.history, self.dirty = self.store.kho_read(self.name), [], False
+        self.msg.setText("Đã tải lại mẫu từ file.")
+        self.redraw()
+
+    def save(self):
+        known, unknown = self.mr.template_tokens(self.ext, self.data)
+        if not known:
+            widgets.warn(self, "Chưa lưu được", "Mẫu không còn ô thay thế nào.")
+            return
+        self.store.kho_write(self.name, self.data)
+        self.dirty = False
+        self.accept()
+
+
+class MauPage(QWidget):
+    """Tab "Kho mẫu": chỉ để XEM hình các mẫu (băng chuyền + hình cỡ lớn). Có công cụ sửa mẫu, nạp mẫu mới, xóa; việc chọn mẫu cho khách làm ở bước thêm khách."""
 
     def __init__(self, core, store):
         super().__init__()
@@ -372,47 +571,36 @@ class MauPage(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(28, 24, 28, 24)
         lay.setSpacing(10)
-        t = QLabel("Kho mẫu chung")
+        t = QLabel("Kho mẫu chứng từ")
         t.setObjectName("title")
-        h = QLabel("Mẫu Word/Excel dùng lại cho nhiều khách. Tên mẫu theo quy ước LOẠI_Khách_số (VD PLX_Arizon_01). Khách mới chọn mẫu trong kho "
-                   "hoặc nạp file mẫu riêng; bấm vào một mẫu để xem nội dung.")
+        h = QLabel("Hình các mẫu Word/Excel đang có, đặt tên LOẠI_Khách_số (VD PLX_Arizon_01). Chuyển mẫu bằng ❮ ❯, phím mũi tên hoặc bấm thẻ bên cạnh. "
+                   "Ô tô vàng là chỗ phần mềm điền số liệu. Cần chỉnh thì dùng “Sửa mẫu”.")
         h.setObjectName("hint")
         h.setWordWrap(True)
         lay.addWidget(t)
         lay.addWidget(h)
         self.flow = CoverFlow()
+        self.flow.setMinimumHeight(300)
         self.flow.current_changed.connect(self.on_flow)
         lay.addWidget(self.flow)
-        split = QSplitter(Qt.Horizontal)
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["Mẫu", "Loại", "Khách nguồn", "Định dạng", "Số ô"])
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.verticalHeader().hide()
-        self.table.setAlternatingRowColors(True)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.table.itemSelectionChanged.connect(self.on_select)
-        split.addWidget(self.table)
-        self.preview = TemplatePreview()
-        split.addWidget(self.preview)
-        split.setStretchFactor(0, 2)
-        split.setStretchFactor(1, 3)
-        lay.addWidget(split, 1)
+        self.title = QLabel("")
+        self.title.setObjectName("h2")
+        lay.addWidget(self.title)
+        self.view = ImageView()
+        lay.addWidget(self.view, 1)
         row = QHBoxLayout()
+        self.edit_btn = QPushButton("✏  Sửa mẫu…")
+        self.edit_btn.clicked.connect(self.edit)
         self.add_btn = QPushButton("📎  Nạp mẫu mới vào kho…")
+        self.add_btn.setObjectName("sec")
         self.add_btn.clicked.connect(self.add_new)
-        self.use_btn = QPushButton("👥  Dùng mẫu này cho khách…")
-        self.use_btn.setObjectName("sec")
-        self.use_btn.clicked.connect(self.use_for_customer)
         self.open_btn = QPushButton("📂  Mở bằng Word/Excel")
         self.open_btn.setObjectName("sec")
         self.open_btn.clicked.connect(self.open_file)
         self.del_btn = QPushButton("🗑  Xóa khỏi kho")
         self.del_btn.setObjectName("dng")
         self.del_btn.clicked.connect(self.remove)
-        for b in (self.add_btn, self.use_btn, self.open_btn, self.del_btn):
+        for b in (self.edit_btn, self.add_btn, self.open_btn, self.del_btn):
             row.addWidget(b)
         row.addStretch(1)
         lay.addLayout(row)
@@ -420,41 +608,31 @@ class MauPage(QWidget):
         self.msg.setObjectName("hint")
         self.msg.setWordWrap(True)
         lay.addWidget(self.msg)
-        self.on_select()
+        self.show_current()
 
     def refresh(self, select=None):
         self.items = self.store.kho_list()
-        self.table.blockSignals(True)
-        self.table.setRowCount(len(self.items))
-        for r, it in enumerate(self.items):
-            for c, v in enumerate([os.path.splitext(it["file"])[0], loai_text(it["loai"]), it["khach"], ext_text(it["ext"]), len(it["tokens"])]):
-                self.table.setItem(r, c, QTableWidgetItem(str(v)))
-        self.table.blockSignals(False)
         names = [it["file"] for it in self.items]
-        self.flow.set_cards(kho_cards(self.items), names.index(select) if select in names else 0)
-        if select in names:
-            self.table.selectRow(names.index(select))
-        self.on_select()
+        keep = names.index(select) if select in names else (self.flow.index if self.flow.cards else 0)
+        self.flow.set_cards(kho_cards(self.items, self.store), keep)
+        self.show_current()
 
     def current(self):
-        rows = self.table.selectionModel().selectedRows()
-        return self.items[rows[0].row()] if rows and rows[0].row() < len(self.items) else None
+        return self.items[self.flow.index] if self.items and 0 <= self.flow.index < len(self.items) else None
 
-    def on_flow(self, i):
-        """Đổi thẻ băng chuyền thì chọn đúng dòng trong bảng (và ngược lại ở on_select)."""
-        if 0 <= i < self.table.rowCount() and not (self.table.selectionModel().selectedRows() and self.table.selectionModel().selectedRows()[0].row() == i):
-            self.table.selectRow(i)
+    def on_flow(self, _i):
+        self.show_current()
 
-    def on_select(self):
+    def show_current(self):
         it = self.current()
-        if it and self.flow.cards and self.flow.index != self.items.index(it):
-            self.flow.set_current(self.items.index(it))
-        for b in (self.use_btn, self.open_btn, self.del_btn):
+        for b in (self.edit_btn, self.open_btn, self.del_btn):
             b.setEnabled(bool(it))
-        if it:
-            self.preview.show_template(self.core, it["ext"], self.store.kho_read(it["file"]), it["tokens"], it["unknown"])
-        else:
-            self.preview.clear()
+        if not it:
+            self.title.setText("")
+            self.view.clear()
+            return
+        self.title.setText(f"{os.path.splitext(it['file'])[0]}  —  {loai_text(it['loai'])}, {ext_text(it['ext'])}, {len(it['tokens'])} ô thay thế")
+        self.view.show_image(template_image(self.store, it, 860))
 
     def add_new(self, path=None):
         name = add_template_to_kho(self, self.store, "Chung", path if isinstance(path, str) else None)
@@ -462,26 +640,11 @@ class MauPage(QWidget):
             self.msg.setText(f"✅  Đã nạp mẫu “{name}” vào kho.")
             self.refresh(select=name)
 
-    def use_for_customer(self, key=None):
+    def edit(self):
         it = self.current()
-        if not it:
-            return
-        custom = [k for k in self.core.PROFILES if k not in self.core.BUILTIN_CUSTOMERS]
-        if not custom:
-            widgets.warn(self, "Chưa có khách", "Chưa có khách nào đã học / thêm mới để dùng mẫu này.")
-            return
-        if not isinstance(key, str):
-            labels = [f"{self.core.PROFILES[k].get('label') or k} — {self.core.PROFILES[k].get('name', '')}" for k in custom]
-            pick, ok = QInputDialog.getItem(self, "Dùng mẫu cho khách", f"Dùng “{os.path.splitext(it['file'])[0]}” cho khách nào?", labels, 0, False)
-            if not ok:
-                return
-            key = custom[labels.index(pick)]
-        try:
-            name, _known, _unknown = self.store.kho_borrow(key, it["file"])
-        except ValueError as e:
-            widgets.warn(self, "Chưa dùng được mẫu", str(e))
-            return
-        self.msg.setText(f"✅  Khách “{self.core.PROFILES[key].get('label') or key}” đã có mẫu “{name}”: nằm trong bộ chứng từ và có nút xuất riêng ở bước xuất.")
+        if it and EditTemplateDialog(self.core, self.store, it["file"], self).exec():
+            self.msg.setText(f"✅  Đã lưu mẫu “{os.path.splitext(it['file'])[0]}”. Khách đã mượn mẫu này trước đó vẫn giữ bản của họ.")
+            self.refresh(select=it["file"])
 
     def open_file(self):
         it = self.current()

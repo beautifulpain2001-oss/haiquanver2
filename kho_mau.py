@@ -69,6 +69,8 @@ def plx_arizon_xlsx():
     put("A13", "A13:D13", "Khai tại văn bản này được sản xuất tại Công ty chúng tôi có địa chỉ tại {{ben_ban_dia_chi}}, có xuất xứ việt nam và đáp ứng tiêu chí xuất xứ “CTH” "
         "theo quy định tại phụ lục I- quy tắc cụ thể mặt hàng ban hành kèm theo thông tư 03/2023/TT-BCT ngày 14 tháng 02 năm 2023")
     put("A14", "A14:D14", "Công ty cam kết thông tin khai báo trên là đúng và chịu trách nhiệm trước pháp luật về thông tin đã khai.")
+    for r, h in {2: 34, 3: 30, 8: 22, 13: 62, 14: 34}.items():  # dòng gộp nhiều chữ: đặt chiều cao để không bị cắt
+        ws.row_dimensions[r].height = h
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue()

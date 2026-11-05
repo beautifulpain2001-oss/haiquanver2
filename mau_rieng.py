@@ -266,3 +266,51 @@ def preview(ext, data, max_rows=80, max_cols=14):
         rows = [["" if c.value is None else str(c.value) for c in row[:max_cols]] for row in ws.iter_rows(max_row=max_rows)]
         return {"kind": "grid", "rows": rows, "sheet": ws.title}
     raise ValueError("Chỉ xem được file Word (.docx) hoặc Excel (.xlsx).")
+
+
+def replace_text(ext, data, find, token):
+    """Công cụ sửa mẫu: đổi một đoạn chữ (hoặc số) đang có trong mẫu thành ô {{token}}. Trả (bytes mới, số chỗ đã đổi).
+    Word: đoạn có chữ đó được dựng lại theo định dạng của chữ đầu tiên trong đoạn. Excel: ô chứa chữ đó (hoặc ô số bằng đúng số đó)."""
+    find, token = str(find or ""), str(token or "").strip("{} ")
+    if not find.strip() or not re.fullmatch(r"[A-Za-z0-9_]+", token):
+        raise ValueError("Cần nhập chữ cần đổi và chọn ô thay thế.")
+    ext = ext.lower().lstrip(".")
+    new = "{{" + token + "}}"
+    count = 0
+    if ext == "docx":
+        src = zipfile.ZipFile(io.BytesIO(data))
+        xml = src.read("word/document.xml").decode("utf-8")
+
+        def repl(m):
+            nonlocal count
+            p = m.group(0)
+            txt = _para_text(p)
+            if find in txt:
+                count += txt.count(find)
+                return _set_para(p, txt.replace(find, new))
+            return p
+
+        out_xml = _PARA.sub(repl, xml)
+        out = io.BytesIO()
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+            for item in src.infolist():
+                dst.writestr(item, out_xml.encode("utf-8") if item.filename == "word/document.xml" else src.read(item.filename))
+        return out.getvalue(), count
+    if ext in ("xlsx", "xlsm"):
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(data))
+        digits = re.sub(r"[.,\s]", "", find)
+        for ws in wb.worksheets:
+            for row in ws.iter_rows():
+                for c in row:
+                    v = c.value
+                    if isinstance(v, str) and find in v:
+                        count += v.count(find)
+                        c.value = v.replace(find, new)
+                    elif isinstance(v, (int, float)) and not isinstance(v, bool) and digits.isdigit() and str(int(v)) == digits and float(v) == int(v):
+                        count += 1
+                        c.value = new
+        out = io.BytesIO()
+        wb.save(out)
+        return out.getvalue(), count
+    raise ValueError("Chỉ sửa được file Word (.docx) hoặc Excel (.xlsx).")

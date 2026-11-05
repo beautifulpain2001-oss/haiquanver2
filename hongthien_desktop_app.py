@@ -965,6 +965,14 @@ class DedicatedDataStore:
         if os.path.isfile(path):
             os.remove(path)
 
+    def kho_write(self, name, data):
+        """Ghi đè nội dung một mẫu trong kho (công cụ sửa mẫu)."""
+        path = os.path.join(self.kho_folder(), os.path.basename(name))
+        if not os.path.isfile(path):
+            raise ValueError(f"Kho không có mẫu “{name}”.")
+        with open(path, "wb") as f:
+            f.write(data)
+
     def kho_read(self, name):
         with open(os.path.join(self.kho_folder(), os.path.basename(name)), "rb") as f:
             return f.read()

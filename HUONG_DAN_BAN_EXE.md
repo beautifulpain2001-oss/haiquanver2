@@ -81,9 +81,10 @@ Giới hạn: mẫu riêng chỉ thêm cho khách đã học/thêm mới (không
 ## Kho mẫu chung
 
 Tab **Kho mẫu** chứa mọi mẫu Word/Excel dùng lại giữa các khách. Tên mẫu theo quy ước `LOẠI_Khách_số`, ví dụ `PLX_Arizon_01`, `PLX_Sunlu_01`.
-- Bấm một mẫu để **xem** nội dung (Word hiện chữ, Excel hiện lưới; các ô `{{...}}` được liệt kê bên dưới). **Mở bằng Word/Excel** để xem đúng giao diện gốc.
+- Tab chỉ để **xem hình** các mẫu (băng chuyền + hình cỡ lớn, ô thay thế tô vàng). Hình do phần mềm tự vẽ, gần đúng; **Mở bằng Word/Excel** để xem đúng 100%.
+- **Sửa mẫu…**: đổi một đoạn chữ/số trong mẫu thành ô `{{...}}` (có hoàn tác, xem hình ngay, rồi Lưu vào kho), hoặc chép ô thay thế để dán khi sửa bằng Word/Excel rồi bấm Tải lại.
 - **Nạp mẫu mới vào kho**: chọn file có ô `{{...}}`, chọn loại chứng từ; app tự đặt tên và tăng số thứ tự.
-- **Dùng mẫu này cho khách**: sao chép mẫu thành mẫu riêng của khách (nằm trong bộ chứng từ, có nút xuất riêng).
+- Chọn mẫu cho khách làm ở bước thêm khách mới (mục Chứng từ riêng), không làm ở tab này.
 - Hóa đơn Bkav, phiếu xuất kho Bkav và Invoice là bộ ba dùng chung cho mọi khách, không nằm trong kho.
 
 ### Thêm khách mới (2 bước)
