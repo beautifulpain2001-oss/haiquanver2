@@ -5378,6 +5378,8 @@ def parse_dated_unit_rows(text):
 
 
 _PO_LABEL_RE = re.compile(r"(?:mã\s*PO|PO\s*(?:No|number)|订单编号|采购订单编号)\s*[:：]?\s*(\d{7,14})", re.I)
+# Ô 'Mã đơn đặt hàng/ 订单编号' (nhãn song ngữ, có thể xuống dòng) rồi mã: chữ + số (YNCGDD2611050001) hoặc toàn số (13060706026)
+_PO_ORDER_CELL_RE = re.compile(r"(?:mã\s*đơn\s*đặt\s*hàng|订单编号)(?:\s*/\s*|\s+)?(?:订单编号|mã\s*đơn\s*đặt\s*hàng)?\s*[:：]?\s*((?=[A-Za-z0-9-]*\d)[A-Za-z0-9-]{8,24})(?![A-Za-z0-9])", re.I)
 
 
 _XL_HEADERS = {
@@ -5552,6 +5554,9 @@ def _po_pattern_hits(prof, text, po_no):
 def find_po_after_label(text):
     """Số PO ngay sau nhãn 'mã PO' / '采购订单编号' (PO của khách chưa có mẫu nhận dạng số PO)."""
     flat = re.sub(r"[ \t]+", " ", text or "")
+    cell = _PO_ORDER_CELL_RE.search(re.sub(r"\s+", " ", flat))
+    if cell and not cell.group(1).lower().startswith(("hàng", "dat")):
+        return cell.group(1).upper()
     m = _PO_LABEL_RE.search(flat) or re.search(r"(?:mã\s*PO|订单编号)[^\d\n]{0,30}(\d{7,14})", flat, re.I)
     return m.group(1) if m else ""
 

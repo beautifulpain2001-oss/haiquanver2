@@ -291,3 +291,10 @@ def test_tesa_name_comes_from_erp_product_list_of_customer(tmp_path):
     if r:
         _po, ls = app.parse_tesa_po_text(old + "@@HDR@@ 8600123456", store.tesa_items, store)
         assert ls and ls[0]["ten_sp"] == "Ống lõi giấy ERP 76.5x3x1390 Blue"
+
+
+def test_po_number_from_order_cell_label():
+    f = app.find_po_after_label
+    assert f("Mã đơn đặt hàng/ 订单编号\nYNCGDD2611050001\nNgày giao") == "YNCGDD2611050001"
+    assert f("Mã đơn đặt hàng/\n订单编号\n13060706026 Tên hàng") == "13060706026"
+    assert f("mã PO: 4500123456") == "4500123456" and f("không có nhãn 13060706026") == ""
