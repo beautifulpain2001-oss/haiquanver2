@@ -55,6 +55,7 @@ def build():
         "--hidden-import", "ui_qt.main_window",
         "--hidden-import", "mau_chung_tu",
         "--hidden-import", "po_scan",
+        "--hidden-import", "mau_word",
         *[a for m in QT_EXCLUDES for a in ("--exclude-module", m)],
         "hongthien_desktop_app.py",
     ]

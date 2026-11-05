@@ -104,10 +104,15 @@ def test_export_each_documents(store, cust):
     assert all(ws[a].font.b and ws[a].alignment.horizontal == "left" for a in ("A6", "A7"))  # địa chỉ / MST bên bán: đậm, căn trái
     assert (ws["D12"].value, ws["E12"].value) == ("Ống lõi giấy phi", "50x55x40mm")
     assert ws["I14"].value == "=SUM(I12:I13)" and "triệu" in ws["D17"].value
-    ws = openpyxl.load_workbook(path["PLX"]).active
-    texts = [ws[f"A{r}"].value or "" for r in range(1, 15)]
-    assert any("Số lượng: 20.000 PCS" in t and "trị giá DAP 21.200.000" in t for t in texts)
-    assert any("300000000001" in t and "00003964" in t for t in texts)
+    assert path["PLX"].endswith(".docx")  # Phụ lục X là file Word đúng mẫu khách
+    import mau_word
+    with open(path["PLX"], "rb") as f:
+        texts = mau_word.paragraph_texts(f.read())
+    assert len(texts) == 30 and texts[0].strip() == "Phụ lục X" and texts[4].startswith("Tên nhà sản xuất: CÔNG TY CỔ PHẦN GIẤY BAO BÌ HỒNG THIÊN")
+    assert "Số lượng: 20.000 PCS , ống lõi giấy phi 50 x 55 x 40mm (90000001) , trị giá DAP 21.200.000  VND" == texts[6]
+    assert "300000000001" in texts[7] and "00003964" in texts[7] and "ngày 09/10/2026" in texts[7]
+    assert texts[8].endswith("nguyên liệu/hàng hóa: ống lõi giấy phi ") and texts[9].startswith("50 x 55 x 40mm (90000001), HS CODE: 48229090. khai tại")
+    assert texts[12].strip().startswith("Bắc Ninh, ngày 09 tháng 10") and texts[24].startswith("-Mẫu Bản khai báo này")  # phần chú thích cuối trang giữ nguyên
 
 
 def test_import_learned_fills_missing_profile_fields(store):

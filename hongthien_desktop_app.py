@@ -3790,6 +3790,31 @@ def build_bdc_sheet(wb, rec, sheet_name="BDC", rows=None):
     return ws
 
 
+def plx_sunlu_docx(rec):
+    """Phụ lục X của Sunlu dạng Word, đúng mẫu khách đưa (mau_word.PLX_SUNLU_B64): chỉ thay số lượng, tên hàng, trị giá, tờ khai, hóa đơn, ngày."""
+    import mau_word
+    prof = PROFILES.get(rec["customer"], {})
+    d = _iso_to_date(rec.get("docDate"))
+    items = rec.get("items", [])
+    lower1 = lambda s: (s[:1].lower() + s[1:]) if s else s
+    names = "; ".join(lower1(str(it.get("ten_sp") or "").strip()) for it in items)
+    qty = sum(float(it.get("qty") or 0) for it in items)
+    amount = sum(float(it.get("amount") or 0) for it in items)
+    hs = ", ".join(dict.fromkeys(str(it.get("hs") or "48229090") for it in items)) or "48229090"
+    incoterm = (prof.get("customs") or {}).get("incoterm", "DAP")
+    m = re.search(r"\d", names) if len(items) == 1 else None  # mẫu ngắt dòng ngay trước kích thước: '...giấy phi ' / '82.5 x 88.5...'
+    head, tail = (names[:m.start()], names[m.start():]) if m else (names + " ", "")
+    texts = {
+        6: f"Số lượng: {_money_dots(qty)} PCS , {names} , trị giá {incoterm} {_money_dots(amount)}  VND",
+        7: f"Tờ khai xuất khẩu tại chỗ số : {rec.get('tkNo', '')}   ngày {_dmy(d)},  Hóa Đơn Số: {rec.get('hdNo', '')} ngày {_dmy(d)}",
+        8: f"{HT_NAME} xác nhận rằng nguyên liệu/hàng hóa: {head}",
+        9: f"{tail}, HS CODE: {hs}. khai tại văn bản này được sản xuất tại nhà máy của Công ty chúng tôi tại địa chỉ：{ADDR_HT.rstrip('.')}, "
+           f"có xuất xứ Việt Nam và đáp ứng tiêu chí CTH  theo quy định tại  Thông tư số 44/2023/TT-BCT ",
+        12: f"         Bắc Ninh, ngày {d.day:02d} tháng {d.month:02d}  năm {d.year}",
+    }
+    return mau_word.fill_paragraphs(mau_word.template_bytes(mau_word.PLX_SUNLU_B64), texts)
+
+
 def build_plx_sunlu_sheet(wb, rec, sheet_name="PLX"):
     """Phụ lục X dạng văn bản theo mẫu Sunlu: số lượng (PCS) + tên hàng + trị giá DAP, tờ khai xuất khẩu tại chỗ, hóa đơn, HS, tiêu chí CTH."""
     ws = wb.create_sheet(title=sheet_name[:31])
@@ -6285,6 +6310,12 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
         fname = f"Bo_Ho_So_Xuat_Hang_{PROFILES[rec['customer']]['label']}_{clean_po}_{s_key}.xlsx"
 
     out_path = os.path.join(work_dir, fname)
+    if mode == "PLX" and rec["customer"] not in BUILTIN_CUSTOMERS and is_sunlu(PROFILES.get(rec["customer"], {})):
+        fname = fname[:-5] + ".docx"  # Sunlu: Phụ lục X là file Word đúng mẫu khách, không phải Excel
+        out_path = os.path.join(work_dir, fname)
+        with open(out_path, "wb") as f:
+            f.write(plx_sunlu_docx(rec))
+        return {"path": out_path, "fname": fname, "problems": problems, "dsh": None}
     if mau_chung_tu:
         mau_chung_tu.autofit_workbook(wb)  # chữ dài tự xuống dòng, dòng tự cao, cột số vừa đủ: mở ra là in được
     wb.save(out_path)
