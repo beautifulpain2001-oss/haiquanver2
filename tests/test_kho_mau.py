@@ -314,7 +314,8 @@ def test_customers_page_search_note_and_make_lot(qapp, store):
     pg.search.setText("ghichu")
     assert [r for r in range(pg.table.rowCount()) if not pg.table.isRowHidden(r)] == [pg.keys.index("ghichu")]
     pg.table.selectRow(pg.keys.index("ghichu"))
-    assert "Ghi rõ Net/Gross" in pg.note_box.text() and not pg.note_box.isHidden() and "PLX" in pg.forms_label.text()
+    assert pg.form.edits["note"].text() == "Ghi rõ Net/Gross" and pg.title.text() == "CÔNG TY GHI CHÚ"
+    assert "PLX" in pg.forms_lay.itemAt(0).widget().text()
     pg.search.setText("")
     from ui_qt.state import Lot
     lot = Lot(app, store)
