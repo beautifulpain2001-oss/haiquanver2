@@ -103,7 +103,7 @@ def make_icon(name, color="#FFFFFF", disabled="#A0AEC0", size=SIZE):
     return icon
 
 
-ROLE_COLOR = {"": "#FFFFFF", "sec": "#1B365D", "dng": "#9B1C1C", "ghost": "#1B365D", "big": "#FFFFFF", "chip": "#1B365D"}
+ROLE_COLOR = {"": "#FFFFFF", "sec": "#0B4FA8", "dng": "#A21B1B", "ghost": "#0B4FA8", "big": "#FFFFFF", "chip": "#0B4FA8"}
 
 
 def split_emoji(text):
@@ -129,7 +129,7 @@ def style_button(btn):
     if name:
         btn.setText(" " + rest)  # chừa khoảng thở giữa biểu tượng và chữ
         role = btn.objectName()
-        btn.setIcon(make_icon(name, ROLE_COLOR.get(role, "#FFFFFF" if not role else "#1B365D")))
+        btn.setIcon(make_icon(name, ROLE_COLOR.get(role, "#FFFFFF" if not role else "#0B4FA8")))
         btn.setIconSize(btn.iconSize().__class__(SIZE, SIZE))
 
 

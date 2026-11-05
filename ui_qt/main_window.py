@@ -5,10 +5,12 @@ import os
 import sys
 import traceback
 
-from PySide6.QtCore import QSize, QTimer
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtGui import QFontDatabase
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QListView, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QStackedWidget, QVBoxLayout, QWidget
 
 from . import icons, theme, widgets
+from .frame import BANNERS, Banner
 from .pages_lot import STEPS, LotPage  # noqa: F401 - STEPS giữ ở đây cho code/test cũ
 from .pages_kho import MauPage
 from .pages_other import CatalogPage, CustomersPage, DataTongPage, DeclarationsPage, RecordsPage, SettingsPage
@@ -29,21 +31,35 @@ class MainWindow(QMainWindow):
             name, rest = icons.split_emoji(text)
             it = QListWidgetItem(rest)
             if name:
-                it.setIcon(icons.make_icon(name, "#E2E8F0", "#94A3B8", 20))
+                it.setIcon(icons.make_icon(name, "#36506F", "#94A3B8", 24))
             self.nav.addItem(it)
-        self.nav.setIconSize(QSize(20, 20))
+        self.nav.setIconSize(QSize(24, 24))
+        self.nav.setViewMode(QListView.IconMode)  # biểu tượng ở trên, tên mục ở dưới
+        self.nav.setFlow(QListView.TopToBottom)
+        self.nav.setWrapping(False)
+        self.nav.setMovement(QListView.Static)
+        self.nav.setUniformItemSizes(True)
+        self.nav.setTextElideMode(Qt.ElideNone)
+        self.nav.setWordWrap(True)
+        self.nav.setGridSize(QSize(98, 92))
+        for i in range(self.nav.count()):
+            it = self.nav.item(i)
+            it.setTextAlignment(Qt.AlignHCenter | Qt.AlignTop)
+            words = it.text().split(" ", 1)
+            it.setText("\n".join(words))  # tên mục xuống dòng ở chữ đầu để vừa 104px
         side = QWidget()
         side.setObjectName("side")
-        side.setFixedWidth(230)
+        side.setFixedWidth(104)
         sl = QVBoxLayout(side)
         sl.setContentsMargins(0, 0, 0, 0)
         sl.setSpacing(0)
-        brand = QLabel("HỒNG THIÊN")
-        brand.setObjectName("brand")
-        sub = QLabel("Hồ sơ hải quan")
-        sub.setObjectName("brandsub")
-        sl.addWidget(brand)
-        sl.addWidget(sub)
+        logo = QLabel("H")  # logo ô vuông; tên công ty nằm ở thanh trên cùng
+        logo.setFixedSize(48, 48)
+        logo.setAlignment(Qt.AlignCenter)
+        logo.setStyleSheet("background:#1570D8;color:white;font-size:22px;font-weight:700;border-radius:14px")
+        sl.addSpacing(14)
+        sl.addWidget(logo, 0, Qt.AlignHCenter)
+        sl.addSpacing(10)
         sl.addWidget(self.nav, 1)
 
         self.lot = LotPage(core, store)
@@ -77,7 +93,31 @@ class MainWindow(QMainWindow):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         lay.addWidget(side)
-        lay.addWidget(self.pages, 1)
+        right = QWidget()
+        rv = QVBoxLayout(right)
+        rv.setContentsMargins(0, 0, 0, 0)
+        rv.setSpacing(0)
+        top = QWidget()
+        top.setObjectName("topbar")
+        tl = QHBoxLayout(top)
+        tl.setContentsMargins(36, 14, 36, 4)
+        brand = QLabel("HỒNG THIÊN  ·  Hồ sơ hải quan")
+        brand.setObjectName("brand")
+        tl.addWidget(brand)
+        tl.addStretch(1)
+        rv.addWidget(top)
+        bw = QWidget()
+        bl = QVBoxLayout(bw)
+        bl.setContentsMargins(36, 6, 36, 8)
+        self.banner = Banner()
+        bl.addWidget(self.banner)
+        rv.addWidget(bw)
+        rv.addWidget(self.pages, 1)
+        for p in (self.lot, self.declarations, self.records, self.catalog, self.customers, self.data_tong, self.kho, self.settings):
+            lab = p.findChild(QLabel, "title")  # tiêu đề riêng của trang đã có trong banner
+            if lab is not None:
+                lab.hide()
+        lay.addWidget(right, 1)
         self.setCentralWidget(root)
         self.nav.setCurrentRow(0)
 
@@ -96,6 +136,8 @@ class MainWindow(QMainWindow):
 
     def show_page(self, i):
         self.pages.setCurrentIndex(i)
+        if 0 <= i < len(BANNERS):
+            self.banner.set_text(*BANNERS[i])
         self.sync_shared()
         page = self.pages.widget(i)
         if hasattr(page, "refresh"):
@@ -128,9 +170,21 @@ def _install_error_hook(core, parent_getter):
     sys.excepthook = hook
 
 
+def load_fonts():
+    """Nạp font Be Vietnam Pro đóng gói kèm phần mềm (thư mục fonts/, giấy phép OFL); không có thì dùng Segoe UI."""
+    root = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    d = os.path.join(root, "fonts")
+    n = 0
+    for fn in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        if fn.lower().endswith(".ttf") and QFontDatabase.addApplicationFont(os.path.join(d, fn)) >= 0:
+            n += 1
+    return n
+
+
 def run(core, store, smoke=False):
     """Mở giao diện mới. `smoke`: tự đóng sau 3 giây (kiểm tra bản đóng gói)."""
     app = QApplication.instance() or QApplication([])
+    load_fonts()
     app.setStyleSheet(theme.STYLE)
     icons.install(app)
     win = MainWindow(core, store)

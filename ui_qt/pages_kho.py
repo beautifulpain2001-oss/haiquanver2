@@ -3,7 +3,7 @@
 import os
 import re
 
-from PySide6.QtCore import QEasingCurve, QRectF, QSize, Qt, QUrl, QVariantAnimation, Signal
+from PySide6.QtCore import QEasingCurve, QRectF, QSize, Qt, QTimer, QUrl, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDialog, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QGraphicsDropShadowEffect, QPlainTextEdit,
@@ -675,7 +675,7 @@ class PagedView(QScrollArea):
     def show_image(self, img, title=""):
         self.pages = [] if img is None or img.isNull() else self.paginate(img, title)
         self._build()
-        self.verticalScrollBar().setValue(0)  # mẫu mới luôn mở từ đầu trang 1
+        QTimer.singleShot(0, lambda: self.verticalScrollBar().setValue(0))  # mẫu mới luôn mở từ đầu trang 1 (sau khi bố cục xong)
 
     def clear(self):
         self.pages = []
