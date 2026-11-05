@@ -154,7 +154,11 @@ class PoStep(QWidget):
         lay.setSpacing(12)
         self.who = _label("", "h2", wrap=True)
         lay.addWidget(self.who)
-        lay.addWidget(_label("Chọn file PO của khách", "h2"))
+        self.pick_title = _label("Chọn file PO của khách", "h2")
+        lay.addWidget(self.pick_title)
+        self.fixed_box = self._build_fixed_box()
+        lay.addWidget(self.fixed_box)
+        self._fixed_for = None
         row = QHBoxLayout()
         self.drop = QPushButton("📂  Bấm để chọn file PO (hoặc kéo thả file vào đây)")
         self.drop.setObjectName("drop")
@@ -181,17 +185,88 @@ class PoStep(QWidget):
         dl.addLayout(self.dates_row)
         self.date_checks = {}
         lay.addWidget(self.dates_box)
-        lay.addWidget(_label("Không có file PO? Bấm “Tiếp tục” rồi thêm dòng hàng bằng tay ở bước ③.", "hint", wrap=True))
+        self.no_file_hint = _label("Không có file PO? Bấm “Tiếp tục” rồi thêm dòng hàng bằng tay ở bước ③.", "hint", wrap=True)
+        lay.addWidget(self.no_file_hint)
         lay.addStretch(1)
         self.refresh()
+
+    # ---- khách đặt một mã cố định: không đọc PO, chỉ xác nhận số PO / số lượng / đơn giá ----
+    def _build_fixed_box(self):
+        box = QGroupBox("Xác nhận đơn hàng (khách chỉ đặt một mã hàng cố định, không cần file PO)")
+        form = QFormLayout(box)
+        form.setLabelAlignment(Qt.AlignLeft)
+        form.setVerticalSpacing(10)
+        form.setContentsMargins(14, 18, 14, 12)
+        self.fixed_item = _label("", "hint", wrap=True)
+        form.addRow("Mặt hàng", self.fixed_item)
+        row = QHBoxLayout()
+        self.f_prefix, self.f_date, self.f_seq = QLineEdit(), QLineEdit(), QLineEdit()
+        for e, tip, w in ((self.f_prefix, "Tiền tố (VD YNCGDD)", 120), (self.f_date, "Ngày yymmdd (mặc định hôm nay)", 90), (self.f_seq, "Số thứ tự (tự tăng)", 70)):
+            e.setPlaceholderText(tip)
+            e.setToolTip(tip)
+            e.setMinimumWidth(w)
+            e.textEdited.connect(lambda _t: self._fixed_compose())
+            row.addWidget(e)
+        self.f_po = QLabel("")
+        self.f_po.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        row.addWidget(QLabel("  →  Số PO:"))
+        row.addWidget(self.f_po, 1)
+        form.addRow("Số PO (tiền tố + ngày + STT)", row)
+        self.f_po_date, self.f_qty, self.f_price = QLineEdit(), QLineEdit(), QLineEdit()
+        form.addRow("Ngày PO (dd/mm/yyyy)", self.f_po_date)
+        form.addRow("Số lượng", self.f_qty)
+        form.addRow("Đơn giá (VNĐ)", self.f_price)
+        self.f_price_from = _label("", "hint", wrap=True)
+        form.addRow("", self.f_price_from)
+        self.f_ok = QPushButton("✅  Xác nhận đơn hàng")
+        self.f_ok.clicked.connect(self.confirm_fixed)
+        form.addRow("", self.f_ok)
+        return box
+
+    def _fixed_compose(self):
+        self.f_po.setText(f"<b>{html.escape(self.f_prefix.text().strip() + self.f_date.text().strip() + self.f_seq.text().strip())}</b>")
+
+    def fill_fixed(self):
+        """Điền sẵn: số PO kế tiếp theo quy chuẩn (tiền tố + ngày hiện tại + số thứ tự), ngày PO hôm nay, SL và giá gần nhất."""
+        d = self.lot.fixed_defaults()
+        item = d.get("item") or {}
+        self.fixed_item.setText(f"{item.get('name', '')}  (mã {item.get('code', '')})" if item else "⚠ Khách chưa có mã hàng cố định trong danh mục.")
+        self.f_prefix.setText(d.get("prefix", ""))
+        self.f_date.setText(d.get("date", ""))
+        self.f_seq.setText(d.get("seq", ""))
+        self.f_po_date.setText(d.get("po_date", ""))
+        self.f_qty.setText(f"{d['qty']:g}" if d.get("qty") else "")
+        self.f_price.setText(f"{d['price']:g}" if d.get("price") else "")
+        self.f_price_from.setText("Đơn giá điền sẵn theo " + d.get("price_from", "") + ". Sửa được nếu khác.")
+        self._fixed_compose()
+
+    def confirm_fixed(self):
+        po = self.f_prefix.text().strip() + self.f_date.text().strip() + self.f_seq.text().strip()
+        try:
+            self.lot.confirm_fixed_order(po, self.f_po_date.text(), self.f_qty.text(), self.f_price.text())
+        except ValueError as e:
+            widgets.warn(self, "Chưa xác nhận được đơn hàng", str(e))
+            return
+        self.set_status(self.lot.read_text + " Bấm “Tiếp tục” để kiểm tra.", ok=True)
+        self.refresh()
+        self.changed.emit()
 
     def refresh(self):
         c = self.lot.customer
         self.who.setText(f"Khách hàng: {self.lot.profile.get('label') or c} — {self.lot.profile.get('name', '')}" if c else "Chưa chọn khách hàng. Bấm “Quay lại” để chọn.")
+        fixed = self.lot.fixed_order
+        self.fixed_box.setVisible(fixed)
+        for w in (self.pick_title, self.drop, self.no_file_hint):
+            w.setVisible(not fixed)
+        if fixed and (self._fixed_for != c or not self.lot.items):
+            self._fixed_for = c
+            self.fill_fixed()
         self.drop.setEnabled(bool(c) and not self.busy.isVisible())
-        self.add_po.setVisible(self.lot.multi_po)
+        self.add_po.setVisible(self.lot.multi_po and not fixed)
         self.refresh_dates()
-        if not self.status.text() and c:
+        if not self.status.text() and c and fixed:
+            self.set_status("Kiểm tra số PO, số lượng, đơn giá rồi bấm “Xác nhận đơn hàng”.", ok=None)
+        elif not self.status.text() and c:
             n = len(self.lot.items)
             self.set_status(f"Lô đang có {n} dòng hàng." if n else "Chọn file PO để phần mềm tự đọc các dòng hàng.", ok=None)
 
@@ -692,7 +767,8 @@ class InfoStep(QWidget):
 
 # --------------------------------------------------------------------------- ④ xuất & lưu
 EXPORTS = [("VAT", "Hóa đơn VAT (Bkav)"), ("PKL", "Invoice / Packing List"), ("PXK", "Phiếu xuất kho (Bkav)"),
-           ("DNTT", "Đề nghị thanh toán"), ("PLX", "Phụ lục X"), ("BBGH", "Biên bản bàn giao"), ("PO", "Đơn đặt hàng (PO)"), ("BEST", "Mẫu riêng của Best")]
+           ("DNTT", "Đề nghị thanh toán"), ("PLX", "Phụ lục X"), ("BBGH", "Biên bản bàn giao"), ("PO", "Đơn đặt hàng (PO)"), ("BDC", "Bảng đối chiếu hàng hóa"),
+           ("BEST", "Mẫu riêng của Best")]
 
 
 def _lines_html(lines):
@@ -785,6 +861,11 @@ class ExportStep(QWidget):
         self.btns["BEST"].setVisible(self.lot.is_best)
         self.btns["PO"].setVisible(bool(self.lot.customer) and "PO" in self.lot.core.lot_bundle_modes({"customer": self.lot.customer}))
         self.btns["PLX"].setVisible(self.lot.customer in ("tesa", "kodi", "shirai") or bool(self.lot.customer and "PLX" in self.lot.core.lot_bundle_modes({"customer": self.lot.customer})))
+        self.btns["BDC"].setVisible(bool(self.lot.customer) and "BDC" in self.lot.core.lot_bundle_modes({"customer": self.lot.customer}))
+        if self.lot.fixed_order and self.lot.core.is_sunlu(self.lot.profile):  # Sunlu: chỉ đúng bộ của khách (không ĐNTT)
+            modes = set(self.lot.core.lot_bundle_modes({"customer": self.lot.customer}))
+            for m, b in self.btns.items():
+                b.setVisible(m in modes)
         self.save_btn.setEnabled(ok)
         self.open_btn.setEnabled(ok)
         self.done_lines = [f"✅  {f['label']}: {f['name']}  ({f['time']})" for f in self.lot.files] or ["Chưa xuất file nào."]

@@ -286,6 +286,13 @@ File `master_catalog.json` trong thư mục chung của project là bản danh m
 
 ---
 
+### 6.4 Khách đặt một mã hàng cố định (kiểu Sunlu)
+- Hồ sơ khách có `fixedItem` (mã hàng cố định) hoặc `docStyle: "sunlu"` (hoặc tên có SUNLU): bước ② không đọc file PO mà hiện ô **Xác nhận đơn hàng**: số PO 3 phần (tiền tố + ngày + số thứ tự), ngày PO, số lượng, đơn giá.
+- Số PO theo `poGen`, ví dụ `YNCGDD{yymmdd}{nnnn}`: số thứ tự = lớn nhất đã dùng cùng ngày + 1 (`next_po_parts`). Sửa tay được từng phần.
+- Đơn giá điền sẵn = giá của hồ sơ gần nhất của khách (`last_fixed_order`), chưa có hồ sơ thì giá trong danh mục.
+- Bộ chứng từ: Invoice, Hóa đơn VAT, Phiếu xuất kho (Bkav, không ghi PO), Đơn đặt hàng, Biên bản giao nhận, Bảng đối chiếu hàng hóa theo tháng (mã `BDC`, gộp mọi hồ sơ cùng tháng), Phụ lục X dạng văn bản. Không có ĐNTT.
+- Dữ liệu khách (tên, MST, mã hàng, giá) nằm trong file dữ liệu học `khach_sunlu_hoc.json` ở thư mục file chung, không nằm trong repo. Test dùng dữ liệu giả (`tests/test_fixed_order.py`).
+
 ## 7. Quy trình bộ hồ sơ khách Best (docSet `best`)
 
 Tài liệu nghiệp vụ đầy đủ (có số liệu thật, **không đưa vào repo**): `best/QUY_TRINH_BO_HO_SO_BEST.md` trong thư mục file chung của project. Tóm tắt quy tắc:
