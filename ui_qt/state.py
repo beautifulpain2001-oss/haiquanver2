@@ -78,6 +78,29 @@ class Lot:
         return bool(self.customer) and self.core.is_best_docset(self.profile)
 
     @property
+    def fixed_order(self):
+        """Khách chỉ đặt một mã hàng cố định (VD Sunlu): không đọc file PO, chỉ xác nhận số PO, số lượng, đơn giá."""
+        return bool(self.customer) and self.customer not in self.core.BUILTIN_CUSTOMERS and self.core.is_fixed_order(self.profile)
+
+    def fixed_defaults(self):
+        """Số PO kế tiếp (3 phần), ngày PO, số lượng và đơn giá gần nhất để điền sẵn."""
+        return self.core.lot_fixed_order_defaults(self.store, self.customer)
+
+    def confirm_fixed_order(self, po, po_date, qty, price):
+        """Tạo lô một dòng hàng từ số liệu người dùng xác nhận. Ném ValueError (tiếng Việt) nếu thiếu/sai."""
+        po = str(po or "").strip()
+        items = self.core.lot_fixed_order_items(self.store, self.customer, po, qty, price, self.form.get("tare", ""))
+        self.items = items
+        self.form["po"], self.form["po_date"] = po, str(po_date or "").strip()
+        self.po_dates = {po: self.form["po_date"]}
+        self.po_touched, self.po_auto = True, False
+        self.schedules, self.selected_dates, self.po_files = None, [], []
+        it = items[0]
+        self.read_text = f"Đơn {po}: {it['ten_sp']} — {it['qty']:,} {it.get('unit', '')} × {it['price']:,} đ."
+        self.saved = False
+        return items
+
+    @property
     def multi_po(self):
         """Khách gom nhiều PO một lô (khách đã học)."""
         return bool(self.customer) and self.customer not in self.core.BUILTIN_CUSTOMERS

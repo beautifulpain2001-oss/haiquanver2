@@ -675,3 +675,26 @@ def test_pick_numbers_dialog_lists_numbers_and_saves_choice(win, tmp_path):
     d.boxes["price"].setEditText("75,430")
     d.save()
     assert d.result() and lot.items[0]["qty"] == 100 and lot.items[0]["price"] == 75430 and lot.items[0]["read"] == "tay"
+
+
+def test_fixed_order_customer_confirms_instead_of_reading_po(win, store):
+    """Khách đặt một mã cố định (kiểu Sunlu): bước ② là ô xác nhận số PO (3 phần) / SL / giá, không có nút chọn file PO; bước xuất không có ĐNTT."""
+    key = store.save_learned_customer("motma", {"name": "CTY MỘT MÃ THỬ", "mst": "0100000098", "unit": "chiếc", "tare": 1.0, "docStyle": "sunlu",
+                                                "poGen": "ABCDE{yymmdd}{nnnn}", "fixedItem": "90000001"},
+                                      [{"code": "90000001", "name": "Ống lõi giấy phi 50 x 55 x 40mm (90000001)", "price": 1000, "div": 50, "kg": 0.03}])
+    page = win.lot
+    page.step1.build_cards()
+    page.step1.pick(key)
+    page.go(1)
+    step = page.step2
+    assert step.fixed_box.isVisibleTo(step) and not step.drop.isVisibleTo(step)
+    today = core.datetime.date.today().strftime("%y%m%d")
+    assert (step.f_prefix.text(), step.f_date.text(), step.f_seq.text()) == ("ABCDE", today, "0001") and step.f_price.text() == "1000"
+    step.f_seq.setText("0007")  # sửa tay một phần của số PO
+    step.f_qty.setText("20000")
+    step.confirm_fixed()
+    assert page.lot.form["po"] == f"ABCDE{today}0007" and page.lot.items[0]["qty"] == 20000
+    page.go(3)
+    exp = page.step5
+    vis = {m for m, b in exp.btns.items() if b.isVisibleTo(exp)}
+    assert vis == {"PKL", "VAT", "PXK", "PO", "BBGH", "BDC", "PLX"}
