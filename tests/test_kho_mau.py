@@ -110,8 +110,33 @@ def test_new_customer_flow_three_files_then_pick_template(qapp, store, tmp_path)
     d = LearnCustomerDialog(app, store, [], draft=draft)
     d.edits["key"].setText("abcmoi")
     d.edits["label"].setText("AbcMoi")
-    d.kho.list.item([it["file"] for it in d.kho.items].index("PLX_Arizon_01.xlsx")).setCheckState(__import__("PySide6.QtCore", fromlist=["Qt"]).Qt.Checked)
+    d.kho.flow.set_current([it["file"] for it in d.kho.items].index("PLX_Arizon_01.xlsx"), animate=False)
+    assert "Chọn mẫu này" in d.kho.pick_btn.text()
+    d.kho.toggle_current()
+    assert d.kho.pick_btn.text().startswith("✖") and "PLX_Arizon_01" in d.kho.chosen_label.text()
     d.save()
     assert d.key == "abcmoi" and store.custom_forms("abcmoi") == ["PLX_Arizon_01.xlsx"]
     assert app.lot_bundle_modes({"customer": "abcmoi"}) == ["PKL", "VAT", "PXK", "R:PLX_Arizon_01.xlsx"]
     d.close()
+
+
+def test_coverflow_navigation_and_hit_test(qapp, store):
+    from PySide6.QtCore import QPointF
+    from ui_qt.pages_kho import CoverFlow, kho_cards
+    flow = CoverFlow()
+    flow.resize(900, 300)
+    flow.set_cards(kho_cards(store.kho_list()) + [{"title": "X", "code": "KHAC", "color": "#64748B", "lines": [], "foot": ""}] * 2, 1)
+    seen = []
+    flow.current_changed.connect(seen.append)
+    flow.step(1)
+    flow.step(-1)
+    flow.step(-1)
+    flow.step(-1)  # quay vòng về cuối
+    assert seen == [2, 1, 0, 3]
+    flow.set_current(1, animate=False)
+    assert flow.card_at(QPointF(450, 140)) == 1 and flow.card_at(QPointF(5, 5)) is None
+    right = flow._card_rect(1).center()
+    flow.mousePressEvent(type("E", (), {"position": lambda self, p=right: p})())  # bấm thẻ bên phải: chuyển sang thẻ đó
+    assert flow.index == 2
+    assert not flow.grab().isNull()  # vẽ được không lỗi
+    flow.close()

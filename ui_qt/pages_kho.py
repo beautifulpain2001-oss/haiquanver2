@@ -2,8 +2,8 @@
 
 import os
 
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QEasingCurve, QRectF, Qt, QUrl, QVariantAnimation, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QListWidget, QListWidgetItem, QPlainTextEdit, QPushButton, QSplitter,
     QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
@@ -21,6 +21,199 @@ def loai_text(code):
 
 def ext_text(ext):
     return "Word" if ext == "docx" else "Excel"
+
+
+# màu viền thẻ theo loại chứng từ (giống bảng băng chuyền mẫu)
+CARD_COLOR = {"PLX": "#8B5CF6", "BBGH": "#10B981", "PO": "#3B82F6", "BDC": "#F59E0B", "DNTT": "#F43F5E", "DCCN": "#06B6D4", "KHAC": "#64748B"}
+
+
+class CoverFlow(QWidget):
+    """Băng chuyền 3D các mẫu chứng từ: thẻ giữa lớn, hai bên nghiêng nhỏ dần. Nút ❮ ❯, phím mũi tên, bấm thẻ bên cạnh, bánh xe chuột.
+    `set_cards([{title, code, color, lines, foot}])`; phát `current_changed(index)` khi đổi thẻ."""
+
+    current_changed = Signal(int)
+    CARD_W, CARD_H = 230, 250
+
+    def __init__(self):
+        super().__init__()
+        self.cards, self.index, self.pos = [], 0, 0.0
+        self.setMinimumHeight(290)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.anim = QVariantAnimation(self)
+        self.anim.setDuration(380)
+        self.anim.setEasingCurve(QEasingCurve.OutCubic)
+        self.anim.valueChanged.connect(self._tick)
+        self.left = QPushButton("❮", self)
+        self.right = QPushButton("❯", self)
+        for b, step in ((self.left, -1), (self.right, 1)):
+            b.setObjectName("sec")
+            b.setFixedSize(40, 40)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setAccessibleName("Mẫu trước" if step < 0 else "Mẫu sau")
+            b.clicked.connect(lambda _=False, st=step: self.step(st))
+
+    def set_cards(self, cards, index=0):
+        self.cards = list(cards)
+        self.index = max(0, min(index, len(self.cards) - 1)) if self.cards else 0
+        self.pos = float(self.index)
+        self.anim.stop()
+        self.left.setEnabled(len(self.cards) > 1)
+        self.right.setEnabled(len(self.cards) > 1)
+        self.update()
+
+    def set_current(self, i, animate=True):
+        if not self.cards or not (0 <= i < len(self.cards)) or i == self.index and abs(self.pos - i) < 1e-6:
+            return
+        self.index = i
+        self.anim.stop()
+        if animate:
+            self.anim.setStartValue(float(self.pos))
+            self.anim.setEndValue(float(i))
+            self.anim.start()
+        else:
+            self.pos = float(i)
+            self.update()
+        self.current_changed.emit(i)
+
+    def step(self, d):
+        if self.cards:
+            self.set_current((self.index + d) % len(self.cards))
+
+    def _tick(self, v):
+        self.pos = float(v)
+        self.update()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        y = (self.height() - self.left.height()) // 2
+        self.left.move(8, y)
+        self.right.move(self.width() - self.right.width() - 8, y)
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Left:
+            self.step(-1)
+        elif e.key() == Qt.Key_Right:
+            self.step(1)
+        else:
+            super().keyPressEvent(e)
+
+    def wheelEvent(self, e):
+        self.step(-1 if e.angleDelta().y() > 0 else 1)
+
+    # --- hình học: thẻ càng xa tâm càng nhỏ, hẹp (giả nghiêng quanh trục dọc), mờ và lùi ra sau
+    def _geom(self, off):
+        a = abs(off)
+        scale = 1.0 - 0.16 * min(a, 1) - 0.14 * max(0.0, min(a - 1, 1))
+        squeeze = 1.0 - 0.18 * min(a, 1) - 0.10 * max(0.0, min(a - 1, 1))
+        spread = min(self.width() * 0.26, 205)
+        x = self.width() / 2 + (spread * min(a, 1) + spread * 0.5 * max(0.0, min(a - 1, 1))) * (1 if off > 0 else -1 if off < 0 else 0)
+        opacity = 1.0 - 0.35 * min(a, 1) - 0.45 * max(0.0, min(a - 1, 1))
+        return x, scale, squeeze, max(0.0, opacity)
+
+    def _card_rect(self, off):
+        x, scale, squeeze, _ = self._geom(off)
+        w, h = self.CARD_W * scale * squeeze, self.CARD_H * scale
+        return QRectF(x - w / 2, (self.height() - 22) / 2 - h / 2, w, h)
+
+    def card_at(self, pt):
+        order = sorted(range(len(self.cards)), key=lambda i: abs(i - self.pos))
+        for i in order:  # gần tâm trước (nằm trên cùng)
+            if self._card_rect(i - self.pos).contains(pt):
+                return i
+        return None
+
+    def mousePressEvent(self, e):
+        self.setFocus()
+        i = self.card_at(e.position())
+        if i is not None and i != self.index:
+            self.set_current(i)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.TextAntialiasing, True)
+        if not self.cards:
+            p.setPen(QColor("#64748B"))
+            p.drawText(self.rect(), Qt.AlignCenter, "Kho chưa có mẫu nào. Bấm “Nạp mẫu mới vào kho”.")
+            return
+        for i in sorted(range(len(self.cards)), key=lambda i: -abs(i - self.pos)):  # xa vẽ trước, gần tâm vẽ sau
+            off = i - self.pos
+            if abs(off) > 2.6:
+                continue
+            x, scale, squeeze, opacity = self._geom(off)
+            p.save()
+            p.setOpacity(opacity)
+            p.translate(x, (self.height() - 22) / 2)
+            p.scale(scale * squeeze, scale)
+            self._draw_card(p, self.cards[i], i, abs(off) < 0.5)
+            p.restore()
+        p.setOpacity(1)
+        n, y = len(self.cards), self.height() - 9  # dấu chấm tròn bên dưới
+        for i in range(n):
+            on = i == self.index
+            w = 22 if on else 7
+            cx = self.width() / 2 + (i - (n - 1) / 2) * 14
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor("#4F46E5") if on else QColor("#CBD5E1"))
+            p.drawRoundedRect(QRectF(cx - w / 2, y - 3.5, w, 7), 3.5, 3.5)
+
+    def _draw_card(self, p, card, i, front):
+        w, h = self.CARD_W, self.CARD_H
+        body = QRectF(-w / 2, -h / 2, w, h)
+        shadow = QPainterPath()
+        shadow.addRoundedRect(body.translated(0, 5), 14, 14)
+        p.fillPath(shadow, QColor(15, 23, 42, 55))
+        path = QPainterPath()
+        path.addRoundedRect(body, 14, 14)
+        p.fillPath(path, QColor("#FFFFFF"))
+        p.setPen(QPen(QColor("#E2E8F0"), 1))
+        p.drawPath(path)
+        p.save()
+        p.setClipPath(path)
+        p.fillRect(QRectF(body.left(), body.top(), w, 7), QColor(card.get("color", "#64748B")))
+        p.restore()
+        f = QFont(self.font())
+        f.setPointSizeF(8)
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QColor(card.get("color", "#64748B")))
+        p.drawText(QRectF(body.left() + 14, body.top() + 16, w - 28, 16), Qt.AlignLeft | Qt.AlignVCenter, card.get("code", ""))
+        f.setPointSizeF(11.5)
+        p.setFont(f)
+        p.setPen(QColor("#0F172A"))
+        p.drawText(QRectF(body.left() + 14, body.top() + 36, w - 28, 48), Qt.AlignLeft | Qt.TextWordWrap, card.get("title", ""))
+        p.setPen(QPen(QColor("#E2E8F0"), 1, Qt.DashLine))
+        p.drawLine(body.left() + 14, body.top() + 92, body.right() - 14, body.top() + 92)
+        f.setPointSizeF(8)
+        f.setBold(False)
+        p.setFont(f)
+        p.setPen(QColor("#64748B"))
+        p.drawText(QRectF(body.left() + 14, body.top() + 98, w - 28, 14), Qt.AlignLeft, "Các ô dữ liệu trên mẫu:")
+        p.setPen(QColor("#334155"))
+        y = body.top() + 118
+        for line in card.get("lines", [])[:5]:
+            p.drawText(QRectF(body.left() + 14, y, w - 28, 14), Qt.AlignLeft | Qt.AlignVCenter, "• " + line)
+            y += 17
+        foot = QRectF(body.left() + 12, body.bottom() - 36, w - 24, 26)
+        p.setPen(QPen(QColor("#E2E8F0"), 1))
+        p.setBrush(QColor("#F8FAFC"))
+        p.drawRoundedRect(foot, 8, 8)
+        p.setPen(QColor("#64748B"))
+        p.drawText(foot.adjusted(10, 0, -10, 0), Qt.AlignLeft | Qt.AlignVCenter, card.get("foot", ""))
+        p.setPen(QColor("#4F46E5"))
+        p.drawText(foot.adjusted(10, 0, -10, 0), Qt.AlignRight | Qt.AlignVCenter, "Đang xem ●" if front else "Bấm để xem")
+
+
+def kho_cards(items):
+    """Nội dung thẻ băng chuyền cho các mẫu trong kho."""
+    import mau_rieng
+    desc = dict(mau_rieng.TOKENS) | dict(mau_rieng.ITEM_TOKENS)
+    out = []
+    for n, it in enumerate(items, 1):
+        out.append({"code": f"{it['loai']} • {loai_text(it['loai']).upper()}", "title": f"{os.path.splitext(it['file'])[0]}", "color": CARD_COLOR.get(it["loai"], "#64748B"),
+                    "lines": [desc.get(t, t) for t in it["tokens"][:5]] or ["(chưa có ô thay thế)"],
+                    "foot": f"{ext_text(it['ext'])} · {len(it['tokens'])} ô"})
+    return out
 
 
 class TemplatePreview(QWidget):
@@ -93,56 +286,78 @@ def add_template_to_kho(parent, store, khach_label, path=None):
 
 
 class KhoPicker(QWidget):
-    """Danh sách mẫu trong kho để chọn (tích chọn) kèm khung xem mẫu; dùng khi tạo khách mới (bước chọn chứng từ riêng)."""
+    """Chọn mẫu trong kho bằng băng chuyền 3D kèm khung xem mẫu; nút "Chọn mẫu này" tích/bỏ tích (dùng ở bước chọn chứng từ riêng khi tạo khách mới)."""
 
     def __init__(self, core, store, khach_label=lambda: ""):
         super().__init__()
         self.core, self.store, self.khach_label = core, store, khach_label
+        self.chosen = set()
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        top = QHBoxLayout()
-        self.list = QListWidget()
-        self.list.setMaximumHeight(150)
-        self.list.currentRowChanged.connect(self.on_row)
-        top.addWidget(self.list, 1)
-        self.preview = TemplatePreview()
-        top.addWidget(self.preview, 2)
-        lay.addLayout(top)
+        self.flow = CoverFlow()
+        self.flow.setMinimumHeight(270)
+        self.flow.current_changed.connect(self.on_row)
+        lay.addWidget(self.flow)
         row = QHBoxLayout()
+        self.pick_btn = QPushButton("✔  Chọn mẫu này cho khách")
+        self.pick_btn.clicked.connect(self.toggle_current)
         self.add_btn = QPushButton("📎  Nạp file mẫu Word/Excel mới…")
         self.add_btn.setObjectName("sec")
         self.add_btn.clicked.connect(self.add_new)
+        row.addWidget(self.pick_btn)
         row.addWidget(self.add_btn)
-        row.addStretch(1)
+        self.chosen_label = QLabel("")
+        self.chosen_label.setObjectName("hint")
+        self.chosen_label.setWordWrap(True)
+        row.addWidget(self.chosen_label, 1)
         lay.addLayout(row)
+        self.preview = TemplatePreview()
+        self.preview.setMaximumHeight(180)
+        lay.addWidget(self.preview)
         self.items = []
         self.refresh()
 
     def refresh(self, check=()):
-        checked = set(check) | set(self.selected())
+        self.chosen |= set(check)
         self.items = self.store.kho_list()
-        self.list.blockSignals(True)
-        self.list.clear()
-        for it in self.items:
-            li = QListWidgetItem(f"{os.path.splitext(it['file'])[0]}  —  {loai_text(it['loai'])}, {ext_text(it['ext'])}")
-            li.setFlags(li.flags() | Qt.ItemIsUserCheckable)
-            li.setCheckState(Qt.Checked if it["file"] in checked else Qt.Unchecked)
-            self.list.addItem(li)
-        self.list.blockSignals(False)
-        self.preview.clear()
+        self.chosen &= {it["file"] for it in self.items}
+        keep = self.flow.index if self.flow.cards else 0
+        self.flow.set_cards(kho_cards(self.items), keep)
+        self._sync()
+        self.on_row(self.flow.index)
 
     def selected(self):
-        return [self.items[i]["file"] for i in range(self.list.count()) if self.list.item(i).checkState() == Qt.Checked] if self.items else []
+        return [it["file"] for it in self.items if it["file"] in self.chosen]
+
+    def toggle(self, name):
+        self.chosen ^= {name}
+        self._sync()
+
+    def toggle_current(self):
+        if self.items:
+            self.toggle(self.items[self.flow.index]["file"])
+
+    def _sync(self):
+        cur = self.items[self.flow.index]["file"] if self.items else ""
+        self.pick_btn.setText("✖  Bỏ chọn mẫu này" if cur in self.chosen else "✔  Chọn mẫu này cho khách")
+        self.pick_btn.setEnabled(bool(self.items))
+        names = ", ".join(os.path.splitext(n)[0] for n in self.selected())
+        self.chosen_label.setText(f"Đã chọn: {names}" if names else "Chưa chọn mẫu nào (có thể bỏ qua, thêm sau ở tab Kho mẫu).")
 
     def on_row(self, i):
+        self._sync()
         if 0 <= i < len(self.items):
             it = self.items[i]
             self.preview.show_template(self.core, it["ext"], self.store.kho_read(it["file"]), it["tokens"], it["unknown"])
+        else:
+            self.preview.clear()
 
     def add_new(self, path=None):
-        name = add_template_to_kho(self, self.store, self.khach_label(), path)
+        name = add_template_to_kho(self, self.store, self.khach_label(), path if isinstance(path, str) else None)
         if name:
             self.refresh(check=[name])
+            self.flow.set_current([it["file"] for it in self.items].index(name), animate=False)
+            self.on_row(self.flow.index)
 
 
 class MauPage(QWidget):
@@ -165,6 +380,9 @@ class MauPage(QWidget):
         h.setWordWrap(True)
         lay.addWidget(t)
         lay.addWidget(h)
+        self.flow = CoverFlow()
+        self.flow.current_changed.connect(self.on_flow)
+        lay.addWidget(self.flow)
         split = QSplitter(Qt.Horizontal)
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(["Mẫu", "Loại", "Khách nguồn", "Định dạng", "Số ô"])
@@ -213,6 +431,7 @@ class MauPage(QWidget):
                 self.table.setItem(r, c, QTableWidgetItem(str(v)))
         self.table.blockSignals(False)
         names = [it["file"] for it in self.items]
+        self.flow.set_cards(kho_cards(self.items), names.index(select) if select in names else 0)
         if select in names:
             self.table.selectRow(names.index(select))
         self.on_select()
@@ -221,8 +440,15 @@ class MauPage(QWidget):
         rows = self.table.selectionModel().selectedRows()
         return self.items[rows[0].row()] if rows and rows[0].row() < len(self.items) else None
 
+    def on_flow(self, i):
+        """Đổi thẻ băng chuyền thì chọn đúng dòng trong bảng (và ngược lại ở on_select)."""
+        if 0 <= i < self.table.rowCount() and not (self.table.selectionModel().selectedRows() and self.table.selectionModel().selectedRows()[0].row() == i):
+            self.table.selectRow(i)
+
     def on_select(self):
         it = self.current()
+        if it and self.flow.cards and self.flow.index != self.items.index(it):
+            self.flow.set_current(self.items.index(it))
         for b in (self.use_btn, self.open_btn, self.del_btn):
             b.setEnabled(bool(it))
         if it:
