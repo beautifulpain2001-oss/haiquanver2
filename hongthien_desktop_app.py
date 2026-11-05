@@ -853,8 +853,61 @@ class DedicatedDataStore:
             if os.path.isfile(path):
                 with open(path, "rb") as f:
                     mau[doc] = base64.b64encode(f.read()).decode("ascii")
+        for fn in (self.custom_profiles.get(key) or {}).get("rieng") or []:
+            path = os.path.join(folder, "rieng", fn)
+            if os.path.isfile(path):
+                with open(path, "rb") as f:
+                    mau["rieng/" + fn] = base64.b64encode(f.read()).decode("ascii")
         mem = {it["name"]: self.item_mem[it["name"]] for it in items if it.get("name") in self.item_mem}
         return {"version": "hongthien-hoc-v1", "khach_moi": {"key": key, "profile": dict(self.custom_profiles[key]), "items": items, "mau": mau}, "item_mem": mem}
+
+    # ---- MẪU RIÊNG của khách (Word/Excel do người dùng nhập, ghi ô {{...}} để phần mềm điền) -----------------------------------
+    def template_folder(self, key):
+        return os.path.join(TEMPLATE_DIR or os.path.join(self.base_dir, "MAU_CHUNG_TU"), key)
+
+    def custom_forms(self, key):
+        """Tên file các mẫu riêng của khách (đã đăng ký trong hồ sơ khách và còn file)."""
+        names = list((PROFILES.get(key) or {}).get("rieng") or [])
+        return [n for n in names if os.path.isfile(os.path.join(self.template_folder(key), "rieng", n))]
+
+    def add_custom_form(self, key, src_path, name=None):
+        """Thêm (hoặc thay) một mẫu riêng cho khách đã học/thêm mới. Trả (tên file đã lưu, ô nhận ra, ô lạ)."""
+        import mau_rieng
+        if key in BUILTIN_CUSTOMERS or key not in self.custom_profiles:
+            raise ValueError("Mẫu riêng hiện chỉ thêm được cho khách đã học / thêm mới (không dành cho Shirai, Kodi, Tesa).")
+        ext = os.path.splitext(src_path)[1].lower()
+        if ext not in (".docx", ".xlsx"):
+            raise ValueError("Chỉ nhận file Word (.docx) hoặc Excel (.xlsx).")
+        with open(src_path, "rb") as f:
+            data = f.read()
+        known, unknown = mau_rieng.template_tokens(ext, data)
+        if not known:
+            raise ValueError("Trong file chưa có ô thay thế nào. Hãy gõ vào file mẫu các ô dạng {{so_po}}, {{ngay}}, {{ten}}, {{sl}}… rồi nhập lại.")
+        fname = re.sub(r'[\\/:*?"<>|]+', "_", (name or os.path.splitext(os.path.basename(src_path))[0]).strip()) + ext
+        folder = os.path.join(self.template_folder(key), "rieng")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, fname), "wb") as f:
+            f.write(data)
+        prof = self.custom_profiles[key]
+        lst = list(prof.get("rieng") or [])
+        if fname not in lst:
+            lst.append(fname)
+        prof["rieng"] = lst
+        PROFILES[key] = build_custom_profile(key, prof)
+        self.save_catalog()
+        return fname, known, unknown
+
+    def remove_custom_form(self, key, fname):
+        prof = self.custom_profiles.get(key)
+        if not prof or fname not in (prof.get("rieng") or []):
+            return
+        prof["rieng"] = [n for n in prof["rieng"] if n != fname]
+        PROFILES[key] = build_custom_profile(key, prof)
+        try:
+            os.remove(os.path.join(self.template_folder(key), "rieng", fname))
+        except OSError:
+            pass
+        self.save_catalog()
 
     def save_templates(self, key, mau, overwrite=False):
         """Lưu file mẫu chứng từ của khách (base64 trong file dữ liệu học) vào MAU_CHUNG_TU/<khách>/<doc>.xlsx."""
@@ -862,6 +915,21 @@ class DedicatedDataStore:
         folder = os.path.join(TEMPLATE_DIR or os.path.join(self.base_dir, "MAU_CHUNG_TU"), key)
         n = 0
         for doc, b64 in (mau or {}).items():
+            if str(doc).startswith("rieng/"):  # mẫu riêng (Word/Excel): lưu nguyên tên file và ghi vào hồ sơ khách
+                fn = os.path.basename(str(doc)[6:])
+                if os.path.splitext(fn)[1].lower() not in (".docx", ".xlsx"):
+                    continue
+                path = os.path.join(folder, "rieng", fn)
+                if not os.path.exists(path) or overwrite:
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    with open(path, "wb") as f:
+                        f.write(base64.b64decode(b64))
+                    n += 1
+                prof = self.custom_profiles.get(key)
+                if prof is not None and fn not in (prof.get("rieng") or []):
+                    prof["rieng"] = list(prof.get("rieng") or []) + [fn]
+                    PROFILES[key] = build_custom_profile(key, prof)
+                continue
             if doc not in ("pkl", "pack", "pgh", "dccn", "dntt", "bbgh", "po"):
                 continue
             path = os.path.join(folder, doc + ".xlsx")
@@ -6221,6 +6289,30 @@ def lot_build_record(store, form, items):
     return rec
 
 
+def lot_mode_label(mode):
+    """Tên chứng từ cho một mode xuất; mẫu riêng ('R:<tên file>') lấy theo tên file mẫu."""
+    return LOT_MODE_LABELS.get(mode) or (os.path.splitext(mode[2:])[0] if str(mode).startswith("R:") else str(mode))
+
+
+def lot_export_custom_form(store, rec, fname, work_dir, s_key):
+    import mau_rieng
+    cust = rec["customer"]
+    if fname not in store.custom_forms(cust):
+        raise ValueError(f"Khách này chưa có mẫu riêng “{fname}”.")
+    path = os.path.join(store.template_folder(cust), "rieng", fname)
+    with open(path, "rb") as f:
+        data = f.read()
+    prof = PROFILES.get(cust, {})
+    consts = {"name": HT_NAME, "addr": ADDR_HT, "mst": MST_HT, "date": _iso_to_date, "words": num_to_vn_words}
+    out, unknown = mau_rieng.fill(os.path.splitext(fname)[1], data, mau_rieng.batch_values(rec, prof, consts), mau_rieng.item_values(rec))
+    ext = os.path.splitext(fname)[1]
+    out_name = f"{os.path.splitext(fname)[0]}_{cust}_{s_key}{ext}"
+    out_path = os.path.join(work_dir, out_name)
+    with open(out_path, "wb") as f:
+        f.write(out)
+    return {"path": out_path, "fname": out_name, "problems": [f"Mẫu {fname}: ô {{{{{u}}}}} không nhận ra, đã để nguyên." for u in unknown], "dsh": None}
+
+
 def lot_export(store, rec, mode="ALL", skip_h=False):
     """Xuất Excel cho hồ sơ `rec` vào thư mục làm việc của hồ sơ.
 
@@ -6253,6 +6345,8 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
     clean_po = re.sub(r"[^a-zA-Z0-9_-]", "", rec["poNumber"])[:24]
     s_key = rec.get("scheduleKey", "30.10")
     problems = []
+    if mode.startswith("R:"):  # mẫu riêng của khách (Word/Excel): điền ô {{...}} rồi xuất lại đúng định dạng file mẫu
+        return lot_export_custom_form(store, rec, mode[2:], work_dir, s_key)
 
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
@@ -6336,8 +6430,9 @@ def lot_bundle_modes(rec):
     cust = rec["customer"]
     prof = PROFILES.get(cust, PROFILES["shirai"])
     best = is_best_docset(prof)
+    rieng = ["R:" + n for n in (prof.get("rieng") or [])]  # mẫu riêng của khách (Word/Excel) nằm trong bộ chứng từ
     if cust not in BUILTIN_CUSTOMERS and not best:
-        return ["PKL", "VAT", "PXK"] + customer_extra_docs(prof)
+        return ["PKL", "VAT", "PXK"] + customer_extra_docs(prof) + rieng
     modes = ["SO"] if cust == "shirai" else []
     modes.append("PKL")
     if best:
@@ -6348,6 +6443,7 @@ def lot_bundle_modes(rec):
     if best:
         modes += ["PGH", "DCCN"]
     modes.append("DNTT")
+    modes += rieng
     modes.append("CHECK")
     return modes
 
@@ -6355,11 +6451,13 @@ def lot_bundle_modes(rec):
 def lot_export_each(store, rec, skip_h=False):
     """Xuất trọn bộ nhưng MỖI CHỨNG TỪ MỘT FILE Excel riêng (cùng thư mục hồ sơ).
     Trả {"files": [{"mode", "label", "name", "path"}], "problems": [điểm lệch khi kiểm tra chéo]}."""
-    files = []
+    files, extra = [], []
     for mode in lot_bundle_modes(rec):
         res = lot_export(store, rec, mode, skip_h=skip_h)
-        files.append({"mode": mode, "label": LOT_MODE_LABELS[mode], "name": res["fname"], "path": res["path"]})
-    return {"files": files, "problems": check_lot(rec)}
+        files.append({"mode": mode, "label": lot_mode_label(mode), "name": res["fname"], "path": res["path"]})
+        if mode.startswith("R:"):  # ô lạ trong mẫu riêng của khách: báo để người dùng sửa file mẫu
+            extra += res["problems"]
+    return {"files": files, "problems": check_lot(rec) + extra}
 
 
 def lot_save_new(store, rec, exported_files):

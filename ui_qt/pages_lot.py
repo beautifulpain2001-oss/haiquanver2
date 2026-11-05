@@ -830,6 +830,10 @@ class ExportStep(QWidget):
             self.btns[mode] = b
             g.addWidget(b, i // 2, i % 2)
         lay.addWidget(self.one)
+        self.rieng_box = QGroupBox("Mẫu riêng của khách (Word/Excel)")
+        self.rieng_lay = QGridLayout(self.rieng_box)
+        self.rieng_btns = {}
+        lay.addWidget(self.rieng_box)
         lay.addWidget(_label("File đã xuất", "h2"))
         self.done = _text_card(lay)
         row = QHBoxLayout()
@@ -866,12 +870,32 @@ class ExportStep(QWidget):
             modes = set(self.lot.core.lot_bundle_modes({"customer": self.lot.customer}))
             for m, b in self.btns.items():
                 b.setVisible(m in modes)
+        self.refresh_rieng()
+        self.rieng_box.setEnabled(ok)
         self.save_btn.setEnabled(ok)
         self.open_btn.setEnabled(ok)
         self.done_lines = [f"✅  {f['label']}: {f['name']}  ({f['time']})" for f in self.lot.files] or ["Chưa xuất file nào."]
         self.done.setText(_lines_html(self.done_lines))
         if not keep_msg:
             self.msg.setText("Hồ sơ đã được lưu." if self.lot.saved else "")
+
+    def refresh_rieng(self):
+        """Nút xuất cho từng mẫu riêng (Word/Excel) mà khách đã nhập; dựng lại mỗi khi đổi khách."""
+        modes = [m for m in self.lot.core.lot_bundle_modes({"customer": self.lot.customer}) if m.startswith("R:")] if self.lot.customer else []
+        if list(self.rieng_btns) != modes:
+            while self.rieng_lay.count():
+                w = self.rieng_lay.takeAt(0).widget()
+                if w:
+                    w.deleteLater()
+            self.rieng_btns = {}
+            for i, mode in enumerate(modes):
+                ext = mode.rsplit(".", 1)[-1].lower()
+                b = QPushButton(("📝  " if ext == "docx" else "📊  ") + self.lot.core.lot_mode_label(mode))
+                b.setObjectName("sec")
+                b.clicked.connect(lambda _=False, m=mode: self.do_export(m))
+                self.rieng_btns[mode] = b
+                self.rieng_lay.addWidget(b, i // 2, i % 2)
+        self.rieng_box.setVisible(bool(modes))
 
     def do_export(self, mode):
         QApplication.setOverrideCursor(Qt.WaitCursor)

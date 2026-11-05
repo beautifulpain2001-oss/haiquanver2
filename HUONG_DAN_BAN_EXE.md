@@ -66,3 +66,14 @@ PHẦN MỀM HỒ SƠ HẢI QUAN HỒNG THIÊN - BẢN .EXE (KHÔNG CẦN CÀI P
 Mỗi lần build có thêm file **HongThien_HaiQuan_Desktop_CapNhat.zip** (chỉ có `.exe`, không kèm Tesseract-OCR). Tắt phần mềm, giải nén và chép
 `HongThien_HaiQuan_Desktop.exe` đè lên file cũ cùng tên. Thư mục `DATA_LUU_TRU_HONG_THIEN` và `Tesseract-OCR` giữ nguyên.
 Lần cài đầu tiên hoặc khi cần OCR trên máy mới thì dùng bản đầy đủ.
+
+## Mẫu riêng của khách (Word/Excel) — không cần tải lại exe
+
+Chứng từ riêng của từng khách (Phụ lục X Word, bảng đối chiếu, biên bản…) làm theo cách sau, không cần sửa phần mềm:
+
+1. Mở file Word/Excel mẫu của khách, gõ vào chỗ cần điền các ô dạng `{{so_po}}`, `{{ngay}}`, `{{ten_hang}}`, `{{tong_sl}}`… (bấm **Khách hàng → Các ô thay thế** để xem đủ danh sách).
+2. Bảng hàng: dòng (Excel / bảng Word) hoặc đoạn (Word) có ô theo dòng hàng (`{{stt}}`, `{{ten}}`, `{{sl}}`, `{{gia}}`, `{{thanh_tien}}`…) tự nhân lên cho mỗi mặt hàng.
+3. **Khách hàng → chọn khách → 📎 Thêm mẫu riêng (Word/Excel)**. Mẫu nằm trong bộ chứng từ của khách (có nút xuất riêng và nằm trong "Xuất trọn bộ"), xuất ra đúng định dạng file mẫu.
+4. **Xuất file học của khách** sẽ mang theo mẫu riêng; máy khác nạp file học là có luôn.
+
+Giới hạn: mẫu riêng chỉ thêm cho khách đã học/thêm mới (không dành cho Shirai, Kodi, Tesa). Word: ô đặt trong đoạn thì cả đoạn lấy định dạng của chữ đầu tiên trong đoạn đó.

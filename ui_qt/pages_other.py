@@ -7,7 +7,7 @@ import re
 from PySide6.QtCore import QAbstractTableModel, QDate, QModelIndex, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
-    QLineEdit, QListWidget, QPushButton, QScrollArea, QTableView, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
+    QLineEdit, QListWidget, QMessageBox, QPushButton, QScrollArea, QTableView, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from . import widgets
@@ -959,6 +959,15 @@ class CustomersPage(_Page):
         self.export_btn.setToolTip("Tạo file .json (hồ sơ khách, danh mục hàng, định mức, file mẫu chứng từ) để máy khác nạp ở Cài đặt → Nạp dữ liệu học.")
         self.export_btn.clicked.connect(self.export_learned)
         row.addWidget(self.export_btn)
+        self.form_btn = QPushButton("📎  Thêm mẫu riêng (Word/Excel)…")
+        self.form_btn.setObjectName("sec")
+        self.form_btn.setToolTip("Nhập file Word/Excel mẫu của khách (đã gõ các ô {{so_po}}, {{ngay}}, {{ten}}…): phần mềm điền số liệu và xuất lại đúng định dạng file đó.")
+        self.form_btn.clicked.connect(self.add_form)
+        row.addWidget(self.form_btn)
+        self.tokens_btn = QPushButton("📝  Các ô thay thế")
+        self.tokens_btn.setObjectName("ghost")
+        self.tokens_btn.clicked.connect(self.show_tokens)
+        row.addWidget(self.tokens_btn)
         row.addStretch(1)
         bl.addLayout(row)
         self.msg = QLabel("")
@@ -991,6 +1000,7 @@ class CustomersPage(_Page):
         self.form.set_enabled(bool(key))
         self.save_btn.setEnabled(bool(key))
         self.export_btn.setEnabled(bool(key) and key not in self.core.BUILTIN_CUSTOMERS)
+        self.form_btn.setEnabled(bool(key) and key not in self.core.BUILTIN_CUSTOMERS)
         self.form.load(self.core.PROFILES.get(key) if key else None)
 
     def save(self):
@@ -1042,6 +1052,31 @@ class CustomersPage(_Page):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
         self.msg.setText(f"✅  Đã xuất {len(data['khach_moi']['items'])} mặt hàng và {len(data['khach_moi']['mau'])} file mẫu ra: {path}. Máy khác: Cài đặt → Nạp dữ liệu học.")
+
+    def add_form(self, path=None):
+        key = self.current_key()
+        if not key:
+            return
+        if not path:
+            path, _ = QFileDialog.getOpenFileName(self, "Chọn file Word/Excel mẫu của khách", "", "Mẫu (*.docx *.xlsx)")
+        if not path:
+            return
+        try:
+            fname, known, unknown = self.store.add_custom_form(key, path)
+        except ValueError as e:
+            widgets.warn(self, "Chưa thêm được mẫu", str(e))
+            return
+        note = f" Ô lạ (sẽ để nguyên): {', '.join('{{' + u + '}}' for u in unknown)}." if unknown else ""
+        self.msg.setText(f"✅  Đã thêm mẫu “{fname}” ({len(known)} ô thay thế nhận ra).{note} Mẫu nằm trong bộ chứng từ của khách và có nút xuất riêng ở bước xuất.")
+        self.changed.emit()
+
+    def show_tokens(self):
+        import mau_rieng
+        lines = ["Gõ các ô dưới đây vào file Word/Excel mẫu của khách, phần mềm sẽ điền số liệu của lô.\n", "Ô chung của cả lô:"]
+        lines += [f"  {{{{{k}}}}}  —  {d}" for k, d in mau_rieng.TOKENS]
+        lines += ["\nÔ theo dòng hàng (dòng Excel / dòng bảng Word / đoạn Word có chứa ô này được nhân lên cho mỗi mặt hàng):"]
+        lines += [f"  {{{{{k}}}}}  —  {d}" for k, d in mau_rieng.ITEM_TOKENS]
+        QMessageBox.information(self, "Các ô thay thế trong mẫu riêng", "\n".join(lines))
 
     def add(self):
         dlg = NewCustomerDialog(self.core, self.store, self)

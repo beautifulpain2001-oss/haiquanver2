@@ -318,7 +318,7 @@ class Lot:
         return errors, warns
 
     def _note_file(self, mode, name, path, now):
-        entry = {"mode": mode, "label": self.core.LOT_MODE_LABELS.get(mode, mode), "name": name, "path": path, "time": now}
+        entry = {"mode": mode, "label": self.core.lot_mode_label(mode), "name": name, "path": path, "time": now}
         self.files = [f for f in self.files if f["mode"] != mode] + [entry]
         slot = {"VAT": "vat", "PXK": "pxk", "PKL": "pkl", "ALL": None}.get(mode)
         if slot:
@@ -338,7 +338,7 @@ class Lot:
             return {"files": res["files"], "problems": res["problems"], "dsh": None}
         res = self.core.lot_export(self.store, rec, mode, skip_h=self.skip_h)
         self._note_file(mode, res["fname"], res["path"], now)
-        one = {"mode": mode, "label": self.core.LOT_MODE_LABELS.get(mode, mode), "name": res["fname"], "path": res["path"]}
+        one = {"mode": mode, "label": self.core.lot_mode_label(mode), "name": res["fname"], "path": res["path"]}
         return {"files": [one], "problems": res["problems"], "dsh": res["dsh"]}
 
     def save(self):
