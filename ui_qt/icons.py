@@ -72,7 +72,7 @@ EMOJI = {
     "➕": "plus", "🆕": "plus", "✏": "edit", "🗑": "trash", "🔄": "refresh", "📂": "folder-open", "📁": "folder", "🗂️": "folder", "🗂": "folder",
     "📥": "download", "📤": "upload", "💾": "save", "🔎": "search", "🔍": "search", "⏭": "next", "↩": "undo", "📄": "file", "🧾": "file-text",
     "📊": "table", "🔗": "link", "📦": "box", "←": "left", "→": "right", "◀": "chev-left", "▶": "chev-right", "📝": "doc-edit", "📑": "file-text",
-    "📚": "database", "🗃": "database", "👥": "users", "⚙": "settings", "⚙️": "settings",
+    "📚": "database", "📎": "link", "🗃": "database", "👥": "users", "⚙": "settings", "⚙️": "settings",
 }
 
 _cache = {}

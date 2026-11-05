@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QDialog, QGridLayout, QPlainTextEdit, QDialogButtonBox, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton,
+    QAbstractItemView, QComboBox, QDialog, QFileDialog, QGridLayout, QPlainTextEdit, QDialogButtonBox, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton,
     QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
@@ -189,6 +189,74 @@ class LookupDialog(QDialog):
         self.msg.setStyleSheet(f"color: {'#03543F' if ok else '#9B1C1C'}; font-weight: 600;")
 
 
+class LearnFilesDialog(QDialog):
+    """Bước 1 khi thêm khách mới: nhập cùng lúc 3 file mẫu (Invoice + 2 file Bkav: hóa đơn và phiếu xuất kho); PO mẫu là tùy chọn."""
+
+    SLOTS = [("invoice", "Invoice (Excel)", "Invoice (*.xlsx *.xlsm)", True),
+             ("hoadon", "Bkav: hóa đơn VAT", "Hóa đơn Bkav (*.xml *.xlsx *.xlsm)", True),
+             ("pxk", "Bkav: phiếu xuất kho", "Phiếu xuất kho Bkav (*.xml *.xlsx *.xlsm)", True),
+             ("po", "PO mẫu (không bắt buộc)", "PO (*.pdf *.png *.jpg *.jpeg *.xlsx *.xls *.txt)", False)]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Thêm khách mới — bước 1: nhập chứng từ mẫu")
+        self.resize(720, 330)
+        self.paths = {}
+        lay = QVBoxLayout(self)
+        head = QLabel("Chọn 3 file mẫu của khách (Invoice và 2 file Bkav) để máy lấy thông tin công ty, địa chỉ, mã hàng, giá, định mức. "
+                      "Bước sau bạn sẽ soát lại và chọn chứng từ riêng (PLX, BBGH…).")
+        head.setWordWrap(True)
+        head.setObjectName("hint")
+        lay.addWidget(head)
+        grid = QGridLayout()
+        self.edits, self.btns = {}, {}
+        for i, (key, label, flt, need) in enumerate(self.SLOTS):
+            grid.addWidget(QLabel(label + (" *" if need else "") + ":"), i, 0)
+            e = QLineEdit()
+            e.setReadOnly(True)
+            e.setPlaceholderText("Chưa chọn file")
+            self.edits[key] = e
+            grid.addWidget(e, i, 1)
+            b = QPushButton("📂  Chọn file…")
+            b.setObjectName("sec")
+            b.clicked.connect(lambda _=False, k=key, f=flt: self.choose(k, f))
+            self.btns[key] = b
+            grid.addWidget(b, i, 2)
+        grid.setColumnStretch(1, 1)
+        lay.addLayout(grid)
+        self.msg = QLabel("")
+        self.msg.setObjectName("hint")
+        lay.addWidget(self.msg)
+        lay.addStretch(1)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        cancel = QPushButton("Hủy")
+        cancel.setObjectName("sec")
+        cancel.clicked.connect(self.reject)
+        self.go = QPushButton("Đọc 3 file và tiếp tục →")
+        self.go.clicked.connect(self.accept)
+        self.go.setEnabled(False)
+        row.addWidget(cancel)
+        row.addWidget(self.go)
+        lay.addLayout(row)
+
+    def choose(self, key, flt, path=None):
+        if not path:
+            path, _ = QFileDialog.getOpenFileName(self, "Chọn file", "", flt)
+        if path:
+            self.set_path(key, path)
+
+    def set_path(self, key, path):
+        self.paths[key] = path
+        self.edits[key].setText(path)
+        need = [k for k, _l, _f, n in self.SLOTS if n]
+        self.go.setEnabled(all(k in self.paths for k in need))
+        self.msg.setText("" if self.go.isEnabled() else "Cần đủ 3 file: Invoice, Bkav hóa đơn, Bkav phiếu xuất kho.")
+
+    def file_list(self):
+        return [self.paths[k] for k, *_ in self.SLOTS if k in self.paths]
+
+
 class LearnCustomerDialog(QDialog):
     """Thêm khách mới từ chứng từ mẫu (hóa đơn/PXK XML, Invoice Excel, PO mẫu): máy đọc thông tin và mã hàng, bạn soát lại rồi mới lưu."""
 
@@ -267,6 +335,13 @@ class LearnCustomerDialog(QDialog):
         self.table.setAlternatingRowColors(True)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         lay.addWidget(self.table, 1)
+        from .pages_kho import KhoPicker
+        kho_head = QLabel("Bước 2 — Chứng từ riêng của khách (PLX, BBGH…): tích chọn mẫu của khách khác trong kho, hoặc nạp file Word/Excel mới")
+        kho_head.setObjectName("h2")
+        kho_head.setWordWrap(True)
+        lay.addWidget(kho_head)
+        self.kho = KhoPicker(core, store, lambda: self.edits["label"].text().strip() or self.edits["key"].text().strip())
+        lay.addWidget(self.kho)
         row = QHBoxLayout()
         dele = QPushButton("🗑  Xóa dòng đã chọn")
         dele.setObjectName("dng")
@@ -363,6 +438,14 @@ class LearnCustomerDialog(QDialog):
         except ValueError as e:
             widgets.warn(self, "Chưa lưu được", str(e))
             return
+        skipped = []
+        for name in self.kho.selected():  # chứng từ riêng đã chọn ở bước 2: sao chép thành mẫu riêng của khách vừa lưu
+            try:
+                self.store.kho_borrow(self.key, name)
+            except ValueError as e:
+                skipped.append(f"{name}: {e}")
+        if skipped:
+            widgets.warn(self, "Khách đã lưu, một số mẫu chưa thêm được", "\n".join(skipped))
         self.accept()
 
 

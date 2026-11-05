@@ -242,3 +242,27 @@ def template_tokens(ext, data):
         raise ValueError("Mẫu riêng chỉ nhận file Word (.docx) hoặc Excel (.xlsx).")
     known = {k for k, _ in TOKENS} | _ITEM_KEYS
     return sorted(found & known), sorted(found - known)
+
+
+def preview(ext, data, max_rows=80, max_cols=14):
+    """Xem mẫu: Word -> {"kind": "text", "text": ...} (đoạn văn, dòng bảng nối bằng ' | '); Excel -> {"kind": "grid", "rows": [[...]]} của trang đầu."""
+    ext = ext.lower().lstrip(".")
+    if ext == "docx":
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            xml = z.read("word/document.xml").decode("utf-8")
+        lines = []
+        for m in re.finditer(r"<w:tbl>.*?</w:tbl>|<w:p[ >].*?</w:p>", xml, re.S):
+            blk = m.group(0)
+            if blk.startswith("<w:tbl>"):
+                for row in _ROW.findall(blk):
+                    cells = re.findall(r"<w:tc>.*?</w:tc>", row, re.S)
+                    lines.append(" | ".join(_para_text(c).strip() for c in cells))
+            else:
+                lines.append(_para_text(blk))
+        return {"kind": "text", "text": "\n".join(lines)}
+    if ext in ("xlsx", "xlsm"):
+        import openpyxl
+        ws = openpyxl.load_workbook(io.BytesIO(data)).worksheets[0]
+        rows = [["" if c.value is None else str(c.value) for c in row[:max_cols]] for row in ws.iter_rows(max_row=max_rows)]
+        return {"kind": "grid", "rows": rows, "sheet": ws.title}
+    raise ValueError("Chỉ xem được file Word (.docx) hoặc Excel (.xlsx).")

@@ -1017,9 +1017,12 @@ class CustomersPage(_Page):
         self.changed.emit()
 
     def learn(self, paths=None):
-        if not paths:
-            paths, _ = QFileDialog.getOpenFileNames(self, "Chọn chứng từ mẫu của khách mới (chọn được nhiều file)", "",
-                                                    "Chứng từ mẫu (*.xml *.xlsx *.xlsm *.pdf *.png *.jpg *.jpeg *.txt)")
+        if not paths:  # bước 1: nhập cùng lúc Invoice + 2 file Bkav (PO mẫu tùy chọn)
+            from .dialogs import LearnFilesDialog
+            dlg = LearnFilesDialog(self)
+            if not dlg.exec():
+                return
+            paths = dlg.file_list()
         if not paths:
             return
         self.msg.setText("⏳  Đang đọc chứng từ mẫu… file scan có thể mất vài chục giây.")

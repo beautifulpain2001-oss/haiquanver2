@@ -77,3 +77,15 @@ Chứng từ riêng của từng khách (Phụ lục X Word, bảng đối chi�
 4. **Xuất file học của khách** sẽ mang theo mẫu riêng; máy khác nạp file học là có luôn.
 
 Giới hạn: mẫu riêng chỉ thêm cho khách đã học/thêm mới (không dành cho Shirai, Kodi, Tesa). Word: ô đặt trong đoạn thì cả đoạn lấy định dạng của chữ đầu tiên trong đoạn đó.
+
+## Kho mẫu chung
+
+Tab **Kho mẫu** chứa mọi mẫu Word/Excel dùng lại giữa các khách. Tên mẫu theo quy ước `LOẠI_Khách_số`, ví dụ `PLX_Arizon_01`, `PLX_Sunlu_01`.
+- Bấm một mẫu để **xem** nội dung (Word hiện chữ, Excel hiện lưới; các ô `{{...}}` được liệt kê bên dưới). **Mở bằng Word/Excel** để xem đúng giao diện gốc.
+- **Nạp mẫu mới vào kho**: chọn file có ô `{{...}}`, chọn loại chứng từ; app tự đặt tên và tăng số thứ tự.
+- **Dùng mẫu này cho khách**: sao chép mẫu thành mẫu riêng của khách (nằm trong bộ chứng từ, có nút xuất riêng).
+- Hóa đơn Bkav, phiếu xuất kho Bkav và Invoice là bộ ba dùng chung cho mọi khách, không nằm trong kho.
+
+### Thêm khách mới (2 bước)
+1. **Khách hàng → Học khách mới**: chọn cùng lúc 3 file mẫu (Invoice, Bkav hóa đơn, Bkav phiếu xuất kho; PO mẫu tùy chọn). App đọc thông tin công ty, mã hàng, giá, định mức.
+2. Soát lại thông tin rồi ở mục **Chứng từ riêng** tích chọn mẫu của khách khác trong kho, hoặc **Nạp file mẫu Word/Excel mới**. Bấm Lưu: khách có sẵn bộ chứng từ.

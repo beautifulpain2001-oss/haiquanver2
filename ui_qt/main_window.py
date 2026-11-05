@@ -10,9 +10,10 @@ from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QListWidget, QL
 
 from . import icons, theme, widgets
 from .pages_lot import STEPS, LotPage  # noqa: F401 - STEPS giữ ở đây cho code/test cũ
+from .pages_kho import MauPage
 from .pages_other import CatalogPage, CustomersPage, DataTongPage, DeclarationsPage, RecordsPage, SettingsPage
 
-NAV = ["📝  Làm chứng từ", "📑  Tờ khai đang có", "🗂  Hồ sơ đã lưu", "📚  Danh mục", "👥  Khách hàng", "🗃  Data tổng", "⚙  Cài đặt"]
+NAV = ["📝  Làm chứng từ", "📑  Tờ khai đang có", "🗂  Hồ sơ đã lưu", "📚  Danh mục", "👥  Khách hàng", "🗃  Data tổng", "📎  Kho mẫu", "⚙  Cài đặt"]
 
 
 class MainWindow(QMainWindow):
@@ -51,9 +52,10 @@ class MainWindow(QMainWindow):
         self.catalog = CatalogPage(core, store)
         self.customers = CustomersPage(core, store)
         self.data_tong = DataTongPage(core, store)
+        self.kho = MauPage(core, store)
         self.settings = SettingsPage(core, store)
         self.pages = QStackedWidget()
-        for p in (self.lot, self.declarations, self.records, self.catalog, self.customers, self.data_tong, self.settings):
+        for p in (self.lot, self.declarations, self.records, self.catalog, self.customers, self.data_tong, self.kho, self.settings):
             self.pages.addWidget(p)
         self.nav.currentRowChanged.connect(self.show_page)
         self.lot.saved.connect(self.records.refresh)
@@ -82,7 +84,7 @@ class MainWindow(QMainWindow):
         try:
             if self.store.sync():
                 page = self.pages.currentWidget()
-                if page in (self.declarations, self.records, self.catalog, self.customers, self.data_tong) and hasattr(page, "refresh"):
+                if page in (self.declarations, self.records, self.catalog, self.customers, self.data_tong, self.kho) and hasattr(page, "refresh"):
                     page.refresh()
         except Exception:
             pass  # thư mục dùng chung tạm thời không đọc được (đang đồng bộ): thử lại lần sau

@@ -909,6 +909,81 @@ class DedicatedDataStore:
             pass
         self.save_catalog()
 
+    # ---- KHO MẪU CHUNG: mẫu Word/Excel dùng lại giữa các khách, tên theo quy ước <LOẠI>_<Khách>_<số>.<đuôi> --------------------------------
+    def kho_folder(self):
+        return os.path.join(TEMPLATE_DIR or os.path.join(self.base_dir, "MAU_CHUNG_TU"), "_KHO")
+
+    def kho_list(self):
+        """Các mẫu trong kho: [{file, loai, khach, so, ext, path, tokens, unknown}]. Lần đầu (chưa có thư mục kho) gieo sẵn các mẫu có sẵn của phần mềm."""
+        import kho_mau
+        import mau_rieng
+        folder = self.kho_folder()
+        if not os.path.isdir(folder):
+            os.makedirs(folder, exist_ok=True)
+            for name, data in kho_mau.seeds().items():
+                with open(os.path.join(folder, name), "wb") as f:
+                    f.write(data)
+        out = []
+        for fn in sorted(os.listdir(folder)):
+            m = re.match(r"^([A-Z0-9]+)_(.+)_(\d{2,})\.(docx|xlsx)$", fn)
+            if not m:
+                continue
+            path = os.path.join(folder, fn)
+            try:
+                with open(path, "rb") as f:
+                    known, unknown = mau_rieng.template_tokens(m.group(4), f.read())
+            except Exception:  # noqa: BLE001 - file hỏng không được làm hỏng cả danh sách
+                known, unknown = [], []
+            out.append({"file": fn, "loai": m.group(1), "khach": m.group(2), "so": m.group(3), "ext": m.group(4), "path": path, "tokens": known, "unknown": unknown})
+        return out
+
+    def kho_add(self, src_path, loai, khach):
+        """Nạp một file Word/Excel mẫu vào kho, tự đặt tên <LOẠI>_<Khách>_<số>. Trả (tên file, ô nhận ra, ô lạ)."""
+        import mau_rieng
+        ext = os.path.splitext(src_path)[1].lower()
+        if ext not in (".docx", ".xlsx"):
+            raise ValueError("Chỉ nhận file Word (.docx) hoặc Excel (.xlsx).")
+        loai = re.sub(r"[^A-Z0-9]", "", str(loai or "KHAC").upper()) or "KHAC"
+        khach = re.sub(r"[^0-9A-Za-zÀ-ỹ]+", "", str(khach or "").strip()) or "Chung"
+        with open(src_path, "rb") as f:
+            data = f.read()
+        known, unknown = mau_rieng.template_tokens(ext, data)
+        if not known:
+            raise ValueError("Trong file chưa có ô thay thế nào. Hãy gõ vào file mẫu các ô dạng {{so_po}}, {{ngay}}, {{ten}}, {{sl}}… rồi nạp lại.")
+        self.kho_list()  # bảo đảm thư mục kho đã có (và đã gieo mẫu có sẵn)
+        folder = self.kho_folder()
+        n = 1
+        while os.path.exists(os.path.join(folder, f"{loai}_{khach}_{n:02d}{ext}")):
+            n += 1
+        name = f"{loai}_{khach}_{n:02d}{ext}"
+        with open(os.path.join(folder, name), "wb") as f:
+            f.write(data)
+        return name, known, unknown
+
+    def kho_remove(self, name):
+        path = os.path.join(self.kho_folder(), os.path.basename(name))
+        if os.path.isfile(path):
+            os.remove(path)
+
+    def kho_read(self, name):
+        with open(os.path.join(self.kho_folder(), os.path.basename(name)), "rb") as f:
+            return f.read()
+
+    def kho_borrow(self, key, name):
+        """Dùng mẫu trong kho cho khách `key` (sao chép thành mẫu riêng của khách, giữ nguyên tên để biết nguồn). Trả (tên mẫu riêng, ô nhận ra, ô lạ)."""
+        path = os.path.join(self.kho_folder(), os.path.basename(name))
+        if not os.path.isfile(path):
+            raise ValueError(f"Kho không có mẫu “{name}”.")
+        return self.add_custom_form(key, path, name=os.path.splitext(os.path.basename(name))[0])
+
+    def kho_publish(self, key, fname, loai):
+        """Đưa mẫu riêng của một khách vào kho chung để khách khác dùng lại."""
+        path = os.path.join(self.template_folder(key), "rieng", fname)
+        if not os.path.isfile(path):
+            raise ValueError(f"Khách này chưa có mẫu riêng “{fname}”.")
+        label = (PROFILES.get(key) or {}).get("label") or key
+        return self.kho_add(path, loai, label)
+
     def save_templates(self, key, mau, overwrite=False):
         """Lưu file mẫu chứng từ của khách (base64 trong file dữ liệu học) vào MAU_CHUNG_TU/<khách>/<doc>.xlsx."""
         import base64
