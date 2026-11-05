@@ -6,7 +6,7 @@ import re
 
 from PySide6.QtCore import QAbstractTableModel, QDate, QModelIndex, Qt, Signal
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
+    QAbstractItemView, QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
     QLineEdit, QListWidget, QMessageBox, QPushButton, QScrollArea, QTableView, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -875,11 +875,14 @@ class CustomerForm(QWidget):
         self.core = core
         form = QFormLayout(self)
         form.setLabelAlignment(Qt.AlignLeft)
+        form.setRowWrapPolicy(QFormLayout.WrapAllRows)  # nhãn dài nằm trên ô nhập: không đẩy ô nhập ra khỏi khung
         self.edits = {}
         for key, label in core.CUSTOMER_FIELDS:
             e = QLineEdit()
             self.edits[key] = e
-            form.addRow(label, e)
+            lab = QLabel(label)
+            lab.setWordWrap(True)  # nhãn dài tự xuống dòng, không làm khung rộng ra
+            form.addRow(lab, e)
 
     def load(self, prof):
         for k, e in self.edits.items():
@@ -925,71 +928,110 @@ class NewCustomerDialog(QDialog):
 
 
 class CustomersPage(_Page):
+    """Danh sách khách bên trái (tìm kiếm), chi tiết bên phải: thông tin, lưu ý đặc thù, mẫu chứng từ gắn kèm, tạo bộ hồ sơ."""
     changed = Signal()
+    make_lot = Signal(str)
 
     def __init__(self, core, store):
         super().__init__()
         self.core, self.store, self.keys = core, store, []
-        t, h = _head("Khách hàng", "Chọn một khách để xem và sửa thông tin (tên, mã số thuế, địa chỉ…). Thông tin được lưu và in lên các chứng từ.")
-        self.lay.addWidget(t)
-        self.lay.addWidget(h)
-        self.table = _table(["Tên gọi", "Tên công ty", "Mã số thuế", "Địa chỉ", "Loại"], 1)
-        self.table.setMaximumHeight(220)
+        top = QHBoxLayout()
+        tv = QVBoxLayout()
+        t, h = _head("Quản lý khách hàng & Cấu hình hồ sơ", "Tìm khách, sửa thông tin pháp lý, địa chỉ giao nhận, lưu ý khi làm chứng từ và mẫu chứng từ riêng của từng khách.")
+        tv.addWidget(t)
+        tv.addWidget(h)
+        top.addLayout(tv, 1)
+        self.add_btn = QPushButton("➕  Thêm khách hàng mới")
+        self.add_btn.clicked.connect(self.add)
+        top.addWidget(self.add_btn, 0, Qt.AlignTop)
+        self.lay.addLayout(top)
+        body = QHBoxLayout()
+        self.lay.addLayout(body, 1)
+        left = QVBoxLayout()
+        body.addLayout(left, 4)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("🔍  Tìm theo tên, mã, MST...")
+        self.search.textChanged.connect(self.apply_filter)
+        left.addWidget(self.search)
+        self.table = _table(["Tên gọi", "Tên công ty", "Mã số thuế", "Mẫu gắn kèm"], 1)
         self.table.itemSelectionChanged.connect(self.on_select)
-        self.lay.addWidget(self.table)
-        box = QGroupBox("Thông tin khách hàng")
+        left.addWidget(self.table, 1)
+        box = QGroupBox("Chi tiết khách hàng")
         bl = QVBoxLayout(box)
         self.form = CustomerForm(core)
-        bl.addWidget(self.form)
+        self.note_box = QLabel("")
+        self.note_box.setWordWrap(True)
+        self.note_box.setMinimumWidth(10)
+        self.note_box.setObjectName("banner_warn")
+        bl.addWidget(self.note_box)
+        self.forms_label = QLabel("")
+        self.forms_label.setWordWrap(True)
+        bl.addWidget(self.forms_label)
         row = QHBoxLayout()
         self.save_btn = QPushButton("💾  Lưu thay đổi")
+        self.save_btn.setObjectName("sec")
         self.save_btn.clicked.connect(self.save)
-        self.add_btn = QPushButton("➕  Thêm khách hàng mới")
-        self.add_btn.setObjectName("sec")
-        self.add_btn.clicked.connect(self.add)
+        self.make_btn = QPushButton("📄  Tạo bộ hồ sơ khách này")
+        self.make_btn.clicked.connect(lambda: self.current_key() and self.make_lot.emit(self.current_key()))
+        row.addWidget(self.make_btn)
         row.addWidget(self.save_btn)
-        row.addWidget(self.add_btn)
-        self.learn_btn = QPushButton("📚  Học khách mới từ chứng từ mẫu…")
+        bl.addLayout(row)
+        row = QGridLayout()  # 4 nút xếp 2 cột để không tràn khung
+        self.learn_btn = QPushButton("📚  Học khách mới…")
         self.learn_btn.setObjectName("sec")
         self.learn_btn.setToolTip("Chọn hóa đơn/PXK XML, Invoice Excel, PO mẫu của khách mới: máy đọc thông tin và mã hàng, bạn soát lại rồi lưu.")
         self.learn_btn.clicked.connect(self.learn)
-        row.addWidget(self.learn_btn)
-        self.export_btn = QPushButton("📤  Xuất file học của khách này")
+        row.addWidget(self.learn_btn, 0, 0)
+        self.export_btn = QPushButton("📤  Xuất file học")
         self.export_btn.setObjectName("sec")
         self.export_btn.setToolTip("Tạo file .json (hồ sơ khách, danh mục hàng, định mức, file mẫu chứng từ) để máy khác nạp ở Cài đặt → Nạp dữ liệu học.")
         self.export_btn.clicked.connect(self.export_learned)
-        row.addWidget(self.export_btn)
-        self.form_btn = QPushButton("📎  Thêm mẫu riêng (Word/Excel)…")
+        row.addWidget(self.export_btn, 0, 1)
+        self.form_btn = QPushButton("📎  Thêm mẫu riêng…")
         self.form_btn.setObjectName("sec")
         self.form_btn.setToolTip("Nhập file Word/Excel mẫu của khách (đã gõ các ô {{so_po}}, {{ngay}}, {{ten}}…): phần mềm điền số liệu và xuất lại đúng định dạng file đó.")
         self.form_btn.clicked.connect(self.add_form)
-        row.addWidget(self.form_btn)
-        self.tokens_btn = QPushButton("📝  Các ô thay thế")
+        row.addWidget(self.form_btn, 1, 0)
+        self.tokens_btn = QPushButton("📝  Ô thay thế")
         self.tokens_btn.setObjectName("ghost")
         self.tokens_btn.clicked.connect(self.show_tokens)
-        row.addWidget(self.tokens_btn)
-        row.addStretch(1)
+        row.addWidget(self.tokens_btn, 1, 1)
         bl.addLayout(row)
         self.msg = QLabel("")
         self.msg.setObjectName("hint")
         self.msg.setWordWrap(True)
         bl.addWidget(self.msg)
-        self.lay.addWidget(box)
-        self.lay.addStretch(1)
+        bl.addWidget(self.form)  # lưu ý, mẫu gắn kèm và nút lên trên; biểu mẫu dài nằm dưới cùng
+        sc = QScrollArea()
+        sc.setWidgetResizable(True)
+        sc.setFrameShape(QFrame.NoFrame)
+        sc.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        sc.setWidget(box)
+        body.addWidget(sc, 5)
         self.form.set_enabled(False)
         self.save_btn.setEnabled(False)
 
     def refresh(self, select=None):
         c = self.core
         self.keys = list(c.PROFILES)
-        rows = [[p.get("label", k), p.get("name", ""), p.get("mst", ""), p.get("addr", ""), "Có sẵn" if k in c.BUILTIN_CUSTOMERS else "Đã học / thêm mới"]
-                for k, p in c.PROFILES.items()]
+        rows = [[p.get("label", k), p.get("name", ""), p.get("mst", ""), ", ".join(self.forms_of(k))] for k, p in c.PROFILES.items()]
         self.table.blockSignals(True)
         _fill(self.table, rows)
         self.table.blockSignals(False)
         if select in self.keys:
             self.table.selectRow(self.keys.index(select))
+        self.apply_filter()
         self.on_select()
+
+    def forms_of(self, key):
+        """Tên các chứng từ làm thêm và mẫu riêng của khách."""
+        prof = self.core.PROFILES.get(key) or {}
+        return list(self.core.customer_extra_docs(prof)) + [n.rsplit(".", 1)[0] for n in prof.get("rieng") or []]
+
+    def apply_filter(self, text=""):
+        t = (text or self.search.text()).strip().lower()
+        for r in range(self.table.rowCount()):
+            self.table.setRowHidden(r, bool(t) and t not in " ".join(self.table.item(r, c).text().lower() for c in range(4)))
 
     def current_key(self):
         rows = self.table.selectionModel().selectedRows()
@@ -1001,7 +1043,13 @@ class CustomersPage(_Page):
         self.save_btn.setEnabled(bool(key))
         self.export_btn.setEnabled(bool(key) and key not in self.core.BUILTIN_CUSTOMERS)
         self.form_btn.setEnabled(bool(key) and key not in self.core.BUILTIN_CUSTOMERS)
+        self.make_btn.setEnabled(bool(key))
         self.form.load(self.core.PROFILES.get(key) if key else None)
+        note = str((self.core.PROFILES.get(key) or {}).get("note") or "").strip() if key else ""
+        self.note_box.setText("⚠  Lưu ý đặc thù khi làm chứng từ: " + note if note else "")
+        self.note_box.setVisible(bool(note))
+        forms = self.forms_of(key) if key else []
+        self.forms_label.setText("Mẫu chứng từ gắn kèm: " + (", ".join(forms) if forms else "chưa có (thêm bằng nút “Thêm mẫu riêng”)"))
 
     def save(self):
         key = self.current_key()

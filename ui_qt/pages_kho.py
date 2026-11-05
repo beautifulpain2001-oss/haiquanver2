@@ -6,7 +6,7 @@ import re
 from PySide6.QtCore import QEasingCurve, QRectF, QSize, Qt, QUrl, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDialog, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit,
+    QAbstractItemView, QCheckBox, QComboBox, QDialog, QFileDialog, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QGraphicsDropShadowEffect, QPlainTextEdit,
     QPushButton, QScrollArea, QStackedWidget, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -618,6 +618,127 @@ class ImageView(QScrollArea):
         self.label.setText("Chọn một mẫu để xem hình.")
 
 
+class PagedView(QScrollArea):
+    """Xem như bản in: nền xám, mỗi trang A4 là một tờ giấy trắng có bóng đổ (đầu trang: ngày + tên mẫu; chân trang: tên mẫu + số trang), cuộn qua từng
+    trang, ô góc trên phải báo trang đang xem. Zoom: nút ＋ － / Vừa chiều rộng hoặc Ctrl + lăn chuột."""
+
+    PW = 900  # bề ngang trang vẽ sẵn (px); chiều cao theo tỉ lệ A4
+    PH = int(900 * 1.4142)
+    MARGIN = 44
+
+    def __init__(self):
+        super().__init__()
+        self.pages, self.zoom, self.labels = [], 1.0, []
+        self.setWidgetResizable(True)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.setStyleSheet("QScrollArea{background:#D4D4D4;border:1px solid #9CA3AF}")
+        self.host = QWidget()
+        self.host.setStyleSheet("background:#D4D4D4")
+        self.col = QVBoxLayout(self.host)
+        self.col.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
+        self.col.setSpacing(14)
+        self.col.setContentsMargins(0, 14, 0, 14)
+        self.setWidget(self.host)
+        self.badge = QLabel("", self)
+        self.badge.setStyleSheet("background:rgba(75,85,99,235);color:white;font-weight:700;border-radius:6px;padding:8px 14px")
+        self.badge.hide()
+        self.verticalScrollBar().valueChanged.connect(self._page_badge)
+
+    def paginate(self, img, title):
+        """Xếp hình mẫu lên các trang A4 có lề, đầu trang và chân trang."""
+        import datetime
+        m = self.MARGIN
+        inner = self.PW - 2 * m
+        sc = inner / img.width()
+        src_h = int((self.PH - 2 * m - 16) / sc)
+        n = max(1, -(-img.height() // src_h))
+        out = []
+        for i in range(n):
+            pg = QImage(self.PW, self.PH, QImage.Format_ARGB32)
+            pg.fill(QColor("white"))
+            p = QPainter(pg)
+            p.setRenderHint(QPainter.SmoothPixmapTransform)
+            part = img.copy(0, i * src_h, img.width(), min(src_h, img.height() - i * src_h))
+            p.drawImage(QRectF(m, m + 4, inner, part.height() * sc), part)
+            f = QFont()
+            f.setPixelSize(11)
+            p.setFont(f)
+            p.setPen(QColor("#111827"))
+            p.drawText(QRectF(m, 12, inner, 16), Qt.AlignLeft, datetime.date.today().strftime("%d/%m/%Y"))
+            p.drawText(QRectF(m, 12, inner, 16), Qt.AlignHCenter, title)
+            p.drawText(QRectF(m, self.PH - 26, inner, 16), Qt.AlignLeft, "Kho mẫu / " + title)
+            p.drawText(QRectF(m, self.PH - 26, inner, 16), Qt.AlignRight, f"{i + 1}/{n}")
+            p.end()
+            out.append(pg)
+        return out
+
+    def show_image(self, img, title=""):
+        self.pages = [] if img is None or img.isNull() else self.paginate(img, title)
+        self._build()
+        self.verticalScrollBar().setValue(0)  # mẫu mới luôn mở từ đầu trang 1
+
+    def clear(self):
+        self.pages = []
+        self._build()
+
+    def _page_w(self):
+        return max(200, int((self.viewport().width() - 40) * self.zoom))
+
+    def _build(self):
+        while self.col.count():
+            w = self.col.takeAt(0).widget()
+            if w:
+                w.hide()  # ẩn ngay để không còn vệt trang cũ trước khi widget được xóa
+                w.deleteLater()
+        self.labels = []
+        if not self.pages:
+            self.col.addWidget(QLabel("Chọn một mẫu để xem."), 0, Qt.AlignHCenter)
+        w = self._page_w()
+        for pg in self.pages:
+            lab = QLabel()
+            lab.setPixmap(QPixmap.fromImage(pg).scaledToWidth(w, Qt.SmoothTransformation))
+            sh = QGraphicsDropShadowEffect(lab)
+            sh.setBlurRadius(18)
+            sh.setOffset(0, 3)
+            sh.setColor(QColor(0, 0, 0, 110))
+            lab.setGraphicsEffect(sh)
+            self.col.addWidget(lab, 0, Qt.AlignHCenter)
+            self.labels.append(lab)
+        self.badge.setVisible(bool(self.pages))
+        self._page_badge()
+
+    def set_zoom(self, z):
+        self.zoom = max(0.4, min(4.0, z))
+        self._build()
+
+    def fit_width(self):
+        self.set_zoom(1.0)
+
+    def _page_badge(self, *_):
+        if not self.pages:
+            return
+        y = self.verticalScrollBar().value() + self.viewport().height() // 2
+        cur = 0
+        for i, lab in enumerate(self.labels):
+            if lab.y() <= y:
+                cur = i
+        self.badge.setText(f"{cur + 1} / {len(self.pages)}")
+        self.badge.adjustSize()
+        self.badge.move(self.width() - self.badge.width() - 24, 8)
+        self.badge.raise_()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if self.pages:
+            self._build()
+
+    def wheelEvent(self, e):
+        if e.modifiers() & Qt.ControlModifier:
+            self.set_zoom(self.zoom * (1.12 if e.angleDelta().y() > 0 else 1 / 1.12))
+        else:
+            super().wheelEvent(e)
+
+
 class EditTemplateDialog(QDialog):
     """Công cụ sửa mẫu: đổi một đoạn chữ/số trong mẫu thành ô {{...}}, xem hình ngay, hoàn tác, lưu; hoặc mở bằng Word/Excel để sửa tự do rồi tải lại."""
 
@@ -762,7 +883,7 @@ class MauPage(QWidget):
         lay.setSpacing(10)
         t = QLabel("Kho mẫu chứng từ")
         t.setObjectName("title")
-        h = QLabel("Chọn một mẫu ở danh sách bên phải để xem hình bên trái. Ô tô vàng là chỗ phần mềm điền số liệu. Bấm vào hình để phóng to. Cần chỉnh thì bấm “Sửa mẫu”.")
+        h = QLabel("Xem như bản in: chọn một mẫu ở danh sách bên phải. Ô tô vàng là chỗ phần mềm điền số liệu. Cuộn để qua từng trang A4; Ctrl + lăn chuột để zoom. Cần chỉnh thì bấm “Sửa mẫu”.")
         h.setObjectName("hint")
         h.setWordWrap(True)
         lay.addWidget(t)
@@ -774,7 +895,15 @@ class MauPage(QWidget):
         self.title = QLabel("")
         self.title.setObjectName("h2")
         left.addWidget(self.title)
-        self.view = ImageView(fit=True)
+        tools = QHBoxLayout()
+        for text, fn in (("－", lambda: self.view.set_zoom(self.view.zoom / 1.2)), ("＋", lambda: self.view.set_zoom(self.view.zoom * 1.2)), ("Vừa chiều rộng", lambda: self.view.fit_width())):
+            b = QPushButton(text)
+            b.setObjectName("sec")
+            b.clicked.connect(fn)
+            tools.addWidget(b)
+        tools.addStretch(1)
+        left.addLayout(tools)
+        self.view = PagedView()
         left.addWidget(self.view, 1)
         right = QVBoxLayout()
         body.addLayout(right, 1)
@@ -834,7 +963,7 @@ class MauPage(QWidget):
             self.view.clear()
             return
         self.title.setText(f"{os.path.splitext(it['file'])[0]}  —  {loai_text(it['loai'])}, {ext_text(it['ext'])}, {len(it['tokens'])} ô thay thế")
-        self.view.show_image(template_image(self.store, it, 1000))
+        self.view.show_image(template_image(self.store, it, 1000), os.path.splitext(it["file"])[0])
 
     def add_new(self, path=None):
         names = add_template_to_kho(self, self.store, "Chung", path if isinstance(path, str) else None)

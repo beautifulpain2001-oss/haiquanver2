@@ -93,13 +93,14 @@ def test_kho_page_image_left_list_right_and_edit_tool(qapp, store):
     assert page.listw.verticalScrollBarPolicy() == Qt.ScrollBarAlwaysOn and page.listw.x() > page.view.x()  # danh sách bên phải, hình bên trái
     assert not page.listw.item(0).icon().isNull()
     page.listw.setCurrentRow(names.index("PLX_Sunlu_01.docx"))
-    assert not page.view.image.isNull() and "PLX_Sunlu_01" in page.title.text()
-    pm = page.view.label.pixmap()
-    assert pm.height() <= page.view.viewport().height() and pm.width() <= page.view.viewport().width()  # vừa khung: thấy cả trang
-    page.view.toggle_fit()  # bấm hình: phóng to cỡ thật
-    assert page.view.label.pixmap().height() == page.view.image.height()
+    assert page.view.pages and "PLX_Sunlu_01" in page.title.text() and page.view.badge.text() == f"1 / {len(page.view.pages)}"  # trang A4, ô báo số trang
+    w0 = page.view.labels[0].pixmap().width()
+    page.view.set_zoom(2.0)
+    assert page.view.labels[0].pixmap().width() > w0 * 1.8  # zoom
+    page.view.fit_width()
+    assert page.view.labels[0].pixmap().width() == w0
     page.listw.setCurrentRow(names.index("PLX_Arizon_01.xlsx"))
-    assert not page.view.image.isNull()
+    assert page.view.pages
     dlg = EditTemplateDialog(app, store, "PLX_Sunlu_01.docx")
     dlg.find.setText("Bắc Ninh")
     dlg.token.setCurrentIndex(dlg.token.findData("khach_ten"))
@@ -301,3 +302,26 @@ def test_detect_docx_candidates_and_apply():
     out = mau_detect.apply_docx(filled, {d["id"]: d["token"] for d in c.values() if d["token"] in ("so_tk", "tong_sl")}, ctx)
     text = mau_rieng.preview("docx", out)["text"]
     assert "{{so_tk}}" in text and "{{tong_sl}}" in text and "21.200.000" in text  # chỉ đổi chỗ đã chọn
+
+
+def test_customers_page_search_note_and_make_lot(qapp, store):
+    """Trang Khách hàng: ô tìm lọc dòng, lưu ý đặc thù hiện hộp vàng và nhắc ở bước xuất, nút Tạo bộ hồ sơ chuyển sang Làm chứng từ với khách đó."""
+    from ui_qt import main_window as mw
+    store.save_learned_customer("ghichu", {"name": "CÔNG TY GHI CHÚ", "label": "GhiChu", "mst": "0100000066", "note": "Ghi rõ Net/Gross", "extraDocs": "PLX"}, [{"name": "Hàng", "code": "A1", "price": 10, "div": 5, "kg": 0.1}])
+    win = mw.MainWindow(app, store)
+    pg = win.customers
+    pg.refresh()
+    pg.search.setText("ghichu")
+    assert [r for r in range(pg.table.rowCount()) if not pg.table.isRowHidden(r)] == [pg.keys.index("ghichu")]
+    pg.table.selectRow(pg.keys.index("ghichu"))
+    assert "Ghi rõ Net/Gross" in pg.note_box.text() and not pg.note_box.isHidden() and "PLX" in pg.forms_label.text()
+    pg.search.setText("")
+    from ui_qt.state import Lot
+    lot = Lot(app, store)
+    lot.select_customer("ghichu")
+    lot.items = [{"stt": 1, "po": "P", "ma_sp": "A1", "ten_sp": "Hàng", "unit": "chiếc", "qty": 10, "price": 10, "amount": 100, "div": 5, "kg": 0.1, "kien": 2, "net": 1, "gross": 2, "tare": 1}]
+    lot.form["po"] = "P"
+    assert lot.validate()[1][0] == "Lưu ý khách này: Ghi rõ Net/Gross"
+    pg.make_btn.click()
+    assert win.nav.currentRow() == 0 and win.lot.lot.customer == "ghichu"
+    win.close()

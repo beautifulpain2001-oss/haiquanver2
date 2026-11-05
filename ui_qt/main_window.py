@@ -63,6 +63,7 @@ class MainWindow(QMainWindow):
         self.records.open_record.connect(self.open_record)
         self.settings.data_changed.connect(self.lot.start_new)
         self.customers.changed.connect(self.lot.step1.refresh)
+        self.customers.make_lot.connect(self.make_lot_for)
         # Kiểm tra OCR chạy chương trình Tesseract (chậm): làm sẵn ở nền ngay khi mở để trang Cài đặt hiện tức thì
         widgets.run_job(self, core.ocr_available, lambda _ok: None)
 
@@ -99,6 +100,13 @@ class MainWindow(QMainWindow):
         page = self.pages.widget(i)
         if hasattr(page, "refresh"):
             page.refresh()
+
+    def make_lot_for(self, key):
+        """Nút 'Tạo bộ hồ sơ cho khách hàng này' ở trang Khách hàng: sang Làm chứng từ với khách đã chọn."""
+        self.lot.start_new()
+        self.lot.lot.select_customer(key)
+        self.lot.step1.refresh()
+        self.nav.setCurrentRow(0)
 
     def open_record(self, rec):
         self.lot.open_record(rec)

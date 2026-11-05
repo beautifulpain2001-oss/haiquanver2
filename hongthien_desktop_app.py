@@ -266,6 +266,7 @@ CUSTOMER_FIELDS = [
     ("extraDocs", "Chứng từ làm thêm khi xuất trọn bộ (mã PLX, DNTT, BBGH, DCCN, PO, BDC; cách nhau dấu phẩy)"),
     ("poGen", "Công thức số PO tự tạo (vd HT{yyyymm}{nn}; YNCGDD{yymmdd}{nnnn} = tiền tố + ngày + 4 số thứ tự)"),
     ("fixedItem", "Mã hàng cố định (khách chỉ đặt 1 mã: không đọc PO, chỉ xác nhận số PO, SL, giá)"),
+    ("note", "Lưu ý đặc thù khi làm chứng từ (hiện ở trang Khách hàng và nhắc ở bước xuất)"),
 ]
 
 

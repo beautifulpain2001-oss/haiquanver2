@@ -315,6 +315,9 @@ class Lot:
         if not str(self.form.get("pxk", "")).strip():
             warns.append("Chưa nhập số PXK (file Invoice sẽ dùng số tạm).")
         warns += [w for w in self.core.check_lot(self.record()) if w not in warns]
+        note = str(self.profile.get("note") or "").strip()
+        if note:  # lưu ý đặc thù của khách (ghi ở trang Khách hàng) luôn nhắc ở bước xuất
+            warns.insert(0, "Lưu ý khách này: " + note)
         return errors, warns
 
     def _note_file(self, mode, name, path, now):
