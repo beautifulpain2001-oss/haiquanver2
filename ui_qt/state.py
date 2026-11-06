@@ -174,6 +174,15 @@ class Lot:
             self.items.append(item)
         else:
             self.items[idx] = item
+        code = str(item.get("ma_sp") or "").strip()
+        if code:  # cùng mã hàng ở các dòng/PO khác trong lô: dùng ngay SL/kiện và kg/chiếc vừa sửa để file xuất ra không còn số cũ
+            for j, other in enumerate(self.items):
+                if other is not item and str(other.get("ma_sp") or "").strip() == code and (float(item.get("div") or 0) > 0 or float(item.get("kg") or 0) > 0):
+                    if float(item.get("div") or 0) > 0:
+                        other["div"] = item["div"]
+                    if float(item.get("kg") or 0) > 0:
+                        other["kg"] = item["kg"]
+                    self.core.lot_recalc([other], self.customer, self.form.get("tare", ""))
         self.saved = False
         return item
 

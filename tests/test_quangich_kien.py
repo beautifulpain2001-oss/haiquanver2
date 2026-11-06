@@ -81,3 +81,46 @@ def test_unify_pxk_leaves_only_current_number():
     ws["I2"], ws["A5"], ws["B7"], ws["C1"] = "PXKKVCNB : 00000299", "Số PXK: 00000250 (cũ)", "PXKKVCNB: 00000250", "Số ĐĐH: POS26999"
     assert mau_chung_tu.unify_pxk(ws, "00000301") == 3
     assert [ws[a].value for a in ("I2", "A5", "B7", "C1")] == ["PXKKVCNB : 00000301", "Số PXK: 00000301 (cũ)", "PXKKVCNB: 00000301", "Số ĐĐH: POS26999"]
+
+
+def test_edit_so_kien_and_kg_applies_to_export_and_is_remembered_by_code(store):
+    """Sửa SL/kiện 50 -> 60 và kg/chiếc ở một dòng: file xuất ra dùng số mới ở MỌI dòng cùng mã; danh mục khách ghi lại theo MÃ (kể cả khi tên trên PO khác tên danh mục)."""
+    from ui_qt.state import Lot
+    store.save_learned_customer("arzed", {"name": "CÔNG TY TNHH ARIZON SỬA", "label": "ArzEd", "mst": "0100000020", "addr": "HY", "unit": "Chiếc"},
+                                [{"name": "Ống catalog 76.2 x 5 x 57", "code": "3609100570001", "price": 2716, "div": 50, "kg": 0.1}])
+    base = {"po": "P1", "ma_sp": "3609100570001", "ten_sp": "Ống theo tên trên PO", "hs": "", "unit": "Chiếc", "qty": 1000, "price": 2716, "amount": 2716000, "div": 50, "kg": 0.1, "kien": 20, "net": 100.0, "gross": 101.0, "tare": 1.0}
+    lot = Lot(app, store)
+    lot.select_customer("arzed")
+    lot.items = [dict(base), dict(base, po="P2", qty=500, amount=1358000, kien=10, net=50.0, gross=51.0)]
+    lot.form.update(po="P1 + P2", pxk="0000999", hd="1")
+    lot.save_item({"po": "P1", "ma_sp": "3609100570001", "ten_sp": "Ống theo tên trên PO", "hs": "", "unit": "Chiếc", "qty": "1000", "price": "2716", "div": "60", "kg": "0.2"}, 0)
+    assert [(i["div"], i["kg"], i["kien"], i["net"]) for i in lot.items] == [(60.0, 0.2, 17, 200.0), (60.0, 0.2, 9, 100.0)]  # dòng cùng mã được đồng bộ và tính lại (làm tròn lên)
+    ws = openpyxl.load_workbook(lot.export("PKL")["files"][0]["path"]).active
+    formulas = [c.value for row in ws.iter_rows(min_row=13, max_row=14) for c in row if isinstance(c.value, str) and "ROUNDUP" in c.value]
+    assert formulas == ["=ROUNDUP(E13/60,0)", "=ROUNDUP(E14/60,0)"]
+    cat = store.items_for_customer("arzed")[0]  # tên danh mục khác tên trên PO: vẫn được cập nhật theo mã để dùng cho lần sau
+    assert (cat["div"], cat["kg"]) == (60.0, 0.2) and store.get_item_norm("Ống catalog 76.2 x 5 x 57")["div"] == 60.0
+
+
+def test_item_dialog_does_not_overwrite_edited_numbers_when_code_field_loses_focus(qapp, store):
+    """Sửa SL/kiện và kg rồi rời/quay lại ô Mã hàng: số vừa sửa không bị điền lại bằng số cũ trong danh mục; đổi sang mã khác thì mới tự điền."""
+    from ui_qt.dialogs import ItemDialog
+    from ui_qt.state import Lot
+    store.save_learned_customer("arzd", {"name": "CÔNG TY TNHH ARIZON DLG", "label": "ArzDlg", "mst": "0100000030", "addr": "HY", "unit": "Chiếc"},
+                                [{"name": "Ống A", "code": "A1", "price": 10, "div": 50, "kg": 0.1}, {"name": "Ống B", "code": "B2", "price": 20, "div": 70, "kg": 0.3}])
+    lot = Lot(app, store)
+    lot.select_customer("arzd")
+    lot.items = [{"po": "P", "ma_sp": "A1", "ten_sp": "Ống A", "hs": "", "unit": "Chiếc", "qty": 1000, "price": 10, "amount": 10000, "div": 50, "kg": 0.1, "kien": 20, "net": 100.0, "gross": 101.0}]
+    dlg = ItemDialog(lot, 0)
+    dlg.edits["div"].setText("60")
+    dlg.edits["kg"].setText("0.2")
+    dlg.edits["ma_sp"].editingFinished.emit()  # rời ô Mã hàng, mã vẫn là A1
+    assert (dlg.edits["div"].text(), dlg.edits["kg"].text()) == ("60", "0.2")
+    dlg.save()
+    assert (lot.items[0]["div"], lot.items[0]["kg"], lot.items[0]["kien"]) == (60.0, 0.2, 17)
+    dlg2 = ItemDialog(lot, 0)
+    dlg2.edits["ma_sp"].setText("B2")
+    dlg2.edits["ma_sp"].editingFinished.emit()  # đổi sang mã khác: tự điền theo danh mục
+    assert (dlg2.edits["ten_sp"].text(), dlg2.edits["div"].text()) == ("Ống B", "70")
+    dlg.close()
+    dlg2.close()

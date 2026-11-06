@@ -36,6 +36,7 @@ class ItemDialog(QDialog):
             self.edits[key] = e
             form.addRow(label, e)
         lay.addLayout(form)
+        self._code = str(cur.get("ma_sp") or "").strip()  # mã lúc mở hộp thoại: chỉ tự điền khi mã THẬT SỰ đổi
         self.edits["ma_sp"].editingFinished.connect(self.autofill)
         bb = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         bb.button(QDialogButtonBox.Save).setText("Lưu dòng hàng")
@@ -46,10 +47,15 @@ class ItemDialog(QDialog):
 
     def autofill(self):
         """Gõ mã hàng đã có trong danh mục thì tự điền tên, HS, đơn giá, định mức."""
-        hit = self.lot.core.lot_lookup_code(self.lot.store, self.lot.customer, self.edits["ma_sp"].text())
+        code = self.edits["ma_sp"].text().strip()
+        if code == self._code:  # mã không đổi (chỉ rời ô): KHÔNG điền lại, để không đè SL/kiện, kg/chiếc, giá người dùng vừa sửa bằng số cũ trong danh mục
+            return
+        self._code = code
+        hit = self.lot.core.lot_lookup_code(self.lot.store, self.lot.customer, code)
         if hit:
             for k, v in hit.items():
-                self.edits[k].setText(str(v))
+                if k in self.edits:
+                    self.edits[k].setText(str(v))
 
     def values(self):
         return {k: e.text() for k, e in self.edits.items()}

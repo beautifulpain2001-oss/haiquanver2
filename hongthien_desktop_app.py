@@ -678,19 +678,25 @@ class DedicatedDataStore:
             if k:
                 self.erp_map[k] = it.get("ma_sp", "")
 
-    def remember_item_norm(self, name, div, kg, hs=""):
+    def remember_item_norm(self, name, div, kg, hs="", code="", customer=""):
+        """Nhớ định mức người dùng đã sửa (SL/kiện, kg/chiếc, HS) cho mặt hàng: theo TÊN và theo MÃ HÀNG (danh mục khách của mã đó, kể cả khi tên trên PO
+        khác tên trong danh mục), để lần sau đọc PO ra đúng số đã sửa."""
         if not name:
             return
+        code = str(code or "").strip()
         self.item_mem[name] = {"div": div, "kg": kg, "hs": hs}
-        for lst in (self.kodi_items, self.tesa_items, *self.custom_items.values()):
+        lists = [self.kodi_items, self.tesa_items] + ([self.custom_items.get(customer, [])] if customer else list(self.custom_items.values()))
+        for lst in lists:
             for it in lst:
-                if it["name"] == name:
+                if it["name"] == name or (code and str(it.get("code") or "").strip() == code):
                     if div > 0:
                         it["div"] = div
                     if kg > 0:
                         it["kg"] = kg
                     if hs:
                         it["hs"] = hs
+                    if it["name"] != name:  # tên trong danh mục khác tên trên PO: ghi cả bộ nhớ định mức theo tên danh mục
+                        self.item_mem[it["name"]] = {"div": div if div > 0 else it.get("div", 0), "kg": kg if kg > 0 else it.get("kg", 0), "hs": hs or it.get("hs", "")}
         self.save_catalog()
 
     def add_tesa_item(self, name, code="", price=0, source="erp"):
@@ -6956,7 +6962,7 @@ def lot_item_from_values(store, customer, vals, tare_text="1.0", base=None):
     kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
     net = round_half_up(qty * kg, 2) if kg > 0 else 0.0
     gross = lot_gross(net, tare_spec)
-    store.remember_item_norm(name, div, kg, hs)
+    store.remember_item_norm(name, div, kg, hs, code=code, customer=customer if customer not in BUILTIN_CUSTOMERS else "")
     if customer not in BUILTIN_CUSTOMERS:
         store.remember_item_refs(customer, name, {"code": code, **{k: g(k) for k in ("inquiry", "customsNo") if k in vals}})
     hit = next((x for x in store.tesa_items if x["name"] == name or x["code"] == code), None)
