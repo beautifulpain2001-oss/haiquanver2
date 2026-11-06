@@ -786,9 +786,26 @@ class DedicatedDataStore:
         """Nạp file dữ liệu học (định mức từng mặt hàng: SL/kiện, kg/cái, HS) vào bộ nhớ định mức.
         Mặc định không ghi đè định mức người dùng đã tự nhập. Trả {"them", "ghi_de", "bo_qua"}."""
         cust = data.get("khach_moi") if isinstance(data, dict) else None
-        if not isinstance(data, dict) or not (isinstance(data.get("item_mem"), dict) or isinstance(cust, dict) or isinstance(data.get("tesa_items"), list)):
+        if not isinstance(data, dict) or not (isinstance(data.get("item_mem"), dict) or isinstance(cust, dict) or isinstance(data.get("tesa_items"), list)
+                                              or isinstance(data.get("cap_nhat_kien"), dict)):
             raise ValueError("File này không phải file dữ liệu học của phần mềm (thiếu mục item_mem).")
         res = {"them": 0, "ghi_de": 0, "bo_qua": 0, "khach": "", "mau": 0}
+        ck = data.get("cap_nhat_kien")
+        if isinstance(ck, dict):  # cập nhật SL/kiện theo MÃ HÀNG của một khách đã có: {"khach": "Arizon", "so_ong_moi_kien": {mã: số}}
+            kh = str(ck.get("khach") or "").strip()
+            key = next((k for k, p in PROFILES.items() if k not in BUILTIN_CUSTOMERS and kh and (k == kh.lower() or str(p.get("label") or "").lower() == kh.lower()
+                                                                                                or strip_accents_upper(kh) in strip_accents_upper(str(p.get("name") or "")))), None)
+            if not key:
+                raise ValueError(f"Máy này chưa có khách “{kh}” để cập nhật SL/kiện (nạp file học của khách đó trước).")
+            table = {str(c).strip(): float(n) for c, n in (ck.get("so_ong_moi_kien") or {}).items() if str(c).strip() and float(n) > 0}
+            done = set()
+            for it in self.custom_items.get(key, []):
+                n = table.get(str(it.get("code") or "").strip())
+                if n:
+                    it["div"] = n
+                    self.item_mem.setdefault(it["name"], {"div": 0, "kg": it.get("kg") or 0, "hs": it.get("hs") or ""})["div"] = n
+                    done.add(str(it["code"]).strip())
+            res["kien"], res["kien_thieu"] = len(done), sorted(set(table) - done)
         for it in data.get("tesa_items") or []:  # mã Tesa mới (chưa có trong dữ liệu có sẵn, có ở ERP): chỉ bổ sung, không đụng mã cũ
             if isinstance(it, dict) and str(it.get("name") or "").strip() and not any(
                     x.get("name") == it["name"] or (it.get("code") and x.get("code") == it["code"]) for x in self.tesa_items):
@@ -2696,7 +2713,7 @@ def build_vat_bkav_sheet(wb, rec, sheet_name="VAT_BKAV"):
     for idx, it in enumerate(rec.get("items", []), 1):
         r = 5 + idx
         ws.row_dimensions[r].height = 70.5 if idx == 1 else 48
-        ten_hang = f"{it['ten_sp']}, PO:{it.get('po', '')}" if prof.get("vatPoSuffix") and it.get("po") else it["ten_sp"]
+        ten_hang = with_code(prof, it, f"{it['ten_sp']}, PO:{it.get('po', '')}" if prof.get("vatPoSuffix") and it.get("po") else it["ten_sp"])
         po_cell = it.get("po", "") if prof.get("linePo") else (f"Po No {rec.get('poNumber', '')}" if prof.get("poInDocs") else "")
         vals = {
             1: idx,
@@ -2803,7 +2820,7 @@ def build_pxk_bkav_sheet(wb, rec, sheet_name="PXK_BKAV"):
             2: "pxk",
             3: pxk_id,
             4: po_cell,
-            5: it["ten_sp"],
+            5: with_code(prof, it, it["ten_sp"]),
             6: it.get("unit") or prof["unit"],
             7: it.get("qty", 0),
             8: it.get("price", 0),
@@ -2944,7 +2961,7 @@ def build_pkl_standard_sheet(wb, rec, sheet_name="Invoice_PKL"):
             (6, w_kg if has_w else None, Font(name="Calibri Light", size=13), "right", "0.000"),
             (7, gross_val, Font(name="Calibri Light", size=13), "right", acc_fmt),
             (8, net_val, Font(name="Calibri Light", size=13), "right", acc_fmt),
-            (9, it.get("kien") or None, Font(name="Calibri Light", size=13), "right", "0.00"),
+            (9, f"=ROUNDUP(E{r}/{float(it.get('div') or 0):g},0)" if float(it.get("div") or 0) > 0 else (it.get("kien") or None), Font(name="Calibri Light", size=13), "right", "#,##0"),  # số kiện luôn làm tròn LÊN
             (10, it.get("price", 0), Font(name="Times New Roman", size=13), "center", "#,##0"),
             (11, f"=J{r}*E{r}", Font(name="Times New Roman", size=14), "center", "#,##0"),
         ]
@@ -3236,7 +3253,7 @@ def build_pkl_shirai_sheet(wb, rec, sheet_name=None):
         put(f"G{r}", it.get("kg", 0), 14, False, "left", "center", True, nf=acc2)
         put(f"H{r}", it.get("gross", 0), 14, False, "right", "center", True, nf=acc2)
         put(f"I{r}", it.get("net", 0), 16, False, "right", "center", True, nf=acc2)
-        put(f"J{r}", it.get("kien", 0), 14, False, "center", "center", True)
+        put(f"J{r}", f"=ROUNDUP(F{r}/{float(it.get('div') or 0):g},0)" if float(it.get("div") or 0) > 0 else it.get("kien", 0), 14, False, "center", "center", True)  # số kiện làm tròn LÊN
         put(f"K{r}", it.get("price", 0), 16, False, None, "center", None, nf=acc0)
         put(f"L{r}", f"=K{r}*F{r}", 16, False, "center", "center", True, nf=acc0)
         for col in "ABCDEFGHIJKL":
@@ -3383,6 +3400,17 @@ def customer_extra_docs(prof):
     if "ARIZON" in str((prof or {}).get("name") or "").upper() and "PLX" not in codes:
         codes = ["PLX"] + codes  # Arizon luôn có Phụ lục X, kể cả khi mục "chứng từ làm thêm" đã ghi chứng từ khác
     return codes
+
+
+def code_name_style(prof):
+    """Khách ghi tên hàng trên Hóa đơn VAT / PXK Bkav dạng 'mã hàng + dấu cách + tên' (Quang Ích; hoặc khách có nameStyle = ma_ten)."""
+    return (prof or {}).get("nameStyle") == "ma_ten" or "QUANG ICH" in strip_accents_upper(str((prof or {}).get("name") or ""))
+
+
+def with_code(prof, it, name):
+    """Tên hàng kèm mã hàng đứng trước nếu khách dùng kiểu 'mã + tên' (không ghi lặp khi tên đã bắt đầu bằng mã)."""
+    code = str(it.get("ma_sp") or "").strip()
+    return f"{code} {name}" if code_name_style(prof) and code and not str(name).strip().startswith(code) else name
 
 
 def is_arizon(prof):

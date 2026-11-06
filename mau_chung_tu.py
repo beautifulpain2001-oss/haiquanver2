@@ -360,7 +360,7 @@ def fill_pkl_arizon(core, wb, rec, prof, tws, title):
         u = str(it.get("unit") or prof.get("unit") or "")
         for col, v in (("A", "=ROW()-12"), ("C", str(it.get("ma_sp") or "").strip()), ("D", "\n" + str(it.get("ten_sp") or "").strip()), ("E", it.get("po", "")),
                        ("F", u[:1].upper() + u[1:]), ("G", it.get("qty", 0)), ("H", it.get("kg", 0)), ("I", f"=K{r}+{tare:g}"), ("K", f"=G{r}*H{r}"),
-                       ("L", f"=ROUND(G{r}/{div:g},0)" if div > 0 else 0), ("M", it.get("price", 0)), ("N", f"=M{r}*G{r}")):
+                       ("L", f"=ROUNDUP(G{r}/{div:g},0)" if div > 0 else 0), ("M", it.get("price", 0)), ("N", f"=M{r}*G{r}")):
             ws[f"{col}{r}"] = v
     return ws
 
