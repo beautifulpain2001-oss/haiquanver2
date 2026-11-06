@@ -186,6 +186,50 @@ class Lot:
         self.saved = False
         return item
 
+    def can_merge(self):
+        return bool(self._dup_groups())
+
+    def has_merged(self):
+        return any(it.get("parts") for it in self.items)
+
+    def _dup_groups(self):
+        groups = {}
+        for i, it in enumerate(self.items):
+            code = str(it.get("ma_sp") or "").strip()
+            if code and not it.get("parts"):
+                groups.setdefault((code, float(it.get("price") or 0)), []).append(i)
+        return [g for g in groups.values() if len(g) > 1]
+
+    def merge_duplicates(self):
+        """Gộp các dòng cùng mã hàng + cùng đơn giá thành một dòng (cộng SL), nhớ các dòng gốc trong `parts` để xem lại trên PO hoặc tách ra. Trả số dòng đã giảm."""
+        groups = self._dup_groups()
+        first = {g[0]: g for g in groups}
+        skip = {i for g in groups for i in g[1:]}
+        out = []
+        for i, it in enumerate(self.items):
+            if i in skip:
+                continue
+            if i in first:
+                parts = [dict(self.items[j]) for j in first[i]]
+                it = dict(it, parts=parts, qty=sum(float(x.get("qty") or 0) for x in parts))
+                pos = [str(x.get("po") or "") for x in parts]
+                it["po"] = " + ".join(dict.fromkeys(p for p in pos if p))
+                reads = [x.get("read") for x in parts]
+                it["read"] = next((r for r in ("loi", "suy_ra") if r in reads), it.get("read"))
+                self.core.lot_recalc([it], self.customer, self.form.get("tare", ""))
+            out.append(it)
+        n = len(self.items) - len(out)
+        self.items = out
+        self.saved = False
+        return n
+
+    def split_merged(self):
+        out = []
+        for it in self.items:
+            out.extend(dict(x) for x in it["parts"]) if it.get("parts") else out.append(it)
+        self.items = out
+        self.saved = False
+
     def delete_item(self, idx):
         if 0 <= idx < len(self.items):
             self.items.pop(idx)

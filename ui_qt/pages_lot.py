@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 
 from . import theme, widgets
 from .dialogs import ItemDialog, LookupDialog, PickNumbersDialog
-from .po_viewer import PoViewer
+from .po_viewer import PoStack
 from .state import Lot
 
 STEPS = ["① Chọn khách hàng", "② Nạp file PO", "③ Kiểm tra dòng hàng", "④ Thông tin chuyến & xuất hồ sơ"]
@@ -389,6 +389,11 @@ class ItemsStep(QWidget):
             b.setObjectName("dng" if "Xóa" in text else "sec")  # nút xóa màu đỏ để khỏi bấm nhầm
             b.clicked.connect(fn)
             bar.addWidget(b)
+        self.merge_btn = QPushButton("🧩  Gộp mã trùng")
+        self.merge_btn.setObjectName("sec")
+        self.merge_btn.setToolTip("Gộp các dòng cùng mã hàng + cùng đơn giá thành một dòng (cộng số lượng). Chọn dòng gộp thì khung PO hiện các dòng gốc. Bấm lại để tách ra.")
+        self.merge_btn.clicked.connect(self.merge)
+        bar.addWidget(self.merge_btn)
         bar.addStretch(1)
         self.view_btn = QPushButton("📄  Xem PO")
         self.view_btn.setObjectName("sec")
@@ -430,7 +435,7 @@ class ItemsStep(QWidget):
         hh.setStretchLastSection(True)
         self.table.setColumnHidden(C_STT, True)  # STT: không cần để soát số liệu
         self.table.doubleClicked.connect(lambda _i: self.edit())
-        self.viewer = PoViewer(lot.core)
+        self.viewer = PoStack(lot.core)
         self.viewer.closed.connect(self.hide_viewer)
         self.viewer.hide()
         self.viewer_closed_by_user = False
@@ -457,6 +462,19 @@ class ItemsStep(QWidget):
         path = it.get("po_file") or (self.lot.po_files[-1] if self.lot.po_files else "")
         return path, max(0, int(it.get("page") or 1) - 1), it.get("box") or self.estimate_box(idx, path)
 
+    def specs_of(self, idx):
+        """Các ô PO cần hiện cho dòng `idx`: dòng thường 1 ô; dòng đã gộp thì mỗi (file, trang) một ô với các khung của những dòng gốc."""
+        it = self.lot.items[idx] if idx is not None and 0 <= idx < len(self.lot.items) else {}
+        if not it.get("parts"):
+            return [self.po_file_of(idx)]
+        groups = {}
+        for x in it["parts"]:
+            path = x.get("po_file") or (self.lot.po_files[-1] if self.lot.po_files else "")
+            g = groups.setdefault((path, max(0, int(x.get("page") or 1) - 1)), [])
+            if x.get("box"):
+                g.append(x["box"])
+        return [(path, page, boxes or None) for (path, page), boxes in groups.items()]
+
     def estimate_box(self, idx, path):
         """Dòng chưa có vị trí trên PO (lô đọc từ bản cũ hoặc mở lại từ hồ sơ đã lưu): đo lại đường kẻ của trang đó rồi lấy theo thứ tự dòng."""
         if idx is None or not path or not path.lower().endswith(".pdf") or not self.lot.core.po_scan:
@@ -478,6 +496,13 @@ class ItemsStep(QWidget):
         boxes = cache[key]
         k = same.index(idx)
         return boxes[k] if k < len(boxes) else None
+
+    def merge(self):
+        if self.lot.has_merged():
+            self.lot.split_merged()
+        else:
+            self.lot.merge_duplicates()
+        self.refresh()
 
     def toggle_viewer(self):
         if not self.viewer.isHidden():
@@ -505,8 +530,7 @@ class ItemsStep(QWidget):
         self.layout_columns()
         self.refresh_labels()
         self.split.setSizes([max(520, self.width() * 58 // 100), max(360, self.width() * 42 // 100)])
-        path, page, box = self.po_file_of(self.selected() if self.selected() is not None else (self.lot.attention_rows() or [0])[0])
-        self.viewer.show_page(path, page, box)
+        self.viewer.show_many(self.specs_of(self.selected() if self.selected() is not None else (self.lot.attention_rows() or [0])[0]))
         self.view_btn.setText(" Ẩn khung xem PO")
 
     def hide_viewer(self):
@@ -518,9 +542,9 @@ class ItemsStep(QWidget):
 
     def follow_selection(self):
         if not self.viewer.isHidden() and self.selected() is not None:
-            path, page, box = self.po_file_of(self.selected())
-            if path != self.viewer.file or page != self.viewer.page or box != self.viewer.box:
-                self.viewer.show_page(path, page, box)
+            specs = self.specs_of(self.selected())
+            if specs != self.viewer.specs:
+                self.viewer.show_many(specs)
 
     def set_filter(self, key):
         self.filter = key
@@ -549,7 +573,7 @@ class ItemsStep(QWidget):
             vals = [it.get("stt"), label, it.get("po", ""), it.get("ma_sp", ""), it.get("ten_sp", ""), it.get("unit", ""),
                     widgets.fmt_num(it.get("qty")), widgets.fmt_num(it.get("price")), widgets.fmt_num(it.get("amount")),
                     f"{float(it.get('div') or 0):g}", f"{float(it.get('kg') or 0):g}", f"{float(it.get('kien') or 0):g}",
-                    widgets.fmt_num(it.get("net"), 2), widgets.fmt_num(it.get("gross"), 2), "; ".join(issues)]
+                    widgets.fmt_num(it.get("net"), 2), widgets.fmt_num(it.get("gross"), 2), "; ".join(([f"Gộp {len(it['parts'])} dòng"] if it.get("parts") else []) + issues)]
             for c, v in enumerate(vals):
                 cell = QTableWidgetItem("" if v is None else str(v))
                 if 6 <= c <= 13:
@@ -586,6 +610,9 @@ class ItemsStep(QWidget):
         self.next_btn.setVisible(has_read)
         self.next_btn.setEnabled(bool(lot.attention_rows()))
         self.apply_filter()
+        merged = lot.has_merged()
+        self.merge_btn.setText("↩  Tách các dòng đã gộp" if merged else "🧩  Gộp mã trùng")
+        self.merge_btn.setEnabled(merged or lot.can_merge())
         self.show_banner()
         po_path = self.po_file_of(None)[0]
         self.view_btn.setVisible(bool(po_path))

@@ -8,9 +8,55 @@ import os
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtCore import QPointF
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, QPolygonF
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QScrollArea, QSplitter, QVBoxLayout, QWidget
 
 IMAGE_EXT = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
+
+
+def _polys(box):
+    """`box` là một khung 4 điểm hoặc danh sách nhiều khung (dòng đã gộp)."""
+    if not box:
+        return []
+    polys = box if isinstance(box[0][0], (list, tuple)) else [box]
+    return [b for b in polys if b and len(b) == 4]
+
+
+class PoStack(QSplitter):
+    """Khung xem PO chia 1–3 ô xếp dọc: mỗi ô một trang PO (dòng gộp từ nhiều PO thì mỗi PO một ô, tô sáng các dòng của mã đó)."""
+
+    closed = Signal()
+
+    def __init__(self, core):
+        super().__init__(Qt.Vertical)
+        self.setChildrenCollapsible(False)
+        self.panes = [PoViewer(core) for _ in range(3)]
+        for p in self.panes:
+            self.addWidget(p)
+            p.closed.connect(self.closed)
+        self.specs = []
+        for p in self.panes[1:]:
+            p.hide()
+
+    file = property(lambda self: self.panes[0].file)
+    page = property(lambda self: self.panes[0].page)
+    box = property(lambda self: self.panes[0].box)
+    pages = property(lambda self: self.panes[0].pages)
+    title = property(lambda self: self.panes[0].title)
+
+    def can_view(self, path):
+        return self.panes[0].can_view(path)
+
+    def show_page(self, path, page=0, box=None):
+        self.show_many([(path, page, box)])
+
+    def show_many(self, specs):
+        self.specs = specs = list(specs)[:3] or [("", 0, None)]
+        for i, p in enumerate(self.panes):
+            if i < len(specs):
+                p.show()
+                p.show_page(*specs[i])
+            else:
+                p.hide()
 
 
 class PoViewer(QWidget):
@@ -98,12 +144,20 @@ class PoViewer(QWidget):
 
     def _highlighted(self, pm, box):
         """Bản sao trang có tô sáng dòng đang chọn: nền vàng trong, viền cam, mũi tên bên trái để thấy ngay cả khi PO nhiều dòng sát nhau."""
-        if not box or len(box) != 4:
+        polys = _polys(box)
+        if not polys:
             return pm
         out = QPixmap(pm)
         p = QPainter(out)
         p.setRenderHint(QPainter.Antialiasing, True)
         W, H = pm.width(), pm.height()
+        for box in polys:
+            self._draw_box(p, box, W, H)
+        p.end()
+        return out
+
+    @staticmethod
+    def _draw_box(p, box, W, H):
         poly = QPolygonF([QPointF(x * W, y * H) for x, y in box])
         p.setPen(QPen(QColor("#EA580C"), 2.5))
         p.setBrush(QColor(255, 214, 0, 80))
@@ -114,8 +168,6 @@ class PoViewer(QWidget):
         p.setPen(Qt.NoPen)
         p.setBrush(QColor("#EA580C"))
         p.drawPolygon(arrow)
-        p.end()
-        return out
 
     def show_page(self, path, page=0, box=None):
         if not self.can_view(path):
@@ -135,8 +187,9 @@ class PoViewer(QWidget):
         pm = self._highlighted(self._render(path, self.page), box)
         self.label.setPixmap(pm)
         self.label.resize(pm.size())
-        if box:  # cuộn để dòng đang chọn nằm giữa khung xem
-            cy = int(sum(y for _x, y in box) / 4 * pm.height())
+        polys = _polys(box)
+        if polys:  # cuộn để dòng đầu tiên đang chọn nằm giữa khung xem
+            cy = int(sum(y for _x, y in polys[0]) / 4 * pm.height())
             bar = self.scroll.verticalScrollBar()
             bar.setValue(max(0, cy - self.scroll.viewport().height() // 2))
         self.title.setText(f"Xem PO — {os.path.basename(path)} · trang {self.page + 1}/{self.pages}")

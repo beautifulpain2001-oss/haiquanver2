@@ -124,3 +124,50 @@ def test_item_dialog_does_not_overwrite_edited_numbers_when_code_field_loses_foc
     assert (dlg2.edits["ten_sp"].text(), dlg2.edits["div"].text()) == ("Ống B", "70")
     dlg.close()
     dlg2.close()
+
+
+def test_merge_duplicate_codes_and_split_back(qapp, store):
+    """Gộp dòng cùng mã + cùng giá (cộng SL, tính lại kiện), nhớ dòng gốc; khung PO chia ô theo PO; tách lại về như cũ."""
+    from ui_qt.pages_lot import ItemsStep
+    from ui_qt.state import Lot
+    store.save_learned_customer("arzm", {"name": "CÔNG TY TNHH ARIZON M", "label": "ArzM", "mst": "0100000031", "addr": "HY", "unit": "Chiếc"},
+                                [{"name": "Ống A", "code": "A1", "price": 10, "div": 50, "kg": 0.1}])
+    lot = Lot(app, store)
+    lot.select_customer("arzm")
+    base = {"ma_sp": "A1", "ten_sp": "Ống A", "hs": "", "unit": "Chiếc", "price": 10, "div": 50, "kg": 0.1, "page": 1}
+    lot.items = [dict(base, po="P1", qty=100, po_file="a.pdf", box=[(0, 0), (1, 0), (1, .1), (0, .1)]),
+                 dict(base, po="P2", qty=60, po_file="b.pdf", box=[(0, .2), (1, .2), (1, .3), (0, .3)]),
+                 dict(base, ma_sp="B2", ten_sp="Ống B", po="P1", qty=5, po_file="a.pdf"),
+                 dict(base, po="P1", qty=40, price=12, po_file="a.pdf")]
+    lot.recalc()
+    assert lot.can_merge() and lot.merge_duplicates() == 1
+    assert [(x["ma_sp"], x["qty"]) for x in lot.items] == [("A1", 160.0), ("B2", 5), ("A1", 40)]
+    m = lot.items[0]
+    assert (m["po"], m["kien"], len(m["parts"])) == ("P1 + P2", 4, 2)
+    page = ItemsStep(lot)
+    specs = page.specs_of(0)
+    assert [s[0] for s in specs] == ["a.pdf", "b.pdf"] and all(s[2] for s in specs)
+    assert len(page.specs_of(1)) == 1
+    lot.split_merged()
+    assert [x["qty"] for x in lot.items] == [100, 60, 5, 40] and not lot.has_merged()
+    page.close()
+
+
+def test_merged_lot_refreshes_and_exports(qapp, store, tmp_path):
+    from ui_qt.pages_lot import ItemsStep
+    from ui_qt.state import Lot
+    lot = Lot(app, store)
+    lot.select_customer("tesa")
+    it = {"ma_sp": "X1", "ten_sp": "Băng keo", "hs": "48229090", "unit": "ống", "price": 5, "div": 10, "kg": 0.1, "po": "P1", "qty": 100}
+    lot.items = [dict(it), dict(it, qty=25)]
+    lot.recalc()
+    page = ItemsStep(lot)
+    lot.merge_duplicates()
+    page.refresh()
+    assert page.table.rowCount() == 1 and "Gộp 2 dòng" in page.table.item(0, 14).text() and "Tách" in page.merge_btn.text()
+    page.table.selectRow(0)
+    page.show_viewer()
+    assert lot.record()["items"][0]["qty"] == 125
+    page.merge()
+    assert page.table.rowCount() == 2
+    page.close()
