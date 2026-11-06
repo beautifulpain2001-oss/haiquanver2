@@ -92,6 +92,7 @@ def clone_sheet(wb, tws, title, regions, max_col=None):
         if dim.min and dim.max and dim.max > dim.min:  # nhóm cột cùng độ rộng
             for c in range(dim.min, dim.max + 1):
                 ws.column_dimensions[get_column_letter(c)].width = dim.width
+                ws.column_dimensions[get_column_letter(c)].hidden = dim.hidden  # cột ẩn của mẫu ẩn cả nhóm, không chỉ cột đầu nhóm
     max_col = max_col or tws.max_column
     for new_r, tr in plan.rows:
         in_region = plan.region_of(tr) is not None
@@ -372,6 +373,10 @@ def fill_pkl_arizon(core, wb, rec, prof, tws, title):
     ws["A8"] = prof["addr"]
     ws["A10"] = f"Từ:{core.HT_NAME}\nĐến: {prof['name']}"
     ws[f"F{pl.map(24)}"] = core.HT_NAME
+    for col, hide in (("B", True), ("H", False), ("J", True)):  # B (Mã hàng trống) và J (cột đệm) thừa: ẩn; H (kg/chiếc) phải hiện
+        ws.column_dimensions[col].hidden = hide
+        if not hide and not ws.column_dimensions[col].width:
+            ws.column_dimensions[col].width = 10
     r0 = pl.first[13]
     for i, it in enumerate(items):
         r = r0 + i

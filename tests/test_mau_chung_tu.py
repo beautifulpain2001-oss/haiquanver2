@@ -57,3 +57,25 @@ def test_autofit_wraps_long_text_and_raises_row_height():
     assert ws["A1"].alignment.wrap_text and ws.row_dimensions[1].height >= 4 * 11 * 1.33  # 3+ dòng hiện đủ
     assert not ws["A3"].alignment.wrap_text  # tràn sang ô trống bên phải thì giữ một dòng
     assert ws.column_dimensions["A"].width >= len("123,456,789.50")  # số quá rộng thì nới cột
+
+
+def test_arizon_invoice_hides_b_and_j_and_shows_h(tmp_path):
+    import openpyxl
+    import hongthien_desktop_app as core
+    import mau_chung_tu
+    t = openpyxl.Workbook()
+    ws = t.active
+    ws.title = "9.2"
+    for col in "ABCDEFGHIJKLMN":
+        ws[f"{col}12"] = col
+    ws.column_dimensions["H"].hidden = True
+    ws.column_dimensions["B"].width = 6
+    ws["A24"] = "x"
+    ws.print_area = "A1:N24"
+    path = tmp_path / "arz.xlsx"
+    t.save(path)
+    wb = openpyxl.Workbook()
+    rec = {"docDate": "2026-11-05", "pxkNo": "1", "items": [{"ma_sp": "A", "ten_sp": "x", "po": "P", "unit": "chiếc", "qty": 10, "kg": 0.1, "div": 5, "price": 3}]}
+    out = mau_chung_tu.fill_pkl_arizon(core, wb, rec, {"name": "ARZ", "addr": "HY", "unit": "chiếc"}, mau_chung_tu.load_template(str(path)), "Inv")
+    d = out.column_dimensions
+    assert d["B"].hidden and d["J"].hidden and not d["H"].hidden

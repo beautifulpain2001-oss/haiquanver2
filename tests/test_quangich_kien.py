@@ -171,3 +171,19 @@ def test_merged_lot_refreshes_and_exports(qapp, store, tmp_path):
     page.merge()
     assert page.table.rowCount() == 2
     page.close()
+
+
+def test_code_links_erp_and_customer_entries(store):
+    """Cùng mã khách: mục ERP (70g, mã ERP) và mục học từ invoice (67g, SL/kiện) gộp một; kg theo ERP, SL/kiện theo invoice; sửa tay thắng cả hai."""
+    store.save_learned_customer("arzl", {"name": "CÔNG TY TNHH ARIZON L", "label": "ArzL", "mst": "0100000032", "addr": "HY", "unit": "Chiếc"},
+                                [{"name": "Ống giấy 76x5x67", "code": "3609100670001", "price": 10, "div": 0, "kg": 0.067}])
+    store._dt_upsert("ArzL", "Ống giấy 76x5x67", ma_hang="3609100670001", kg=0.067, kg_nguon="invoice", kien=200, kien_nguon="invoice", exact=True)
+    store._dt_upsert("ArzL", "ống 76x5x67, T.nâu", ma_erp="FG10496-010-00000", kg=0.07, kg_nguon="erp", exact=True, ma_kh="3609100670001")
+    m = store.dt_merged("arzl", "FG10496-010-00000")  # tra bằng mã ERP cũng ra mục kia
+    assert (m["kg"], m["kien"], m["ma_erp"], m["ma_hang"]) == (0.07, 200, "FG10496-010-00000", "3609100670001")
+    line = {"ma_sp": "3609100670001", "ten_sp": "Ống giấy 76x5x67", "qty": 1000, "kg": 0.067, "div": 0, "tare": 0}
+    assert store.dt_fill_lines("arzl", [line]) == 1
+    assert (line["kg"], line["div"], line["kien"], line["net"], line["ma_erp"]) == (0.07, 200.0, 5, 70.0, "FG10496-010-00000")
+    assert "ERP" in line["read_note"]
+    hit = app.lot_lookup_code(store, "arzl", "FG10496-010-00000")
+    assert (hit["kg"], hit["div"], hit["ma_erp"]) == (0.07, 200, "FG10496-010-00000")
