@@ -2739,6 +2739,24 @@ def get_vat_and_pxk_ids(rec):
     return f"shirai ngày {short_d}", f"Shirai ngày {short_d}"
 
 
+def merge_same_lines(items, prof):
+    """Hóa đơn/PXK Bkav: các dòng giống hoàn toàn (cùng mã, tên, ĐVT, đơn giá, và cùng PO nếu PO được ghi trên dòng) gộp thành một dòng, chỉ lấy tổng SL và thành tiền."""
+    out, seen = [], {}
+    for it in items:
+        key = (str(it.get("ma_sp") or "").strip(), str(it.get("ten_sp") or "").strip(), str(it.get("unit") or ""), float(it.get("price") or 0),
+               str(it.get("po") or "") if (prof.get("linePo") or prof.get("vatPoSuffix")) else "")
+        if key in seen:
+            m = seen[key]
+            m["qty"] = float(m.get("qty") or 0) + float(it.get("qty") or 0)
+            m["amount"] = float(m.get("amount") or 0) + float(it.get("amount") or 0)
+            if m["qty"] == int(m["qty"]):
+                m["qty"] = int(m["qty"])
+        else:
+            seen[key] = dict(it)
+            out.append(seen[key])
+    return out
+
+
 def build_vat_bkav_sheet(wb, rec, sheet_name="VAT_BKAV"):
     ws = wb.create_sheet(title=sheet_name[:31])
     prof = PROFILES.get(rec["customer"], PROFILES["shirai"])
@@ -2787,7 +2805,7 @@ def build_vat_bkav_sheet(wb, rec, sheet_name="VAT_BKAV"):
         color = "C0C0C0" if i == 1 else "FFCC99" if i == 2 else "FFFFCC" if i <= 12 else "CCCCFF" if i <= 22 else "CCFFCC"
         c.fill = make_fill(color)
 
-    for idx, it in enumerate(rec.get("items", []), 1):
+    for idx, it in enumerate(merge_same_lines(rec.get("items", []), prof), 1):
         r = 5 + idx
         ws.row_dimensions[r].height = 70.5 if idx == 1 else 48
         ten_hang = with_code(prof, it, f"{it['ten_sp']}, PO:{it.get('po', '')}" if prof.get("vatPoSuffix") and it.get("po") else it["ten_sp"])
@@ -2888,7 +2906,7 @@ def build_pxk_bkav_sheet(wb, rec, sheet_name="PXK_BKAV"):
     drv = rec.get("driver") or prof["driver"]
     acc_fmt = '_(* #,##0_);_(* \\(#,##0\\);_(* "-"??_);_(@_)'
 
-    for idx, it in enumerate(rec.get("items", []), 1):
+    for idx, it in enumerate(merge_same_lines(rec.get("items", []), prof), 1):
         r = 2 + idx
         ws.row_dimensions[r].height = 39.95
         po_cell = it.get("po", "") if prof.get("linePo") else (f"Po No {rec.get('poNumber', '')}" if prof.get("poInDocs") else "")

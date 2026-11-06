@@ -200,3 +200,15 @@ def test_gross_uses_tare_field_for_every_invoice(qapp, store):
     assert (rec["items"][0]["net"], rec["items"][0]["gross"], rec["items"][0]["tare"]) == (25.0, 25.5, 0.5)
     ws = openpyxl.load_workbook(app.lot_export(store, dict(rec, docDate="2026-11-05"), "PKL")["path"]).active
     assert any(c.value == "=F13+0.5" or c.value == "=H13+0.5" for row in ws.iter_rows(min_row=13, max_row=13) for c in row)
+
+
+def test_bkav_vat_and_pxk_merge_identical_lines(store):
+    store.save_learned_customer("mg1", {"name": "CÔNG TY MG", "label": "Mg", "mst": "0100000033", "addr": "BN", "unit": "chiếc"}, [{"name": "Ống A", "code": "A1", "price": 10, "div": 50, "kg": 0.1}])
+    base = {"po": "P", "ma_sp": "A1", "ten_sp": "Ống A", "unit": "chiếc", "price": 10, "div": 50, "kg": 0.1}
+    items = [dict(base, qty=100, amount=1000), dict(base, ma_sp="B2", ten_sp="Ống B", qty=5, amount=50), dict(base, qty=60, amount=600), dict(base, qty=7, price=12, amount=84)]
+    rec = make_rec(store, "mg1", items)
+    for mode, col_qty in (("VAT", "F"), ("PXK", "G")):
+        ws = openpyxl.load_workbook(app.lot_export(store, rec, mode)["path"]).active
+        first = 6 if mode == "VAT" else 3
+        qtys = [ws[f"{col_qty}{r}"].value for r in range(first, first + 5) if ws[f"{col_qty}{r}"].value is not None]
+        assert qtys == [160, 5, 7], (mode, qtys)
