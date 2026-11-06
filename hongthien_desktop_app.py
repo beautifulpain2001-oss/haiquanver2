@@ -6441,6 +6441,7 @@ def lot_recalc(items, customer, tare_text):
         if kg > 0:
             it["net"] = exact(qty * kg)
             it["gross"] = lot_gross(it["net"], spec)
+            it["tare"] = 0.0 if str(spec).strip().endswith("%") else _tare_number(spec, 0.0)  # bì cộng thêm mỗi dòng theo ô trên màn hình: invoice ghi công thức tịnh + bì
 
 
 def lot_build_record(store, form, items):

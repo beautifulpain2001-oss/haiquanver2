@@ -344,6 +344,7 @@ class Lot:
     # ---- hồ sơ, kiểm tra, xuất, lưu -------------------------------------------
     def record(self):
         self.normalize()
+        self.core.lot_recalc(self.items, self.customer, self.form.get("tare", ""))  # cả bì = tịnh + bì cộng thêm mỗi dòng đang nhập ở bước ④, cho mọi invoice
         form = dict(self.form, customer=self.customer, schedule="", po_dates=self.po_dates, record_id=self.record_id, po_files=self.po_files)
         return self.core.lot_build_record(self.store, form, self.items)
 

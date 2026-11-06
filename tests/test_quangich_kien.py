@@ -187,3 +187,16 @@ def test_code_links_erp_and_customer_entries(store):
     assert "ERP" in line["read_note"]
     hit = app.lot_lookup_code(store, "arzl", "FG10496-010-00000")
     assert (hit["kg"], hit["div"], hit["ma_erp"]) == (0.07, 200, "FG10496-010-00000")
+
+
+def test_gross_uses_tare_field_for_every_invoice(qapp, store):
+    """Ô 'Bì cộng thêm mỗi dòng' ở bước ④ quyết định cả bì = tịnh + bì trên mọi invoice, kể cả dòng đã đọc với bì khác."""
+    from ui_qt.state import Lot
+    lot = Lot(app, store)
+    lot.select_customer("tesa")
+    lot.items = [{"po": "P", "ma_sp": "X", "ten_sp": "Ống", "hs": "", "unit": "ống", "qty": 100, "price": 5, "div": 10, "kg": 0.25, "tare": 1.0, "net": 25.0, "gross": 26.0}]
+    lot.form["tare"] = "0.5"
+    rec = lot.record()
+    assert (rec["items"][0]["net"], rec["items"][0]["gross"], rec["items"][0]["tare"]) == (25.0, 25.5, 0.5)
+    ws = openpyxl.load_workbook(app.lot_export(store, dict(rec, docDate="2026-11-05"), "PKL")["path"]).active
+    assert any(c.value == "=F13+0.5" or c.value == "=H13+0.5" for row in ws.iter_rows(min_row=13, max_row=13) for c in row)
