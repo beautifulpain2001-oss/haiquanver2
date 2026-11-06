@@ -118,7 +118,7 @@ def test_pkl_shirai_layout_follows_users_invoice(seed):
     assert [ws.cell(11, c).value for c in (1, 2, 3, 4, 5, 12)] == ["STT", "Mã hàng", "Tên Hàng", "PO", "ĐVT", "Thành Tiền \nVND"]
     assert ws["A12"].value == "=ROW()-11" and ws["L12"].value == "=K12*F12"  # thành tiền luôn = SL x đơn giá
     it = rec["items"][0]
-    assert ws["D12"].value == f"Po.No {it['po']}" and ws["F12"].value == it["qty"] and ws["I12"].value == "=ROUNDUP(F12*G12,2)" and str(ws["H12"].value).startswith("=ROUNDUP(I12+")
+    assert ws["D12"].value == f"Po.No {it['po']}" and ws["F12"].value == it["qty"] and ws["I12"].value == "=F12*G12" and str(ws["H12"].value).startswith("=I12+")
     tot = 12 + n
     assert ws[f"C{tot}"].value == "Tổng" and ws[f"L{tot}"].value == f"=SUBTOTAL(9,L12:L{tot - 1})"  # không có hàng trống
     assert ws[f"E{tot + 1}"].value == f"=J{tot}" and ws[f"F{tot + 1}"].value == "kiện"

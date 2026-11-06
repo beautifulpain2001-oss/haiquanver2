@@ -203,9 +203,11 @@ def fill_pkl(core, wb, rec, prof, tws, title):
         r = pl.first[15] + i
         spec = core.split_name_spec(it["ten_sp"])[1]
         tare = float(it.get("tare") or 0)
-        for col, v in (("A", i + 1), ("B", it["ten_sp"]), ("H", _unit(it, prof)), ("I", it.get("qty", 0)), ("J", f"=ROUNDUP(K{r}+{tare:g},2)"),
-                       ("K", f"=ROUNDUP(I{r}*O{r},2)"), ("L", it.get("price", 0)), ("M", f"=I{r}*L{r}"), ("N", spec), ("O", it.get("kg", 0))):
+        for col, v in (("A", i + 1), ("B", it["ten_sp"]), ("H", _unit(it, prof)), ("I", it.get("qty", 0)), ("J", f"=K{r}+{tare:g}"),
+                       ("K", f"=I{r}*O{r}"), ("L", it.get("price", 0)), ("M", f"=I{r}*L{r}"), ("N", spec), ("O", it.get("kg", 0))):
             ws[f"{col}{r}"] = v
+        for col in "JK":
+            ws[f"{col}{r}"].number_format = core.ACC3
     if not _all_div(rec, 20):  # mẫu chia 20 ống/kiện; khác định mức thì ghi số kiện đã tính
         ws[f"C{pl.map(28)}"] = _kien_total(rec)
     unify_pxk(ws, rec.get("pxkNo"))
@@ -232,8 +234,10 @@ def fill_pack(core, wb, rec, prof, tws, title):
     for i, it in enumerate(items):
         r = pl.first[18] + i
         tare = float(it.get("tare") or 0)
-        for col, v in (("A", i + 1), ("B", it["ten_sp"]), ("D", it.get("qty", 0)), ("E", f"=ROUNDUP(G{r}*D{r},2)"), ("F", f"=ROUNDUP(E{r}+{tare:g},2)"), ("G", it.get("kg", 0))):
+        for col, v in (("A", i + 1), ("B", it["ten_sp"]), ("D", it.get("qty", 0)), ("E", f"=G{r}*D{r}"), ("F", f"=E{r}+{tare:g}"), ("G", it.get("kg", 0))):
             ws[f"{col}{r}"] = v
+        for col in "EF":
+            ws[f"{col}{r}"].number_format = core.ACC3
     if not _all_div(rec, 20):
         ws[f"B{pl.map(32)}"] = _kien_total(rec)
     unify_pxk(ws, rec.get("pxkNo"))
@@ -384,9 +388,11 @@ def fill_pkl_arizon(core, wb, rec, prof, tws, title):
         div = float(it.get("div") or 0)
         u = str(it.get("unit") or prof.get("unit") or "")
         for col, v in (("A", "=ROW()-12"), ("C", str(it.get("ma_sp") or "").strip()), ("D", "\n" + str(it.get("ten_sp") or "").strip()), ("E", it.get("po", "")),
-                       ("F", u[:1].upper() + u[1:]), ("G", it.get("qty", 0)), ("H", it.get("kg", 0)), ("I", f"=ROUNDUP(K{r}+{tare:g},2)"), ("K", f"=ROUNDUP(G{r}*H{r},2)"),
+                       ("F", u[:1].upper() + u[1:]), ("G", it.get("qty", 0)), ("H", it.get("kg", 0)), ("I", f"=K{r}+{tare:g}"), ("K", f"=G{r}*H{r}"),
                        ("L", f"=ROUNDUP(G{r}/{div:g},0)" if div > 0 else 0), ("M", it.get("price", 0)), ("N", f"=M{r}*G{r}")):
             ws[f"{col}{r}"] = v
+        for col in "IK":
+            ws[f"{col}{r}"].number_format = core.ACC3
     return ws
 
 
