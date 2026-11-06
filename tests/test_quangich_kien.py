@@ -44,7 +44,7 @@ def test_so_kien_is_roundup_formula_in_standard_invoice(store):
     item = {"stt": 1, "po": "P", "ma_sp": "A1", "ten_sp": "Ống A", "unit": "chiếc", "qty": 1000, "price": 10, "amount": 10000, "div": 75, "kg": 0.5, "kien": 14, "net": 500, "gross": 501}
     rec = make_rec(store, "kien1", [item])
     ws = openpyxl.load_workbook(app.lot_export(store, rec, "PKL")["path"]).active
-    kien = [c.value for row in ws.iter_rows(min_row=13, max_row=13) for c in row if isinstance(c.value, str) and "ROUNDUP" in c.value]
+    kien = [c.value for row in ws.iter_rows(min_row=13, max_row=13) for c in row if isinstance(c.value, str) and "ROUNDUP(E13/" in c.value]
     assert kien == ["=ROUNDUP(E13/75,0)"]  # 1000/75 = 13,33 -> 14
 
 
@@ -96,7 +96,7 @@ def test_edit_so_kien_and_kg_applies_to_export_and_is_remembered_by_code(store):
     lot.save_item({"po": "P1", "ma_sp": "3609100570001", "ten_sp": "Ống theo tên trên PO", "hs": "", "unit": "Chiếc", "qty": "1000", "price": "2716", "div": "60", "kg": "0.2"}, 0)
     assert [(i["div"], i["kg"], i["kien"], i["net"]) for i in lot.items] == [(60.0, 0.2, 17, 200.0), (60.0, 0.2, 9, 100.0)]  # dòng cùng mã được đồng bộ và tính lại (làm tròn lên)
     ws = openpyxl.load_workbook(lot.export("PKL")["files"][0]["path"]).active
-    formulas = [c.value for row in ws.iter_rows(min_row=13, max_row=14) for c in row if isinstance(c.value, str) and "ROUNDUP" in c.value]
+    formulas = [c.value for row in ws.iter_rows(min_row=13, max_row=14) for c in row if isinstance(c.value, str) and "/60" in c.value]
     assert formulas == ["=ROUNDUP(E13/60,0)", "=ROUNDUP(E14/60,0)"]
     cat = store.items_for_customer("arzed")[0]  # tên danh mục khác tên trên PO: vẫn được cập nhật theo mã để dùng cho lần sau
     assert (cat["div"], cat["kg"]) == (60.0, 0.2) and store.get_item_norm("Ống catalog 76.2 x 5 x 57")["div"] == 60.0

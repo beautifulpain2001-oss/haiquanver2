@@ -22,7 +22,7 @@ def test_round_half_up_matches_excel(x, expected):
 
 @pytest.mark.parametrize("net,tare,expected", [
     (18.36, "0.02", 18.38), (18.36, "0.01", 18.37), (18.36, "0,02", 18.38),  # dấu phẩy thập phân kiểu Việt Nam
-    (18.36, "", 18.36), (18.36, "0.08%", 18.37), (110.66, "0.08%", 110.75), (0, "0.02", 0.0),
+    (18.36, "", 18.36), (18.36, "0.08%", 18.38), (110.66, "0.08%", 110.75), (0, "0.02", 0.0),
 ])
 def test_lot_gross_fixed_or_percent(net, tare, expected):
     assert app.lot_gross(net, tare) == expected
@@ -114,7 +114,7 @@ def test_remembered_norm_beats_default_rule(store):
 def test_tare_percent_option_reproduces_percentage_gross(store):
     _, schedules = app.parse_shirai_po_excel(FIXTURE, store, "0.08%")
     box = schedules["25.10"]["items"][0]
-    assert box["gross"] == app.round_half_up(box["net"] * 1.0008, 2)
+    assert box["gross"] == app.round_up(box["net"] * 1.0008, 2)
 
 
 # ---------------------------------------------------------------- thành tiền = SL x đơn giá; lệch thì báo

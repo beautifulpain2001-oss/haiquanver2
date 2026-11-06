@@ -127,7 +127,7 @@ class TestKodi:
 
     def test_bi_follows_tare_value(self, seed):
         rec = dict(seed["kodi"], items=[dict(seed["kodi"]["items"][0], tare=2.5)])
-        assert app.build_pkl_kodi_sheet(new_wb(), rec)["E13"].value == "=F13+2.5"
+        assert app.build_pkl_kodi_sheet(new_wb(), rec)["E13"].value == "=ROUNDUP(F13+2.5,2)"
 
 
 class TestTesa:
