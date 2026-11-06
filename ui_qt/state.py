@@ -135,7 +135,8 @@ class Lot:
         for it in self.items:  # nhớ file PO và trang của từng dòng để mở đúng chỗ khi cần soát
             it.setdefault("po_file", res.get("path") or "")
         rep = res.get("read_report") or self.core.read_report(self.items)
-        self.read_text = (rep.get("text", "") if res.get("read_report") else "") + ((" " + self.rule_note) if self.rule_note else "")
+        po_tag = f"PO {res['po']}: " if res.get("po") and not res.get("read_report") else ""
+        self.read_text = po_tag + rep.get("text", "") + ((" " + self.rule_note) if self.rule_note else "")  # luôn báo đọc được hay không, kể cả PO có lớp chữ
         self.po_dates = res["po_dates"]
         self.form["po"] = res["po"] or self.form["po"]
         if res["po_date"]:

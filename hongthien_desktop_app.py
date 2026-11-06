@@ -5966,6 +5966,9 @@ def read_report(lines, check=""):
             text += f" ❌ Chưa đọc được dòng {', '.join(map(str, bad))}: đã thêm sẵn ở bảng, hãy nhập tay."
         if warn:
             text += f" 🟡 Dòng {', '.join(map(str, warn))} phải suy ra từ ô khác: hãy so với PO."
+    new_rows = [i for i, x in enumerate(lines, 1) if x.get("new_item")]
+    if new_rows:
+        text += f" ℹ Dòng {', '.join(map(str, new_rows))} là mặt hàng mới chưa có trong danh mục khách (số liệu đã đọc đúng, cần nhập kg/chiếc và SL/kiện)."
     if check:
         text += " " + check
     return {**n, "total": total, "bad_rows": bad, "warn_rows": warn, "text": text}
@@ -6053,7 +6056,8 @@ def mark_read(items, catalog=None):
         elif price <= 0:
             it["read"], it["read_note"] = "suy_ra", "Chưa có đơn giá"
         elif known and (it.get("ma_sp") not in known and it.get("ten_sp") not in known):
-            it["read"], it["read_note"] = "suy_ra", "Mặt hàng chưa có trong danh mục của khách"
+            # SL và đơn giá đã đọc đúng: dòng này ĐỌC ĐƯỢC; chỉ là mặt hàng mới nên cần bổ sung kg/chiếc và SL/kiện
+            it["read"], it["read_note"], it["new_item"] = "ok", "Mặt hàng mới, chưa có trong danh mục của khách: nhập kg/chiếc và SL/kiện", True
         else:
             it["read"], it["read_note"] = "ok", ""
     return items

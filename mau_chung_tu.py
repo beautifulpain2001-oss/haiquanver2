@@ -164,6 +164,24 @@ def _po_lines(core, rec, pos_fmt):
     return [pos_fmt(p, d) for p, d in (core.rec_po_list(rec) or [("", "")])]
 
 
+_PXK_RE = re.compile(r"(PXK\w*\s*[:：]?\s*)(\d{3,})", re.I)
+
+
+def unify_pxk(ws, pxk):
+    """Mọi chỗ ghi 'PXK… : <số>' trong sheet đều thành số PXK hiện hành (mẫu của khách có thể ghi mã cũ ở nhiều ô). Trả số chỗ đã đổi."""
+    n = 0
+    pxk = str(pxk or "").strip()
+    if not pxk:
+        return 0
+    for row in ws.iter_rows():
+        for c in row:
+            if isinstance(c.value, str) and _PXK_RE.search(c.value):
+                new = _PXK_RE.sub(lambda m: m.group(1) + pxk, c.value)
+                if new != c.value:
+                    c.value, n = new, n + 1
+    return n
+
+
 def fill_pkl(core, wb, rec, prof, tws, title):
     items, pos = rec.get("items", []), core.rec_po_list(rec) or [("", "")]
     ws, pl = clone_sheet(wb, tws, title, [(3, 4, max(len(pos), 2)), (15, 26, max(len(items), 1))])
@@ -189,6 +207,7 @@ def fill_pkl(core, wb, rec, prof, tws, title):
             ws[f"{col}{r}"] = v
     if not _all_div(rec, 20):  # mẫu chia 20 ống/kiện; khác định mức thì ghi số kiện đã tính
         ws[f"C{pl.map(28)}"] = _kien_total(rec)
+    unify_pxk(ws, rec.get("pxkNo"))
     return ws
 
 
@@ -216,6 +235,7 @@ def fill_pack(core, wb, rec, prof, tws, title):
             ws[f"{col}{r}"] = v
     if not _all_div(rec, 20):
         ws[f"B{pl.map(32)}"] = _kien_total(rec)
+    unify_pxk(ws, rec.get("pxkNo"))
     return ws
 
 

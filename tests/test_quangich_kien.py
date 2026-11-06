@@ -58,3 +58,26 @@ def test_cap_nhat_kien_from_cn_sheet_updates_div_by_code(store):
     assert divs == {"3609100620001": 196, "3609301000001": 36} and store.get_item_norm("Ống giấy phi 76.2 x 5 x 62")["div"] == 196
     with pytest.raises(ValueError, match="chưa có khách"):
         store.import_learned({"cap_nhat_kien": {"khach": "Khong co", "so_ong_moi_kien": {"1": 2}}})
+
+
+def test_read_report_shown_for_text_layer_po_and_new_item_is_ok(store):
+    """PO có lớp chữ cũng báo 'đọc được hay không'; mặt hàng mới chưa có trong danh mục là ĐỌC ĐƯỢC (ghi chú cần nhập kg/kiện), không phải 'phải suy ra'."""
+    from ui_qt.state import Lot
+    store.save_learned_customer("arzpo", {"name": "CÔNG TY TNHH ARIZON THỬ", "label": "ArzPo", "mst": "0100000010", "addr": "HY", "unit": "Chiếc", "po_pattern": r"VN-\d{4}-\d{12}"},
+                                [{"name": "Ống giấy phi 76.2 x 5 x 57mm", "code": "3609100570001", "price": 2716, "div": 196, "kg": 0.057}])
+    items = [{"stt": 1, "po": "VN-3501-202611050004", "ma_sp": "3609100570001", "ten_sp": "Ống giấy phi 76.2 x 5 x 57mm", "unit": "Chiếc", "qty": 200, "price": 2716, "amount": 543200, "div": 196, "kg": 0.057, "kien": 2, "net": 11.4, "gross": 12.4},
+             {"stt": 2, "po": "VN-3501-202611050004", "ma_sp": "3607000000003", "ten_sp": "Nắp nhựa 163*32", "unit": "Chiếc", "qty": 2000, "price": 6880, "amount": 13760000, "div": 0, "kg": 0, "kien": 0, "net": 0, "gross": 0}]
+    lot = Lot(app, store)
+    lot.select_customer("arzpo")
+    lot.apply_po({"ok": True, "customer": "arzpo", "po": "VN-3501-202611050004", "po_date": "", "po_dates": {}, "items": items, "msg": "x", "schedules": None, "schedule_key": "", "doc_date": ""})
+    assert [it["read"] for it in lot.items] == ["ok", "ok"] and lot.items[1]["new_item"]
+    assert lot.read_text.startswith("PO VN-3501-202611050004: ✅ Đã đọc đủ 2/2 dòng.") and "Dòng 2 là mặt hàng mới" in lot.read_text
+
+
+def test_unify_pxk_leaves_only_current_number():
+    import mau_chung_tu
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws["I2"], ws["A5"], ws["B7"], ws["C1"] = "PXKKVCNB : 00000299", "Số PXK: 00000250 (cũ)", "PXKKVCNB: 00000250", "Số ĐĐH: POS26999"
+    assert mau_chung_tu.unify_pxk(ws, "00000301") == 3
+    assert [ws[a].value for a in ("I2", "A5", "B7", "C1")] == ["PXKKVCNB : 00000301", "Số PXK: 00000301 (cũ)", "PXKKVCNB: 00000301", "Số ĐĐH: POS26999"]
