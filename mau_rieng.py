@@ -114,6 +114,15 @@ def _fill_para(p_xml, vals, unknown):
     txt = _para_text(p_xml)
     if "{{" not in txt:
         return p_xml
+    runs = [_xml_unescape(m.group(2)) for m in _T.finditer(p_xml)]
+    if sum(len(tokens_in(r)) for r in runs) == len(_TOKEN.findall(txt)):
+        # mọi ô thay thế nằm gọn trong từng đoạn chữ (run): thay tại chỗ, giữ nguyên in đậm/nghiêng và ngắt dòng của đoạn
+        it = iter(runs)
+
+        def repl(m):
+            r = next(it)
+            return ('<w:t xml:space="preserve">' + escape(_sub(r, vals, unknown)) + m.group(3)) if "{{" in r else m.group(0)
+        return _T.sub(repl, p_xml)
     return _set_para(p_xml, _sub(txt, vals, unknown))
 
 
