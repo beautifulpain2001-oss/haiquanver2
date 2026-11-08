@@ -906,6 +906,11 @@ class DedicatedDataStore:
             if os.path.isfile(path):
                 with open(path, "rb") as f:
                     mau["rieng/" + fn] = base64.b64encode(f.read()).decode("ascii")
+        for mode in FORM_MODES:
+            p = self.form_override(key, mode)
+            if p:
+                with open(p, "rb") as f:
+                    mau["thay/" + os.path.basename(p)] = base64.b64encode(f.read()).decode("ascii")
         mem = {it["name"]: self.item_mem[it["name"]] for it in items if it.get("name") in self.item_mem}
         return {"version": "hongthien-hoc-v1", "khach_moi": {"key": key, "profile": dict(self.custom_profiles[key]), "items": items, "mau": mau}, "item_mem": mem}
 
@@ -951,10 +956,11 @@ class DedicatedDataStore:
             return
         prof["rieng"] = [n for n in prof["rieng"] if n != fname]
         PROFILES[key] = build_custom_profile(key, prof)
-        try:
-            os.remove(os.path.join(self.template_folder(key), "rieng", fname))
-        except OSError:
-            pass
+        for p in (os.path.join(self.template_folder(key), "rieng", fname), os.path.join(self.template_folder(key), "rieng", "_goc", fname)):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
         self.save_catalog()
 
     # ---- KHO MẪU CHUNG: mẫu Word/Excel dùng lại giữa các khách, tên theo quy ước <LOẠI>_<Khách>_<số>.<đuôi> --------------------------------
@@ -1050,6 +1056,97 @@ class DedicatedDataStore:
         label = (PROFILES.get(key) or {}).get("label") or key
         return self.kho_add(path, loai, label)
 
+    # ---- FORM CHỨNG TỪ CỦA KHÁCH (sửa ở Kho mẫu): MAU_CHUNG_TU/<khách>/thay/<MÃ>.xlsx|.docx thay cho mẫu dựng sẵn khi xuất ---------
+    # Mỗi lần sửa form (hoặc mẫu riêng) lần đầu, bản trước khi sửa được cất ở thư mục _goc cạnh file để khôi phục.
+    def form_dir(self, key):
+        return os.path.join(self.template_folder(key), "thay")
+
+    def form_override(self, key, mode):
+        """File form khách đã sửa cho chứng từ `mode` (None = xuất theo mẫu dựng sẵn)."""
+        for ext in (".xlsx", ".docx"):
+            p = os.path.join(self.form_dir(key), f"{mode}{ext}")
+            if os.path.isfile(p):
+                return p
+        return None
+
+    def customer_docs(self, key):
+        """Các chứng từ trong bộ của khách cho Kho mẫu: [{mode, label, kind, path, ext, goc}].
+        kind: "form" (form đã sửa, thay mẫu dựng sẵn), "rieng" (mẫu riêng Word/Excel), "builtin" (dựng sẵn, đổi thành form được),
+        "bkav" (Hóa đơn VAT / PXK: file nạp Bkav), "fixed" (dựng sẵn, không đổi được)."""
+        out = []
+        for mode in lot_bundle_modes({"customer": key}):
+            if mode == "CHECK":
+                continue
+            d = {"mode": mode, "label": lot_mode_label(mode), "kind": "fixed", "path": None, "ext": "xlsx", "goc": False}
+            if mode.startswith("R:"):
+                d.update(kind="rieng", path=os.path.join(self.template_folder(key), "rieng", mode[2:]), ext=os.path.splitext(mode)[1].lstrip(".").lower())
+            elif mode in ("VAT", "PXK"):
+                d["kind"] = "bkav"
+            elif mode in FORM_MODES:
+                p = self.form_override(key, mode)
+                d.update(kind="form", path=p, ext=os.path.splitext(p)[1].lstrip(".")) if p else d.update(kind="builtin")
+                if not p and mode == "PLX" and key not in BUILTIN_CUSTOMERS and is_sunlu(PROFILES.get(key, {})):
+                    d["ext"] = "docx"
+            if d["path"]:
+                d["goc"] = bool(self.doc_original(d["path"]))
+            out.append(d)
+        return out
+
+    def form_make(self, key, mode):
+        """Đổi chứng từ dựng sẵn `mode` của khách thành form để sửa (từ nay xuất theo form). Trả (đường dẫn form, [chỗ nên xem lại])."""
+        ext, data, warns = form_from_builtin(self, key, mode)
+        folder = self.form_dir(key)
+        os.makedirs(os.path.join(folder, "_goc"), exist_ok=True)
+        for old in (".xlsx", ".docx"):
+            for p in (os.path.join(folder, mode + old), os.path.join(folder, "_goc", mode + old)):
+                if os.path.isfile(p):
+                    os.remove(p)
+        path = os.path.join(folder, f"{mode}.{ext}")
+        for p in (path, os.path.join(folder, "_goc", f"{mode}.{ext}")):  # bản gốc = form vừa chuyển từ mẫu dựng sẵn
+            with open(p, "wb") as f:
+                f.write(data)
+        return path, warns
+
+    def form_drop(self, key, mode):
+        """Bỏ form đã sửa: chứng từ `mode` xuất lại theo mẫu dựng sẵn của phần mềm."""
+        folder = self.form_dir(key)
+        for ext in (".xlsx", ".docx"):
+            for p in (os.path.join(folder, mode + ext), os.path.join(folder, "_goc", mode + ext)):
+                if os.path.isfile(p):
+                    os.remove(p)
+
+    def _doc_path_ok(self, path):
+        root = os.path.realpath(TEMPLATE_DIR or os.path.join(self.base_dir, "MAU_CHUNG_TU"))
+        rp = os.path.realpath(path)
+        if not rp.startswith(root + os.sep):
+            raise ValueError("File không nằm trong thư mục mẫu chứng từ.")
+        return rp
+
+    def doc_read(self, path):
+        with open(self._doc_path_ok(path), "rb") as f:
+            return f.read()
+
+    def doc_original(self, path):
+        """Bản gốc (trước lần sửa đầu tiên) của một form / mẫu riêng, None nếu chưa có."""
+        p = os.path.join(os.path.dirname(path), "_goc", os.path.basename(path))
+        return p if os.path.isfile(p) else None
+
+    def doc_write(self, path, data):
+        """Ghi nội dung mới cho form / mẫu riêng; lần sửa đầu tiên cất bản đang có làm bản gốc."""
+        path = self._doc_path_ok(path)
+        if os.path.isfile(path) and not self.doc_original(path):
+            os.makedirs(os.path.join(os.path.dirname(path), "_goc"), exist_ok=True)
+            shutil.copy2(path, os.path.join(os.path.dirname(path), "_goc", os.path.basename(path)))
+        with open(path, "wb") as f:
+            f.write(data)
+
+    def doc_restore(self, path):
+        """Khôi phục bản gốc của form / mẫu riêng."""
+        goc = self.doc_original(self._doc_path_ok(path))
+        if not goc:
+            raise ValueError("Mẫu này chưa có bản gốc để khôi phục (chưa sửa lần nào).")
+        shutil.copy2(goc, path)
+
     def save_templates(self, key, mau, overwrite=False):
         """Lưu file mẫu chứng từ của khách (base64 trong file dữ liệu học) vào MAU_CHUNG_TU/<khách>/<doc>.xlsx."""
         import base64
@@ -1070,6 +1167,18 @@ class DedicatedDataStore:
                 if prof is not None and fn not in (prof.get("rieng") or []):
                     prof["rieng"] = list(prof.get("rieng") or []) + [fn]
                     PROFILES[key] = build_custom_profile(key, prof)
+                continue
+            if str(doc).startswith("thay/"):  # form chứng từ khách đã sửa ở Kho mẫu
+                fn = os.path.basename(str(doc)[5:])
+                mode, ext = os.path.splitext(fn)
+                if mode not in FORM_MODES or ext.lower() not in (".docx", ".xlsx"):
+                    continue
+                path = os.path.join(folder, "thay", fn)
+                if not os.path.exists(path) or overwrite:
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    with open(path, "wb") as f:
+                        f.write(base64.b64decode(b64))
+                    n += 1
                 continue
             if doc not in ("pkl", "pack", "pgh", "dccn", "dntt", "bbgh", "po"):
                 continue
@@ -6638,16 +6747,23 @@ def lot_export_custom_form(store, rec, fname, work_dir, s_key):
     if fname not in store.custom_forms(cust):
         raise ValueError(f"Khách này chưa có mẫu riêng “{fname}”.")
     path = os.path.join(store.template_folder(cust), "rieng", fname)
+    return lot_export_form_file(rec, path, f"{os.path.splitext(fname)[0]}_{cust}_{s_key}", work_dir)
+
+
+def lot_export_form_file(rec, path, out_base, work_dir):
+    """Điền số liệu lô `rec` vào file form Word/Excel `path` (ô {{...}}) và ghi ra work_dir/<out_base>.<đuôi file form>."""
+    import mau_rieng
     with open(path, "rb") as f:
         data = f.read()
-    prof = PROFILES.get(cust, {})
+    prof = PROFILES.get(rec["customer"], {})
     consts = {"name": HT_NAME, "addr": ADDR_HT, "mst": MST_HT, "date": _iso_to_date, "words": num_to_vn_words}
-    out, unknown = mau_rieng.fill(os.path.splitext(fname)[1], data, mau_rieng.batch_values(rec, prof, consts), mau_rieng.item_values(rec))
-    ext = os.path.splitext(fname)[1]
-    out_name = f"{os.path.splitext(fname)[0]}_{cust}_{s_key}{ext}"
+    ext = os.path.splitext(path)[1]
+    out, unknown = mau_rieng.fill(ext, data, mau_rieng.batch_values(rec, prof, consts), mau_rieng.item_values(rec))
+    out_name = out_base + ext
     out_path = os.path.join(work_dir, out_name)
     with open(out_path, "wb") as f:
         f.write(out)
+    fname = os.path.basename(path)
     return {"path": out_path, "fname": out_name, "problems": [f"Mẫu {fname}: ô {{{{{u}}}}} không nhận ra, đã để nguyên." for u in unknown], "dsh": None}
 
 
@@ -6680,12 +6796,32 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
                 shutil.copy2(src, dst)
         except OSError:
             pass
+    s_key = rec.get("scheduleKey", "30.10")
+    if mode.startswith("R:"):  # mẫu riêng của khách (Word/Excel): điền ô {{...}} rồi xuất lại đúng định dạng file mẫu
+        return lot_export_custom_form(store, rec, mode[2:], work_dir, s_key)
+    form = store.form_override(rec["customer"], mode) if mode in FORM_MODES else None
+    if form:  # khách đã sửa form của chứng từ này ở Kho mẫu: xuất theo form đó thay cho mẫu dựng sẵn
+        return lot_export_form_file(rec, form, f"{FORM_FILE_PREFIX[mode]}_{rec['customer']}_{s_key}", work_dir)
+
+    wb, fname, problems = lot_mode_workbook(store, rec, mode, skip_h)
+    out_path = os.path.join(work_dir, fname)
+    if mode == "PLX" and rec["customer"] not in BUILTIN_CUSTOMERS and is_sunlu(PROFILES.get(rec["customer"], {})):
+        fname = fname[:-5] + ".docx"  # Sunlu: Phụ lục X là file Word đúng mẫu khách, không phải Excel
+        out_path = os.path.join(work_dir, fname)
+        with open(out_path, "wb") as f:
+            f.write(plx_sunlu_docx(rec))
+        return {"path": out_path, "fname": fname, "problems": problems, "dsh": None}
+    if mau_chung_tu:
+        mau_chung_tu.autofit_workbook(wb)  # chữ dài tự xuống dòng, dòng tự cao, cột số vừa đủ: mở ra là in được
+    wb.save(out_path)
+    return {"path": out_path, "fname": fname, "problems": problems, "dsh": None}
+
+
+def lot_mode_workbook(store, rec, mode, skip_h=False):
+    """Dựng workbook của một chứng từ theo mẫu dựng sẵn (chưa ghi file, không đụng dữ liệu). Trả (wb, tên file, điểm lệch)."""
     clean_po = re.sub(r"[^a-zA-Z0-9_-]", "", rec["poNumber"])[:24]
     s_key = rec.get("scheduleKey", "30.10")
     problems = []
-    if mode.startswith("R:"):  # mẫu riêng của khách (Word/Excel): điền ô {{...}} rồi xuất lại đúng định dạng file mẫu
-        return lot_export_custom_form(store, rec, mode[2:], work_dir, s_key)
-
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
 
@@ -6743,18 +6879,7 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
         problems = check_lot(rec)
         build_check_sheet(wb, rec, problems, f"KiemTra_{s_key}")
         fname = f"Bo_Ho_So_Xuat_Hang_{PROFILES[rec['customer']]['label']}_{clean_po}_{s_key}.xlsx"
-
-    out_path = os.path.join(work_dir, fname)
-    if mode == "PLX" and rec["customer"] not in BUILTIN_CUSTOMERS and is_sunlu(PROFILES.get(rec["customer"], {})):
-        fname = fname[:-5] + ".docx"  # Sunlu: Phụ lục X là file Word đúng mẫu khách, không phải Excel
-        out_path = os.path.join(work_dir, fname)
-        with open(out_path, "wb") as f:
-            f.write(plx_sunlu_docx(rec))
-        return {"path": out_path, "fname": fname, "problems": problems, "dsh": None}
-    if mau_chung_tu:
-        mau_chung_tu.autofit_workbook(wb)  # chữ dài tự xuống dòng, dòng tự cao, cột số vừa đủ: mở ra là in được
-    wb.save(out_path)
-    return {"path": out_path, "fname": fname, "problems": problems, "dsh": None}
+    return wb, fname, problems
 
 
 LOT_MODE_LABELS = {
@@ -6799,6 +6924,138 @@ def lot_export_each(store, rec, skip_h=False):
         if mode.startswith("R:"):  # ô lạ trong mẫu riêng của khách: báo để người dùng sửa file mẫu
             extra += res["problems"]
     return {"files": files, "problems": check_lot(rec) + extra}
+
+
+# ---- FORM CHỨNG TỪ SỬA Ở KHO MẪU: thay mẫu dựng sẵn bằng file Word/Excel có ô {{...}} của riêng khách ----------------------------
+# Chứng từ dựng sẵn đổi được thành form (Hóa đơn VAT / Phiếu xuất kho là file nạp Bkav nên giữ đúng định dạng Bkav, không đổi).
+FORM_MODES = ("PKL", "PLX", "DNTT", "BBGH", "PO", "SC", "DCCN", "PACK", "PGH")
+FORM_FILE_PREFIX = {"PKL": "invoice", "PLX": "PLX", "DNTT": "DNTT", "BBGH": "BienBanBanGiao", "PO": "DonDatHang", "SC": "SaleContract",
+                    "DCCN": "DoiChieuCongNo", "PACK": "DongGoi", "PGH": "PhieuGiaoHang"}
+# Số "đánh dấu" dùng khi dựng chứng từ mẫu: số nào hiện ra trong file thì biết đó là ô nào (không trùng số thật thường gặp)
+_FORM_SENT = {"qty": 4321, "price": 9876, "kg": 0.0371, "div": 53, "tare": 0.137, "date": "2099-07-04", "po_date": "03/02/2098", "pay": 45, "unit": "qqdvt"}
+_FORM_ITEM_TEXT = ("{{ma}}", "{{ten}}")  # dòng có mã / tên hàng = dòng hàng mẫu
+# chữ của mặt hàng mẫu hiện ở NGOÀI dòng hàng (VD "(Chiếc)" cạnh tổng số lượng): đổi sang ô chung của lô
+_FORM_OUTSIDE = {"{{dvt}}": "{{dvt_chung}}", "{{dvt_hoa}}": "{{dvt_chung_hoa}}", "{{ma}}": "{{ma_hang}}", "{{ten}}": "{{ten_hang}}", "{{hs_dong}}": "{{hs}}"}
+
+
+def _form_sentinel_record(store, key):
+    q, pr, kg, div, tare = (_FORM_SENT[k] for k in ("qty", "price", "kg", "div", "tare"))
+    net = exact(q * kg)
+    item = {"stt": 1, "po": "{{so_po}}", "ma_sp": "{{ma}}", "ten_sp": "{{ten}}", "unit": _FORM_SENT["unit"], "qty": q, "price": pr, "amount": q * pr, "div": div, "kg": kg,
+            "kien": math.ceil(q / div), "net": net, "gross": exact(net + tare), "tare": tare, "hs": "{{hs_dong}}"}
+    form = {"customer": key, "doc_date": _FORM_SENT["date"], "po": "{{so_po}}", "po_date": _FORM_SENT["po_date"], "pxk": "{{so_pxk}}", "hd": "{{so_hd}}",
+            "tk": "{{so_tk}}", "pay_days": str(_FORM_SENT["pay"])}
+    rec = lot_build_record(store, form, [item])
+    rec["id"] = "FORM-MAU"
+    return rec, item
+
+
+def _form_number_tokens(item):
+    """{số đánh dấu: (ô theo dòng hàng, ô tổng)}; số thập phân có thể đã được làm tròn 2-3 số lẻ trong chứng từ."""
+    pairs = [("qty", "sl", "tong_sl"), ("price", "gia", None), ("amount", "thanh_tien", "tong_tri_gia"), ("kg", "kg", None),
+             ("kien", "kien", "tong_kien"), ("net", "net", "tong_net"), ("gross", "gross", "tong_gross")]
+    out = []
+    for f, tok_item, tok_tot in pairs:
+        v = float(item[f])
+        variants = {v} | ({round(v, 2), round(v, 3)} if f in ("net", "gross") else set())
+        out.append((variants, tok_item, tok_tot))
+    return out
+
+
+def _form_tokenize_text(text, in_item_row, item):
+    """Đổi các chữ đánh dấu (ngày 27/11/2099, số 4.321...) trong một ô chữ thành ô {{...}}."""
+    d = datetime.date.fromisoformat(_FORM_SENT["date"])
+    due = (d + datetime.timedelta(days=_FORM_SENT["pay"])).strftime("%d/%m/%Y")
+    t = text.replace(d.strftime("%d/%m/%Y"), "{{ngay}}").replace(f"{d.day}/{d.month}/{d.year}", "{{ngay_ngan}}").replace(due, "{{han_tt}}")
+    t = t.replace(_FORM_SENT["po_date"], "{{ngay_po}}").replace(d.strftime("%d%m%Y"), "{{dd}}{{mm}}{{yyyy}}")
+    t = re.sub(r"(?<!\d)(0?%d)(\D{1,14}?)(0?%d)(\D{1,14}?)%d(?!\d)" % (d.day, d.month, d.year),
+               lambda m: ("{{dd}}" if len(m.group(1)) == 2 else "{{d}}") + m.group(2) + ("{{mm}}" if len(m.group(3)) == 2 else "{{m}}") + m.group(4) + "{{yyyy}}", t)
+    t = re.sub(r"(?<!\d)(0?%d)(\D{1,3})%d(?!\d)" % (d.month, d.year), lambda m: ("{{mm}}" if len(m.group(1)) == 2 else "{{m}}") + m.group(2) + "{{yyyy}}", t)
+    pd_, pm_, py_ = _FORM_SENT["po_date"].split("/")
+    t = re.sub(r"(?<!\d)%s(\D{1,14}?)%s(\D{1,14}?)%s(?!\d)" % (pd_, pm_, py_), r"{{po_dd}}\g<1>{{po_mm}}\g<2>{{po_yyyy}}", t)
+    u = _FORM_SENT["unit"]
+    t = t.replace(u, "{{dvt}}").replace(u[:1].upper() + u[1:], "{{dvt_hoa}}").replace(u.upper(), "{{dvt}}")
+    t = re.sub(r"(?<![\d.,])%d(?=\s*(?:ngày|days?\b|天))" % _FORM_SENT["pay"], "{{so_ngay_no}}", t)
+    if not in_item_row:
+        t = t.replace(f"{item['amount']:,.0f}", "{{tong_tri_gia_phay}}")
+    import mau_rieng
+    words = num_to_vn_words(round(item["amount"]))
+    for w in (words, words[:1].upper() + words[1:], words.lower()):
+        t = t.replace(w, "{{tong_tri_gia_chu}}")
+    for variants, tok_item, tok_tot in _form_number_tokens(item):
+        tok = tok_item if in_item_row else (tok_tot or tok_item)
+        for v in sorted(variants, key=lambda x: -len(mau_rieng._dots(x))):
+            d = mau_rieng._dots(v)
+            if len(re.sub(r"\D", "", d)) >= 3:  # số ngắn (VD 82) dễ trùng chữ khác: chỉ đổi khi cả ô là số đó
+                t = re.sub(r"(?<![\d.,])" + re.escape(d) + r"(?![\d]|[.,]\d)", "{{" + tok + "}}", t)
+            elif t.strip() == d:
+                t = "{{" + tok + "}}"
+    return t
+
+
+def _form_tokenize_workbook(wb, item, title="Sheet"):
+    """Chứng từ dựng sẵn (đã dựng bằng số liệu đánh dấu) -> form có ô {{...}}. Trả danh sách chỗ nên xem lại."""
+    warns = []
+    nums = _form_number_tokens(item)
+    div_lit, tare_lit = f"/{_FORM_SENT['div']:g}", f"+{_FORM_SENT['tare']:g}"
+    for ws in wb.worksheets:
+        ws.title = (re.sub(r"_?04\.07$", "", ws.title) or title)[:31]  # tên sheet có ngày giao của lô mẫu
+        for row in ws.iter_rows():
+            in_item = any(isinstance(c.value, str) and any(x in c.value for x in _FORM_ITEM_TEXT) for c in row)
+            for c in row:
+                v = c.value
+                if type(c).__name__ == "MergedCell" or v is None or isinstance(v, bool):
+                    continue
+                if isinstance(v, (int, float)):
+                    if in_item and v == 1 and c.column == 1:
+                        c.value = "{{stt}}"
+                        continue
+                    for variants, tok_item, tok_tot in nums:
+                        if any(abs(float(v) - x) < 1e-9 for x in variants):
+                            tok = tok_item if in_item else tok_tot
+                            if tok:
+                                c.value = "{{" + tok + "}}"
+                            break
+                elif isinstance(v, str) and v.startswith("="):
+                    if in_item and div_lit in v.replace(" ", ""):
+                        c.value = "{{kien}}"  # công thức số kiện theo định mức của mặt hàng mẫu: mỗi mặt hàng một định mức nên lấy số app tính
+                    elif in_item and tare_lit in v.replace(" ", ""):
+                        c.value = "{{gross}}"  # tịnh + bì mỗi dòng (bì nhập ở bước xuất): lấy số app tính
+                    elif in_item and f"*{_FORM_SENT['kg']:g}" in v.replace(" ", ""):
+                        c.value = "{{net}}"  # SL x kg/chiếc của mặt hàng mẫu: mỗi mặt hàng một kg nên lấy số app tính
+                elif isinstance(v, (datetime.datetime, datetime.date)):
+                    if v.strftime("%Y-%m-%d") == _FORM_SENT["date"]:
+                        c.value = "{{ngay_so}}"
+                elif isinstance(v, str):
+                    c.value = _form_tokenize_text(v, in_item, item)
+                    if not in_item:
+                        for a, b in _FORM_OUTSIDE.items():
+                            c.value = c.value.replace(a, b)
+                if isinstance(c.value, str) and ("2099" in c.value or "2098" in c.value or "qqdvt" in c.value.lower() or "so_po" in c.value.replace("{{so_po}}", "")):
+                    warns.append(f"{ws.title}!{c.coordinate}: “{c.value[:60]}” (ngày/số tính từ ngày chứng từ, nên xem lại)")
+    return warns
+
+
+def form_from_builtin(store, key, mode, tokenize=True):
+    """Dựng chứng từ `mode` của khách `key` theo mẫu dựng sẵn rồi đổi thành form có ô {{...}}. Trả (đuôi file, nội dung, [chỗ nên xem lại]).
+    tokenize=False: chỉ dựng chứng từ mẫu (để xem trước VAT/PXK...)."""
+    import io as _io
+    prof = PROFILES.get(key)
+    if not prof:
+        raise ValueError("Không có khách này.")
+    if tokenize and mode not in FORM_MODES:
+        raise ValueError(f"{lot_mode_label(mode)} giữ đúng mẫu dựng sẵn, không đổi thành form để sửa được.")
+    if mode == "PLX" and key not in BUILTIN_CUSTOMERS and is_sunlu(prof):
+        import kho_mau
+        return "docx", kho_mau.plx_sunlu_docx(), []
+    rec, item = _form_sentinel_record(store, key)
+    wb, _fname, _p = lot_mode_workbook(store, rec, mode)
+    if mau_chung_tu:
+        mau_chung_tu.autofit_workbook(wb)
+    warns = _form_tokenize_workbook(wb, item, FORM_FILE_PREFIX.get(mode, mode).capitalize()) if tokenize else []
+    out = _io.BytesIO()
+    wb.save(out)
+    return "xlsx", out.getvalue(), warns
 
 
 def lot_save_new(store, rec, exported_files):

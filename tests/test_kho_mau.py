@@ -60,7 +60,7 @@ def test_borrow_arizon_excel_and_sunlu_word_then_export(store, rec):
     assert store.custom_forms("khothu") == ["PLX_Arizon_01.xlsx", "PLX_Sunlu_01.docx"]
     res = app.lot_export(store, rec, "R:PLX_Arizon_01.xlsx")
     ws = openpyxl.load_workbook(res["path"]).active
-    assert ws["A4"].value == f"Tên nhà sản xuất: {app.HT_NAME}" and ws["C6"].value == "21.312" and "00001" in ws["A8"].value
+    assert ws["A4"].value == f"Tên nhà sản xuất: {app.HT_NAME}" and ws["C6"].value == 21312 and "00001" in ws["A8"].value
     assert [ws[f"C{r}"].value for r in (11, 12)] == ["Ống A", "Ống B"] and [ws[f"D{r}"].value for r in (11, 12)] == [21212, 100]  # dòng hàng nhân lên, số thật
     assert "Khai tại văn bản này" in ws["A14"].value  # đoạn cam kết bị đẩy xuống đúng chỗ
     res = app.lot_export(store, rec, "R:PLX_Sunlu_01.docx")
@@ -245,7 +245,7 @@ def test_detect_full_convert_then_fill_with_lot_data(store, tmp_path):
     out, unknown = mau_rieng.fill_xlsx(tpl, mau_rieng.batch_values(rec, prof, consts), mau_rieng.item_values(rec))
     ws = openpyxl.load_workbook(io.BytesIO(out)).active
     assert unknown == [] and ws["A5"].value == "Số:PO-NEW" and [ws[f"B{r}"].value for r in (10, 11)] == ["Ống A", "Ống B"]
-    assert ws["D12"].value == "150" and ws["A13"].value.endswith("05/11/2026")  # tổng cộng và dòng bên dưới dời xuống đúng chỗ khi thêm dòng hàng
+    assert ws["D12"].value == 150 and ws["A13"].value.endswith("05/11/2026")  # tổng cộng và dòng bên dưới dời xuống đúng chỗ khi thêm dòng hàng
 
 
 def test_detect_dialog_adds_each_sheet_as_named_template(qapp, store, tmp_path):

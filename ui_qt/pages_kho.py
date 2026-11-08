@@ -739,28 +739,139 @@ class PagedView(QScrollArea):
             super().wheelEvent(e)
 
 
-class EditTemplateDialog(QDialog):
-    """Công cụ sửa mẫu: đổi một đoạn chữ/số trong mẫu thành ô {{...}}, xem hình ngay, hoàn tác, lưu; hoặc mở bằng Word/Excel để sửa tự do rồi tải lại."""
+class ContentEditor(QWidget):
+    """Sửa chữ/số ngay trong phần mềm. Excel: lưới ô theo từng sheet (ô gộp chỉ sửa ô đầu). Word: mỗi dòng một đoạn văn (kể cả đoạn trong bảng).
+    Mỗi lần sửa một ô phát `edited(bytes mới)`; định dạng, ô gộp, khung in của file giữ nguyên."""
 
-    def __init__(self, core, store, name, parent=None):
+    edited = Signal(bytes)
+
+    def __init__(self, ext):
+        super().__init__()
+        import mau_rieng
+        self.mr, self.ext, self.data, self.sheets = mau_rieng, ext, b"", []
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        top = QHBoxLayout()
+        self.sheet = QComboBox()
+        self.sheet.currentIndexChanged.connect(self._show_sheet)
+        top.addWidget(QLabel("Sheet:" if ext != "docx" else "Các đoạn văn của file Word:"))
+        top.addWidget(self.sheet, 1)
+        self.sheet.setVisible(ext != "docx")
+        lay.addLayout(top)
+        self.grid = QTableWidget(0, 0)
+        self.grid.setWordWrap(True)
+        self.grid.itemChanged.connect(self._changed)
+        lay.addWidget(self.grid, 1)
+
+    def load(self, data):
+        self.data = data
+        self.grid.blockSignals(True)
+        if self.ext == "docx":
+            paras = self.mr.docx_paragraphs(data)
+            self.grid.clear()
+            self.grid.setColumnCount(1)
+            self.grid.setRowCount(len(paras))
+            self.grid.setHorizontalHeaderLabels(["Đoạn văn (bấm đúp để sửa)"])
+            self.grid.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            for i, t in enumerate(paras):
+                self.grid.setItem(i, 0, QTableWidgetItem(t))
+            self.grid.resizeRowsToContents()
+        else:
+            keep = self.sheet.currentIndex()
+            self.sheets = self.mr.xlsx_cells(data)
+            self.sheet.blockSignals(True)
+            self.sheet.clear()
+            self.sheet.addItems([sh["sheet"] for sh in self.sheets])
+            self.sheet.setCurrentIndex(keep if 0 <= keep < len(self.sheets) else 0)
+            self.sheet.blockSignals(False)
+            self._show_sheet()
+        self.grid.blockSignals(False)
+
+    def _show_sheet(self, *_):
+        from openpyxl.utils import get_column_letter
+        i = self.sheet.currentIndex()
+        if not (0 <= i < len(self.sheets)):
+            return
+        sh = self.sheets[i]
+        rows = sh["rows"]
+        nc = max((len(r) for r in rows), default=0)
+        self.grid.blockSignals(True)
+        self.grid.clear()
+        self.grid.setRowCount(len(rows))
+        self.grid.setColumnCount(nc)
+        self.grid.setHorizontalHeaderLabels([get_column_letter(c + 1) for c in range(nc)])
+        for r, row in enumerate(rows):
+            for c in range(nc):
+                it = QTableWidgetItem(row[c] if c < len(row) else "")
+                if it.text():
+                    it.setToolTip(it.text())
+                if (r + 1, c + 1) in sh["merged"]:
+                    it.setFlags(Qt.ItemIsEnabled)
+                    it.setBackground(QColor("#EEF2F7"))
+                elif "{{" in it.text():
+                    it.setBackground(QColor("#FEF3C7"))
+                self.grid.setItem(r, c, it)
+        self.grid.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        for c in range(nc):
+            self.grid.setColumnWidth(c, 140)
+        self.grid.blockSignals(False)
+
+    def _changed(self, item):
+        if self.ext == "docx":
+            data = self.mr.set_docx_paragraphs(self.data, {item.row(): item.text()})
+        else:
+            sh = self.sheets[self.sheet.currentIndex()]
+            data = self.mr.set_xlsx_cells(self.data, {(sh["sheet"], item.row() + 1, item.column() + 1): item.text()})
+            row = sh["rows"][item.row()]
+            while len(row) <= item.column():
+                row.append("")
+            row[item.column()] = item.text()
+        self.data = data
+        self.grid.blockSignals(True)
+        item.setBackground(QColor("#FEF3C7") if "{{" in item.text() else QColor("white"))
+        self.grid.blockSignals(False)
+        self.edited.emit(data)
+
+    def insert_token(self, token):
+        """Chèn {{ô}} vào cuối ô / đoạn đang chọn. Trả False nếu chưa chọn ô nào."""
+        it = self.grid.currentItem()
+        if it is None or not (it.flags() & Qt.ItemIsEditable):
+            return False
+        it.setText((it.text() + " " if it.text() and not it.text().endswith(" ") else it.text()) + "{{" + token + "}}")
+        return True
+
+
+class EditTemplateDialog(QDialog):
+    """Sửa mẫu ngay trong phần mềm: tab "Xem như bản in" và tab "Sửa chữ / số" (sửa từng ô Excel hoặc từng đoạn Word);
+    đổi một đoạn chữ thành ô {{...}}, chèn ô vào chỗ đang chọn, hoàn tác, lưu. Vẫn mở được bằng Word/Excel để sửa định dạng rồi tải lại.
+    `path`: file form / mẫu riêng của khách (lưu qua store.doc_write, có bản gốc); không có thì là mẫu `name` trong kho chung."""
+
+    def __init__(self, core, store, name, parent=None, path=None, title=None):
         super().__init__(parent)
         import mau_rieng
-        self.core, self.store, self.name, self.mr = core, store, name, mau_rieng
-        self.ext = os.path.splitext(name)[1].lstrip(".")
-        self.setWindowTitle(f"Sửa mẫu — {os.path.splitext(name)[0]}")
-        self.resize(1100, 720)
-        self.data = store.kho_read(name)
+        self.core, self.store, self.name, self.mr, self.path = core, store, name, mau_rieng, path
+        self.ext = os.path.splitext(path or name)[1].lstrip(".").lower()
+        self.setWindowTitle(f"Sửa mẫu — {title or os.path.splitext(name)[0]}")
+        self.resize(1200, 760)
+        self.data = self._read()
         self.history = []
         self.dirty = False
         lay = QHBoxLayout(self)
+        self.tabs = QTabWidget()
         self.view = ImageView(fit=False)
-        lay.addWidget(self.view, 3)
+        self.content = ContentEditor(self.ext)
+        self.content.edited.connect(self._content_edited)
+        self.tabs.addTab(self.view, "🖼  Xem như bản in")
+        self.tabs.addTab(self.content, "✏  Sửa chữ / số")
+        self.tabs.currentChanged.connect(lambda i: self.redraw() if i == 0 else None)
+        lay.addWidget(self.tabs, 3)
         side = QVBoxLayout()
         lay.addLayout(side, 2)
         t = QLabel("Đổi chữ trong mẫu thành ô thay thế")
         t.setObjectName("h2")
         side.addWidget(t)
-        hint = QLabel("Gõ đúng đoạn chữ (hoặc số) đang có trong mẫu rồi chọn ô sẽ thay vào đó. Ô thay thế được tô vàng trên hình.")
+        hint = QLabel("Ô thay thế {{...}} là chỗ phần mềm tự điền số liệu của lô khi xuất. Gõ đúng đoạn chữ (hoặc số) đang có trong mẫu rồi chọn ô sẽ thay vào đó; "
+                      "hoặc chọn một ô ở tab “Sửa chữ / số” rồi bấm “Chèn vào ô đang chọn”.")
         hint.setObjectName("hint")
         hint.setWordWrap(True)
         side.addWidget(hint)
@@ -774,12 +885,16 @@ class EditTemplateDialog(QDialog):
         row = QHBoxLayout()
         self.apply_btn = QPushButton("✏  Đổi thành ô")
         self.apply_btn.clicked.connect(self.apply)
+        self.insert_btn = QPushButton("➕  Chèn vào ô đang chọn")
+        self.insert_btn.setObjectName("sec")
+        self.insert_btn.clicked.connect(self.insert)
+        row.addWidget(self.apply_btn)
+        row.addWidget(self.insert_btn)
+        side.addLayout(row)
         self.undo_btn = QPushButton("↩  Hoàn tác")
         self.undo_btn.setObjectName("sec")
         self.undo_btn.clicked.connect(self.undo)
-        row.addWidget(self.apply_btn)
-        row.addWidget(self.undo_btn)
-        side.addLayout(row)
+        side.addWidget(self.undo_btn)
         t2 = QLabel("Chèn ô thay thế khi sửa bằng Word/Excel")
         t2.setObjectName("h2")
         side.addWidget(t2)
@@ -809,12 +924,19 @@ class EditTemplateDialog(QDialog):
         cancel = QPushButton("Đóng")
         cancel.setObjectName("sec")
         cancel.clicked.connect(self.reject)
-        self.save_btn = QPushButton("💾  Lưu vào kho")
+        self.save_btn = QPushButton("💾  Lưu mẫu" if path else "💾  Lưu vào kho")
         self.save_btn.clicked.connect(self.save)
         row3.addWidget(cancel)
         row3.addWidget(self.save_btn)
         side.addLayout(row3)
+        self.content.load(self.data)
         self.redraw()
+
+    def _read(self):
+        return self.store.doc_read(self.path) if self.path else self.store.kho_read(self.name)
+
+    def _file(self):
+        return self.path or os.path.join(self.store.kho_folder(), self.name)
 
     def redraw(self):
         from . import mau_render
@@ -825,6 +947,20 @@ class EditTemplateDialog(QDialog):
         self.undo_btn.setEnabled(bool(self.history))
         self.save_btn.setEnabled(self.dirty)
 
+    def _set_data(self, data, reload_content=True):
+        self.history.append(self.data)
+        self.data, self.dirty = data, True
+        if reload_content:
+            self.content.load(data)
+        self.redraw()
+
+    def _content_edited(self, data):
+        self.history.append(self.data)
+        self.data, self.dirty = data, True
+        self.undo_btn.setEnabled(True)
+        self.save_btn.setEnabled(True)
+        self.msg.setText("Đã sửa. Bấm “Lưu mẫu” để các lần xuất sau dùng nội dung mới." if self.path else "Đã sửa. Bấm “Lưu vào kho” để giữ lại.")
+
     def apply(self):
         try:
             data, n = self.mr.replace_text(self.ext, self.data, self.find.text(), self.token.currentData())
@@ -834,17 +970,21 @@ class EditTemplateDialog(QDialog):
         if not n:
             self.msg.setText("Không thấy chữ đó trong mẫu (gõ đúng từng ký tự, kể cả dấu chấm).")
             return
-        self.history.append(self.data)
-        self.data, self.dirty = data, True
-        self.msg.setText(f"Đã đổi {n} chỗ thành {{{{{self.token.currentData()}}}}}. Bấm “Lưu vào kho” để giữ lại.")
+        self._set_data(data)
+        self.msg.setText(f"Đã đổi {n} chỗ thành {{{{{self.token.currentData()}}}}}. Bấm “{self.save_btn.text().split('  ')[-1]}” để giữ lại.")
         self.find.clear()
-        self.redraw()
+
+    def insert(self):
+        if self.tabs.currentWidget() is not self.content or not self.content.insert_token(self.token.currentData()):
+            self.tabs.setCurrentWidget(self.content)
+            self.msg.setText("Chọn một ô (Excel) hoặc một đoạn (Word) ở tab “Sửa chữ / số” rồi bấm lại “Chèn vào ô đang chọn”.")
 
     def undo(self):
         if self.history:
             self.data = self.history.pop()
             self.dirty = bool(self.history)
-            self.msg.setText("Đã hoàn tác một lần đổi.")
+            self.content.load(self.data)
+            self.msg.setText("Đã hoàn tác một lần sửa.")
             self.redraw()
 
     def copy_token(self, item):
@@ -852,48 +992,77 @@ class EditTemplateDialog(QDialog):
         self.msg.setText(f"Đã chép {{{{{item.data(Qt.UserRole)}}}}}: dán vào chỗ cần điền trong file mẫu.")
 
     def open_external(self):
-        QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.join(self.store.kho_folder(), self.name)))
+        QDesktopServices.openUrl(QUrl.fromLocalFile(self._file()))
         self.msg.setText("Đã mở file bằng Word/Excel. Sửa xong thì lưu file, đóng lại rồi bấm “Tải lại từ file”.")
 
     def reload(self):
-        self.data, self.history, self.dirty = self.store.kho_read(self.name), [], False
+        self.data, self.history, self.dirty = self._read(), [], False
+        self.content.load(self.data)
         self.msg.setText("Đã tải lại mẫu từ file.")
         self.redraw()
 
     def save(self):
         known, unknown = self.mr.template_tokens(self.ext, self.data)
-        if not known:
+        if not self.path and not known:
             widgets.warn(self, "Chưa lưu được", "Mẫu không còn ô thay thế nào.")
             return
-        self.store.kho_write(self.name, self.data)
+        if self.path:
+            self.store.doc_write(self.path, self.data)
+        else:
+            self.store.kho_write(self.name, self.data)
         self.dirty = False
         self.accept()
 
 
+KIND_TEXT = {"form": "Form đã sửa", "rieng": "Mẫu riêng Word/Excel", "builtin": "Mẫu dựng sẵn", "bkav": "File nạp Bkav", "fixed": "Mẫu dựng sẵn"}
+KIND_HINT = {
+    "form": "Chứng từ này đang xuất theo form đã sửa ở đây. Sửa xong bấm Lưu: các lần xuất sau dùng ngay nội dung mới.",
+    "rieng": "Mẫu riêng Word/Excel của khách. Sửa xong bấm Lưu: các lần xuất sau dùng ngay nội dung mới.",
+    "builtin": "Chứng từ đang do phần mềm dựng sẵn. Bấm “Chuyển thành form để sửa” để có file Excel/Word sửa được; từ đó xuất theo form, "
+               "bỏ form thì quay lại mẫu dựng sẵn. Hình bên trái là form sẽ tạo ra (ô tô vàng là chỗ phần mềm điền).",
+    "bkav": "Hóa đơn VAT / Phiếu xuất kho là file để nạp vào Bkav, phải giữ đúng định dạng Bkav nên không sửa form ở đây.",
+    "fixed": "Chứng từ này phần mềm tự dựng theo số liệu riêng (không đổi thành form được).",
+}
+
+
 class MauPage(QWidget):
-    """Tab "Kho mẫu": hình mẫu đang chọn nằm BÊN TRÁI (vừa khung, thấy cả trang), danh sách mẫu BÊN PHẢI (có thanh cuộn). Chỉ để xem;
-    có nút Sửa mẫu, Nạp mẫu mới, Mở bằng Word/Excel, Xóa. Việc chọn mẫu cho khách làm ở bước thêm khách mới."""
+    """Tab "Kho mẫu": nơi xem và sửa form chứng từ.
+    Cột trái: "Kho chung" (mẫu dùng lại giữa các khách) và từng khách trong hệ thống (Deli Hải Dương / Bắc Ninh là hai khách riêng).
+    Giữa: hình chứng từ như bản in. Phải: danh sách mẫu / chứng từ của mục đang chọn và các nút sửa.
+    Sửa chứng từ của khách thì các lần xuất sau dùng form đã sửa; lần sửa đầu có cất bản gốc để khôi phục."""
 
     def __init__(self, core, store):
         super().__init__()
         self.setObjectName("page")
-        self.core, self.store, self.items = core, store, []
+        self.core, self.store, self.items, self.docs = core, store, [], []
+        self.cust = None  # None = Kho chung; khác = mã khách đang xem
         lay = QVBoxLayout(self)
         lay.setContentsMargins(28, 24, 28, 24)
         lay.setSpacing(10)
         t = QLabel("Kho mẫu chứng từ")
         t.setObjectName("title")
-        h = QLabel("Xem như bản in: chọn một mẫu ở danh sách bên phải. Ô tô vàng là chỗ phần mềm điền số liệu. Cuộn để qua từng trang A4; Ctrl + lăn chuột để zoom. Cần chỉnh thì bấm “Sửa mẫu”.")
+        h = QLabel("Chọn một khách ở cột trái để xem và sửa chứng từ của khách đó (sửa xong, các lần xuất sau dùng form mới). “Kho chung” là các mẫu dùng lại giữa các khách. "
+                   "Ô tô vàng là chỗ phần mềm điền số liệu. Ctrl + lăn chuột để zoom.")
         h.setObjectName("hint")
         h.setWordWrap(True)
         lay.addWidget(t)
         lay.addWidget(h)
         body = QHBoxLayout()
         lay.addLayout(body, 1)
+        cl = QVBoxLayout()
+        body.addLayout(cl, 0)
+        ct = QLabel("Khách hàng")
+        ct.setObjectName("h2")
+        cl.addWidget(ct)
+        self.custs = QListWidget()
+        self.custs.setFixedWidth(210)
+        self.custs.currentRowChanged.connect(self.on_cust)
+        cl.addWidget(self.custs, 1)
         left = QVBoxLayout()
         body.addLayout(left, 3)
         self.title = QLabel("")
         self.title.setObjectName("h2")
+        self.title.setWordWrap(True)
         left.addWidget(self.title)
         tools = QHBoxLayout()
         for text, fn in (("－", lambda: self.view.set_zoom(self.view.zoom / 1.2)), ("＋", lambda: self.view.set_zoom(self.view.zoom * 1.2)), ("Vừa chiều rộng", lambda: self.view.fit_width())):
@@ -907,15 +1076,21 @@ class MauPage(QWidget):
         left.addWidget(self.view, 1)
         right = QVBoxLayout()
         body.addLayout(right, 1)
-        rt = QLabel("Danh sách mẫu")
-        rt.setObjectName("h2")
-        right.addWidget(rt)
+        self.list_title = QLabel("Danh sách mẫu")
+        self.list_title.setObjectName("h2")
+        right.addWidget(self.list_title)
         self.listw = QListWidget()
         self.listw.setIconSize(QSize(96, 124))
         self.listw.setSpacing(4)
         self.listw.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.listw.currentRowChanged.connect(self.on_row)
         right.addWidget(self.listw, 1)
+        self.kind_hint = QLabel("")
+        self.kind_hint.setObjectName("hint")
+        self.kind_hint.setWordWrap(True)
+        right.addWidget(self.kind_hint)
+        self.conv_btn = QPushButton("🧩  Chuyển thành form để sửa")
+        self.conv_btn.clicked.connect(self.convert)
         self.edit_btn = QPushButton("✏  Sửa mẫu…")
         self.edit_btn.clicked.connect(self.edit)
         self.add_btn = QPushButton("📎  Nạp mẫu mới vào kho…")
@@ -924,27 +1099,81 @@ class MauPage(QWidget):
         self.open_btn = QPushButton("📂  Mở bằng Word/Excel")
         self.open_btn.setObjectName("sec")
         self.open_btn.clicked.connect(self.open_file)
+        self.restore_btn = QPushButton("↺  Khôi phục bản gốc")
+        self.restore_btn.setObjectName("sec")
+        self.restore_btn.clicked.connect(self.restore)
+        self.drop_btn = QPushButton("⟲  Dùng lại mẫu dựng sẵn")
+        self.drop_btn.setObjectName("sec")
+        self.drop_btn.clicked.connect(self.drop)
         self.del_btn = QPushButton("🗑  Xóa khỏi kho")
         self.del_btn.setObjectName("dng")
         self.del_btn.clicked.connect(self.remove)
-        for b in (self.edit_btn, self.add_btn, self.open_btn, self.del_btn):
+        for b in (self.conv_btn, self.edit_btn, self.add_btn, self.open_btn, self.restore_btn, self.drop_btn, self.del_btn):
             right.addWidget(b)
         self.msg = QLabel("")
         self.msg.setObjectName("hint")
         self.msg.setWordWrap(True)
         right.addWidget(self.msg)
+        self._fill_custs()
         self.on_row(-1)
 
+    # ---- cột khách -----------------------------------------------------------------------------------------
+    def _fill_custs(self):
+        keep = self.cust
+        self.custs.blockSignals(True)
+        self.custs.clear()
+        li = QListWidgetItem("📦  Kho chung")
+        li.setData(Qt.UserRole, None)
+        self.custs.addItem(li)
+        profs = self.core.PROFILES
+        keys = [k for k in self.core.BUILTIN_CUSTOMERS if k in profs] + sorted((k for k in profs if k not in self.core.BUILTIN_CUSTOMERS), key=lambda k: str(profs[k].get("label") or k).lower())
+        for k in keys:
+            li = QListWidgetItem(f"👤  {profs[k].get('label') or k}")
+            li.setData(Qt.UserRole, k)
+            li.setToolTip(str(profs[k].get("name") or ""))
+            self.custs.addItem(li)
+        row = next((i for i in range(self.custs.count()) if self.custs.item(i).data(Qt.UserRole) == keep), 0)
+        self.custs.setCurrentRow(row)
+        self.custs.blockSignals(False)
+        self.cust = self.custs.item(row).data(Qt.UserRole)
+
+    def select_customer(self, key):
+        for i in range(self.custs.count()):
+            if self.custs.item(i).data(Qt.UserRole) == key:
+                self.custs.setCurrentRow(i)
+                return True
+        return False
+
+    def on_cust(self, i):
+        self.cust = self.custs.item(i).data(Qt.UserRole) if 0 <= i < self.custs.count() else None
+        self.msg.setText("")
+        self.refresh()
+
+    # ---- danh sách bên phải ------------------------------------------------------------------------------------
     def refresh(self, select=None):
+        if self.custs.count() != len(self.core.PROFILES) + 1:
+            self._fill_custs()
         keep = self.listw.currentRow()
-        self.items = self.store.kho_list()
-        names = [it["file"] for it in self.items]
         self.listw.blockSignals(True)
         self.listw.clear()
-        for it in self.items:
-            img = template_image(self.store, it, 300)
-            icon = QIcon(QPixmap.fromImage(img).scaled(96, 124, Qt.KeepAspectRatio, Qt.SmoothTransformation)) if not img.isNull() else QIcon()
-            self.listw.addItem(QListWidgetItem(icon, f"{os.path.splitext(it['file'])[0]}\n{loai_text(it['loai'])} · {ext_text(it['ext'])} · {len(it['tokens'])} ô"))
+        if self.cust is None:
+            self.list_title.setText("Danh sách mẫu")
+            self.docs = []
+            self.items = self.store.kho_list()
+            names = [it["file"] for it in self.items]
+            for it in self.items:
+                img = template_image(self.store, it, 300)
+                icon = QIcon(QPixmap.fromImage(img).scaled(96, 124, Qt.KeepAspectRatio, Qt.SmoothTransformation)) if not img.isNull() else QIcon()
+                self.listw.addItem(QListWidgetItem(icon, f"{os.path.splitext(it['file'])[0]}\n{loai_text(it['loai'])} · {ext_text(it['ext'])} · {len(it['tokens'])} ô"))
+        else:
+            label = self.core.PROFILES.get(self.cust, {}).get("label") or self.cust
+            self.list_title.setText(f"Chứng từ của {label}")
+            self.items = []
+            self.docs = self.store.customer_docs(self.cust)
+            names = [d["mode"] for d in self.docs]
+            for d in self.docs:
+                mark = "✏" if d["kind"] in ("form", "rieng") else ("🔒" if d["kind"] in ("bkav", "fixed") else "⚙")
+                self.listw.addItem(QListWidgetItem(f"{mark}  {d['label']}\n{KIND_TEXT[d['kind']]} · {ext_text(d['ext'])}"))
         self.listw.blockSignals(False)
         row = names.index(select) if select in names else (keep if 0 <= keep < len(names) else (0 if names else -1))
         self.listw.setCurrentRow(row)
@@ -952,35 +1181,130 @@ class MauPage(QWidget):
 
     def current(self):
         i = self.listw.currentRow()
-        return self.items[i] if 0 <= i < len(self.items) else None
+        return self.items[i] if self.cust is None and 0 <= i < len(self.items) else None
+
+    def current_doc(self):
+        i = self.listw.currentRow()
+        return self.docs[i] if self.cust is not None and 0 <= i < len(self.docs) else None
+
+    def _buttons(self, shown):
+        for name in ("conv_btn", "edit_btn", "add_btn", "open_btn", "restore_btn", "drop_btn", "del_btn"):
+            getattr(self, name).setVisible(name in shown)
 
     def on_row(self, _i):
-        it = self.current()
-        for b in (self.edit_btn, self.open_btn, self.del_btn):
-            b.setEnabled(bool(it))
-        if not it:
+        if self.cust is None:
+            self._buttons(("edit_btn", "add_btn", "open_btn", "del_btn"))
+            self.edit_btn.setText("✏  Sửa mẫu…")
+            self.kind_hint.setText("")
+            it = self.current()
+            for b in (self.edit_btn, self.open_btn, self.del_btn):
+                b.setEnabled(bool(it))
+            if not it:
+                self.title.setText("")
+                self.view.clear()
+                return
+            self.title.setText(f"{os.path.splitext(it['file'])[0]}  —  {loai_text(it['loai'])}, {ext_text(it['ext'])}, {len(it['tokens'])} ô thay thế")
+            self.view.show_image(template_image(self.store, it, 1000), os.path.splitext(it["file"])[0])
+            return
+        d = self.current_doc()
+        if not d:
+            self._buttons(())
+            self.kind_hint.setText("Khách này chưa có chứng từ nào.")
             self.title.setText("")
             self.view.clear()
             return
-        self.title.setText(f"{os.path.splitext(it['file'])[0]}  —  {loai_text(it['loai'])}, {ext_text(it['ext'])}, {len(it['tokens'])} ô thay thế")
-        self.view.show_image(template_image(self.store, it, 1000), os.path.splitext(it["file"])[0])
+        kind = d["kind"]
+        self.kind_hint.setText(KIND_HINT[kind])
+        if kind in ("form", "rieng"):
+            self._buttons(("edit_btn", "open_btn", "restore_btn") + (("drop_btn",) if kind == "form" else ()))
+            self.edit_btn.setText("✏  Sửa trong app…")
+            self.edit_btn.setEnabled(True)
+            self.open_btn.setEnabled(True)
+            self.restore_btn.setEnabled(bool(d["goc"]))
+            self.drop_btn.setEnabled(True)
+        elif kind == "builtin":
+            self._buttons(("conv_btn",))
+            self.conv_btn.setEnabled(True)
+        else:
+            self._buttons(())
+        label = self.core.PROFILES.get(self.cust, {}).get("label") or self.cust
+        self.title.setText(f"{label}  —  {d['label']}  ({KIND_TEXT[kind]}, {ext_text(d['ext'])})")
+        self.view.show_image(self._doc_image(d), f"{label} / {d['label']}")
 
+    def _doc_image(self, d, width=1000):
+        if d["path"]:
+            return template_image(self.store, {"path": d["path"], "ext": d["ext"]}, width)
+        from . import mau_render
+        import json
+        key = ("builtin", self.cust, d["mode"], width, json.dumps(self.core.PROFILES.get(self.cust, {}), sort_keys=True, default=str))
+        if key not in _IMG_CACHE:
+            try:
+                ext, data, _w = self.core.form_from_builtin(self.store, self.cust, d["mode"], tokenize=d["kind"] == "builtin")
+                _IMG_CACHE[key] = mau_render.render_template(ext, data, width)
+            except Exception:  # noqa: BLE001 - không dựng được hình: khung xem báo trống
+                _IMG_CACHE[key] = QImage()
+        return _IMG_CACHE[key]
+
+    # ---- nút ---------------------------------------------------------------------------------------------------
     def add_new(self, path=None):
         names = add_template_to_kho(self, self.store, "Chung", path if isinstance(path, str) else None)
         if names:
             self.msg.setText("✅  Đã nạp vào kho: " + ", ".join(os.path.splitext(n)[0] for n in names) + ".")
             self.refresh(select=names[0])
 
+    def convert(self):
+        d = self.current_doc()
+        if not d or d["kind"] != "builtin":
+            return
+        try:
+            path, warns = self.store.form_make(self.cust, d["mode"])
+        except Exception as e:  # noqa: BLE001
+            widgets.warn(self, "Chưa chuyển được", str(e))
+            return
+        note = f"✅  Đã chuyển “{d['label']}” thành form. Từ nay chứng từ này xuất theo form; bấm “Sửa trong app…” để sửa."
+        if warns:
+            note += " Nên xem lại: " + "; ".join(warns[:3]) + ("…" if len(warns) > 3 else "")
+        self.msg.setText(note)
+        self.refresh(select=d["mode"])
+
     def edit(self):
-        it = self.current()
-        if it and EditTemplateDialog(self.core, self.store, it["file"], self).exec():
-            self.msg.setText(f"✅  Đã lưu mẫu “{os.path.splitext(it['file'])[0]}”. Khách đã mượn mẫu này trước đó vẫn giữ bản của họ.")
-            self.refresh(select=it["file"])
+        if self.cust is None:
+            it = self.current()
+            if it and EditTemplateDialog(self.core, self.store, it["file"], self).exec():
+                self.msg.setText(f"✅  Đã lưu mẫu “{os.path.splitext(it['file'])[0]}”. Khách đã mượn mẫu này trước đó vẫn giữ bản của họ.")
+                self.refresh(select=it["file"])
+            return
+        d = self.current_doc()
+        if d and d["path"]:
+            label = self.core.PROFILES.get(self.cust, {}).get("label") or self.cust
+            if EditTemplateDialog(self.core, self.store, os.path.basename(d["path"]), self, path=d["path"], title=f"{label} / {d['label']}").exec():
+                self.msg.setText(f"✅  Đã lưu “{d['label']}” của {label}. Các lần xuất sau dùng form này (bản gốc vẫn giữ để khôi phục).")
+                self.refresh(select=d["mode"])
 
     def open_file(self):
-        it = self.current()
-        if it:
+        it = self.current() if self.cust is None else self.current_doc()
+        if it and it.get("path"):
             QDesktopServices.openUrl(QUrl.fromLocalFile(it["path"]))
+            if self.cust is not None:
+                self.msg.setText("Đã mở file bằng Word/Excel. Sửa xong thì lưu file: lần xuất sau dùng luôn file đó (bản gốc chỉ được cất khi sửa trong app).")
+
+    def restore(self):
+        d = self.current_doc()
+        if d and d["path"] and widgets.ask(self, "Khôi phục bản gốc", f"Đưa “{d['label']}” về bản trước lần sửa đầu tiên? Các chỗ đã sửa sẽ mất."):
+            try:
+                self.store.doc_restore(d["path"])
+            except ValueError as e:
+                widgets.warn(self, "Chưa khôi phục được", str(e))
+                return
+            self.msg.setText(f"✅  Đã khôi phục bản gốc của “{d['label']}”.")
+            self.refresh(select=d["mode"])
+
+    def drop(self):
+        d = self.current_doc()
+        if d and d["kind"] == "form" and widgets.ask(self, "Dùng lại mẫu dựng sẵn", f"Bỏ form đã sửa của “{d['label']}” và xuất lại theo mẫu dựng sẵn của phần mềm?"):
+            self.store.form_drop(self.cust, d["mode"])
+            self.msg.setText(f"Đã bỏ form: “{d['label']}” xuất lại theo mẫu dựng sẵn.")
+            self.refresh(select=d["mode"])
 
     def remove(self):
         it = self.current()

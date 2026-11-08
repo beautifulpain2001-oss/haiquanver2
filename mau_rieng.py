@@ -21,10 +21,15 @@ TOKENS = [
     ("tong_sl", "Tổng số lượng"), ("tong_tri_gia", "Tổng trị giá"), ("tong_tri_gia_chu", "Tổng trị giá bằng chữ"), ("tong_kien", "Tổng số kiện"),
     ("tong_net", "Tổng trọng lượng tịnh"), ("tong_gross", "Tổng trọng lượng cả bì"),
     ("ten_hang", "Tên các mặt hàng (nối bằng ; )"), ("ma_hang", "Mã các mặt hàng"), ("hs", "Mã HS các mặt hàng"),
+    ("dvt_chung", "Đơn vị tính của lô (theo mặt hàng đầu)"), ("dvt_chung_hoa", "Đơn vị tính của lô, viết hoa chữ đầu"),
+    ("ngay_so", "Ngày chứng từ dạng ngày của Excel (ô chỉ chứa ô này)"), ("d", "Ngày (không có số 0 đầu)"), ("m", "Tháng (không có số 0 đầu)"), ("ngay_ngan", "Ngày chứng từ d/m/yyyy"),
+    ("han_tt", "Hạn thanh toán dd/mm/yyyy (ngày chứng từ + số ngày nợ)"), ("so_ngay_no", "Số ngày nợ (thanh toán sau)"),
+    ("po_dd", "Ngày của ngày PO (2 số)"), ("po_mm", "Tháng của ngày PO (2 số)"), ("po_yyyy", "Năm của ngày PO"), ("tong_tri_gia_phay", "Tổng trị giá dạng 22,534,720"),
 ]
 ITEM_TOKENS = [
     ("stt", "Số thứ tự"), ("ma", "Mã hàng"), ("ten", "Tên hàng"), ("dvt", "Đơn vị tính"), ("sl", "Số lượng"), ("gia", "Đơn giá"),
     ("thanh_tien", "Thành tiền"), ("kg", "kg/chiếc"), ("kien", "Số kiện"), ("net", "Trọng lượng tịnh"), ("gross", "Trọng lượng cả bì"), ("hs_dong", "Mã HS"),
+    ("dvt_hoa", "Đơn vị tính viết hoa chữ đầu"),
 ]
 _ITEM_KEYS = {k for k, _ in ITEM_TOKENS}
 _TOKEN = re.compile(r"\{\{\s*([A-Za-z0-9_]+)\s*\}\}")
@@ -43,7 +48,17 @@ def batch_values(rec, prof, consts):
     d = consts["date"](rec.get("docDate"))
     total = sum(float(it.get("amount") or 0) or float(it.get("qty") or 0) * float(it.get("price") or 0) for it in items)
     num = lambda k: sum(float(it.get(k) or 0) for it in items)
+    unit = str((items[0].get("unit") if items else "") or prof.get("unit") or "")
+    try:
+        days = int(float(rec.get("payDays") or prof.get("payDays") or 30))
+    except (TypeError, ValueError):
+        days = 30
+    import datetime
+    due = d + datetime.timedelta(days=days)
+    pm = re.match(r"\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})", str(rec.get("poDate") or ""))
+    po_parts = (pm.group(1).zfill(2), pm.group(2).zfill(2), pm.group(3)) if pm else (d.strftime("%d"), d.strftime("%m"), d.strftime("%Y"))
     return {
+        "po_dd": po_parts[0], "po_mm": po_parts[1], "po_yyyy": po_parts[2],
         "khach_ten": prof.get("name", ""), "khach_dia_chi": prof.get("addr", ""), "khach_mst": prof.get("mst", ""),
         "ben_ban_ten": consts["name"], "ben_ban_dia_chi": consts["addr"].rstrip("."), "ben_ban_mst": consts["mst"],
         "so_po": rec.get("poNumber", ""), "ngay_po": rec.get("poDate", ""), "so_pxk": rec.get("pxkNo", ""), "so_hd": rec.get("hdNo", ""), "so_tk": rec.get("tkNo", ""),
@@ -52,6 +67,12 @@ def batch_values(rec, prof, consts):
         "tong_kien": _dots(num("kien")), "tong_net": _dots(num("net")), "tong_gross": _dots(num("gross")),
         "ten_hang": "; ".join(str(it.get("ten_sp") or "") for it in items), "ma_hang": "; ".join(str(it.get("ma_sp") or "") for it in items),
         "hs": ", ".join(dict.fromkeys(str(it.get("hs") or "") for it in items if it.get("hs"))),
+        "dvt_chung": unit, "dvt_chung_hoa": unit[:1].upper() + unit[1:],
+        "d": str(d.day), "m": str(d.month), "ngay_ngan": f"{d.day}/{d.month}/{d.year}", "han_tt": due.strftime("%d/%m/%Y"), "so_ngay_no": str(days),
+        "tong_tri_gia_phay": f"{total:,.0f}",
+        # số thật của các ô tổng: ô Excel chỉ chứa đúng một ô tổng thì ghi số (cộng/định dạng được), không ghi chữ
+        "ngay_so": d.strftime("%d/%m/%Y"),
+        "__so__": {"ngay_so": datetime.datetime(d.year, d.month, d.day), "tong_sl": num("qty"), "tong_tri_gia": total, "tong_kien": num("kien"), "tong_net": num("net"), "tong_gross": num("gross")},
     }
 
 
@@ -62,7 +83,8 @@ def item_values(rec):
         qty, price = float(it.get("qty") or 0), float(it.get("price") or 0)
         out.append({"stt": i, "ma": it.get("ma_sp", ""), "ten": it.get("ten_sp", ""), "dvt": it.get("unit", ""), "sl": qty, "gia": price,
                     "thanh_tien": float(it.get("amount") or 0) or qty * price, "kg": float(it.get("kg") or 0), "kien": float(it.get("kien") or 0),
-                    "net": float(it.get("net") or 0), "gross": float(it.get("gross") or 0), "hs_dong": it.get("hs", "")})
+                    "net": float(it.get("net") or 0), "gross": float(it.get("gross") or 0), "hs_dong": it.get("hs", ""),
+                    "dvt_hoa": str(it.get("unit") or "")[:1].upper() + str(it.get("unit") or "")[1:]})
     return out
 
 
@@ -181,9 +203,33 @@ def _copy_row_style(ws, src_row, dst_row):
         ws.row_dimensions[dst_row].height = ws.row_dimensions[src_row].height
 
 
+_CELL_REF = re.compile(r"(?<![A-Za-z_\d!.$'\"])(\$?[A-Z]{1,3}\$?)(\d+)(?::(\$?[A-Z]{1,3}\$?)(\d+))?(?![\d(A-Za-z_!])")
+
+
+def shift_formula_rows(formula, r, extra):
+    """Công thức ở NGOÀI dòng hàng mẫu `r` khi chèn thêm `extra` dòng ngay dưới dòng r: ô dưới dòng r dời xuống,
+    vùng kết thúc đúng ở dòng r (VD tổng SUM(D11:D11)) được kéo dài thêm cho hết các dòng hàng mới."""
+    def repl(m):
+        a = int(m.group(2))
+        if m.group(3) is None:
+            return f"{m.group(1)}{a + extra if a > r else a}"
+        b = int(m.group(4))
+        a2 = a + extra if a > r else a
+        b2 = b + extra if b > r or (b == r and a <= r) else b
+        return f"{m.group(1)}{a2}:{m.group(3)}{b2}"
+    return _CELL_REF.sub(repl, formula)
+
+
+def _is_formula(v):
+    return isinstance(v, str) and v.startswith("=")
+
+
 def fill_xlsx(data, batch, rows):
-    """Điền ô thay thế vào file Excel (bytes). Dòng có ô theo dòng hàng được nhân lên cho mỗi mặt hàng. Trả (bytes mới, [ô lạ])."""
+    """Điền ô thay thế vào file Excel (bytes). Dòng có ô theo dòng hàng được nhân lên cho mỗi mặt hàng (chép cả công thức, ô gộp,
+    chữ cố định của dòng mẫu; công thức tổng bên dưới tự kéo dài theo số dòng). Trả (bytes mới, [ô lạ])."""
     import openpyxl
+    from openpyxl.formula.translate import Translator
+    from openpyxl.utils import get_column_letter
     wb = openpyxl.load_workbook(io.BytesIO(data))
     unknown = set()
     for ws in wb.worksheets:
@@ -191,7 +237,13 @@ def fill_xlsx(data, batch, rows):
         item_rows = [r for r in range(ws.max_row, 0, -1) if any(isinstance(c.value, str) and _has_item_token(c.value) for c in ws[r])]
         for r in item_rows:
             extra = max(len(rows), 1) - 1
+            tpl = [(c.column, c.value) for c in ws[r]]
+            row_merges = [(m.min_col, m.max_col) for m in ws.merged_cells.ranges if m.min_row == m.max_row == r]
             if extra > 0:
+                for row in ws.iter_rows():
+                    for c in row:
+                        if c.row != r and _is_formula(c.value):
+                            c.value = shift_formula_rows(c.value, r, extra)
                 merged = [(m.min_row, m.min_col, m.max_row, m.max_col) for m in list(ws.merged_cells.ranges) if m.min_row > r]
                 for m in list(ws.merged_cells.ranges):
                     if m.min_row > r:
@@ -201,20 +253,38 @@ def fill_xlsx(data, batch, rows):
                     ws.merge_cells(start_row=mr0 + extra, start_column=mc0, end_row=mr1 + extra, end_column=mc1)
                 for k in range(1, extra + 1):
                     _copy_row_style(ws, r, r + k)
-            tpl = [(c.column, c.value) for c in ws[r]]
+                    for c0, c1 in row_merges:
+                        ws.merge_cells(start_row=r + k, start_column=c0, end_row=r + k, end_column=c1)
             for k in range(max(len(rows), 1)):
                 v = dict(batch, **(rows[k] if rows else {}))
                 for col, val in tpl:
+                    cell = ws.cell(row=r + k, column=col)
                     if isinstance(val, str) and "{{" in val:
                         m = _TOKEN.fullmatch(val.strip())
+                        so = batch.get("__so__") or {}
                         if m and m.group(1) in v and isinstance(v[m.group(1)], (int, float)):
-                            ws.cell(row=r + k, column=col).value = v[m.group(1)]  # ô chỉ chứa một ô số: ghi số thật để cộng được
+                            cell.value = v[m.group(1)]  # ô chỉ chứa một ô số: ghi số thật để cộng được
+                        elif m and m.group(1) in so and not (rows and m.group(1) in rows[k]):
+                            cell.value = so[m.group(1)]
                         else:
-                            ws.cell(row=r + k, column=col).value = _sub(val, v, unknown)
+                            cell.value = _sub(val, v, unknown)
+                    elif k and _is_formula(val):  # công thức của dòng mẫu: dời theo dòng mới (=E13*F13 -> =E14*F14)
+                        addr = get_column_letter(col)
+                        try:
+                            cell.value = Translator(val, origin=f"{addr}{r}").translate_formula(f"{addr}{r + k}")
+                        except Exception:  # noqa: BLE001 - công thức lạ: chép nguyên
+                            cell.value = val
+                    elif k and val is not None:
+                        try:
+                            cell.value = val  # chữ cố định của dòng mẫu (VD "Chiếc")
+                        except (AttributeError, ValueError):  # ô bị gộp
+                            pass
+        so = batch.get("__so__") or {}
         for row in ws.iter_rows():
             for c in row:
                 if isinstance(c.value, str) and "{{" in c.value:
-                    c.value = _sub(c.value, batch, unknown)
+                    m = _TOKEN.fullmatch(c.value.strip())
+                    c.value = so[m.group(1)] if m and m.group(1) in so else _sub(c.value, batch, unknown)
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue(), sorted(unknown)
@@ -323,3 +393,86 @@ def replace_text(ext, data, find, token):
         wb.save(out)
         return out.getvalue(), count
     raise ValueError("Chỉ sửa được file Word (.docx) hoặc Excel (.xlsx).")
+
+
+# ------------------------------------------------------------------------------------------------ sửa nội dung ngay trong phần mềm
+def docx_paragraphs(data):
+    """Chữ của từng đoạn trong thân file Word (kể cả đoạn trong ô bảng), theo thứ tự trong file."""
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        xml = z.read("word/document.xml").decode("utf-8")
+    return [_para_text(p) for p in _PARA.findall(xml)]
+
+
+def set_docx_paragraphs(data, texts):
+    """`texts`: {số thứ tự đoạn (từ 0): chữ mới}. Đoạn được đổi dồn chữ vào đoạn chữ đầu (giữ định dạng của nó); đoạn khác giữ nguyên."""
+    src = zipfile.ZipFile(io.BytesIO(data))
+    xml = src.read("word/document.xml").decode("utf-8")
+    idx = [0]
+
+    def repl(m):
+        i = idx[0]
+        idx[0] += 1
+        if i not in texts or texts[i] == _para_text(m.group(0)):
+            return m.group(0)
+        p = m.group(0)
+        if not _T.search(p):  # đoạn trống: thêm một đoạn chữ
+            return p.replace("</w:p>", '<w:r><w:t xml:space="preserve">' + escape(texts[i]) + "</w:t></w:r></w:p>")
+        return _set_para(p, texts[i])
+
+    out_xml = _PARA.sub(repl, xml)
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+        for item in src.infolist():
+            dst.writestr(item, out_xml.encode("utf-8") if item.filename == "word/document.xml" else src.read(item.filename))
+    return out.getvalue()
+
+
+def xlsx_cells(data, max_rows=300, max_cols=40):
+    """Lưới ô của từng sheet Excel để sửa: [{"sheet", "rows": [[chữ hiện trong ô, ...]], "merged": {(dòng, cột) bị gộp vào ô khác}}].
+    Công thức hiện nguyên dạng =..., số hiện như Excel lưu (không định dạng)."""
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(data))
+    out = []
+    for ws in wb.worksheets:
+        nr, nc = min(ws.max_row, max_rows), min(ws.max_column, max_cols)
+        hidden = set()
+        for m in ws.merged_cells.ranges:
+            for rr in range(m.min_row, m.max_row + 1):
+                for cc in range(m.min_col, m.max_col + 1):
+                    if (rr, cc) != (m.min_row, m.min_col):
+                        hidden.add((rr, cc))
+        rows = []
+        for r in range(1, nr + 1):
+            rows.append(["" if ws.cell(r, c).value is None else _cell_text(ws.cell(r, c).value) for c in range(1, nc + 1)])
+        out.append({"sheet": ws.title, "rows": rows, "merged": hidden})
+    return out
+
+
+def _cell_text(v):
+    if isinstance(v, float) and v == int(v):
+        return str(int(v))
+    return str(v)
+
+
+def set_xlsx_cells(data, changes):
+    """`changes`: {(tên sheet, dòng, cột): chữ mới} (dòng/cột từ 1). Chữ là số thì ghi số, bắt đầu bằng = thì ghi công thức, rỗng thì xóa ô.
+    Định dạng ô, ô gộp, độ rộng cột, thiết lập in giữ nguyên."""
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(data))
+    for (sheet, r, c), text in changes.items():
+        ws = wb[sheet]
+        cell = ws.cell(r, c)
+        if type(cell).__name__ == "MergedCell":
+            continue
+        t = str(text if text is not None else "")
+        if t == "":
+            cell.value = None
+        elif re.fullmatch(r"-?\d+", t.strip()):
+            cell.value = int(t.strip())
+        elif re.fullmatch(r"-?\d*\.\d+", t.strip()):
+            cell.value = float(t.strip())
+        else:
+            cell.value = t
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
