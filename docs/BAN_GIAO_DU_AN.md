@@ -369,6 +369,7 @@ PO của Best (PDF scan hoặc PDF xuất từ ERP; có Item Code, Spec, SL, gi�
 | #8 | 31/10 | Bộ hồ sơ Best: nhiều PO/lô, Đóng gói, PGH, ĐCCN, ĐNTT mẫu khách, tờ khai B11 theo khách, dsh ECUS, sheet KiemTra |
 | #9 | 31/10 | Merge đồng bộ `main` |
 | #10 | 01/11 | Đọc PO PDF có lớp chữ (xuất từ ERP) theo bố cục trang; PO Best từ 0 dòng lên 11/11 dòng |
+| (Kho mẫu) | 08/11 | Kho mẫu thành nơi sửa form chứng từ theo từng khách: chứng từ dựng sẵn đổi thành form Excel/Word có ô `{{...}}` (`form_from_builtin`, lưu ở `MAU_CHUNG_TU/<khách>/thay/<MÃ>.xlsx`), sửa từng ô/đoạn ngay trong app, lần xuất sau dùng form; bản gốc ở `_goc/` để khôi phục |
 
 Xem chi tiết từng PR trên GitHub (tab Pull requests, trạng thái Closed).
 
@@ -433,6 +434,7 @@ Xem chi tiết từng PR trên GitHub (tab Pull requests, trạng thái Closed).
 | 7 | Tách `hongthien_desktop_app.py` thành module (parser, export, store, ui) | Thấp | Giữ API cũ cho test và PyInstaller. |
 | 8 | Ký số file .exe | Thấp | Để bớt cảnh báo SmartScreen/antivirus; cần chứng thư số. |
 | 9 | Khóa ghi khi nhiều máy cùng lưu qua LAN | Thấp–Trung bình | Hiện "lưu sau thắng". |
+| 10 | Form chứng từ sửa ở Kho mẫu: Hóa đơn VAT / PXK (file nạp Bkav), Phiếu SO Shirai và Bảng đối chiếu hàng hóa chưa đổi thành form | Thấp | VAT/PXK cố ý giữ đúng định dạng Bkav. Kodi xuất theo form thì bỏ qua tùy chọn "không lấy cột Thành Tiền". Ô ngày/hạn có dạng lạ được báo "nên xem lại" khi chuyển. |
 
 ### 12.2 Rủi ro
 - **OCR sai số**: luôn để người dùng soát số PO, SL, giá trước khi xuất; sheet KiemTra chỉ đối chiếu nội bộ, không kiểm được số đọc sai từ PO. Scan dưới 200 dpi hoặc nghiêng nhiều thì lỗi tăng.
