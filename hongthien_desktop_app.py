@@ -265,6 +265,7 @@ CUSTOMER_FIELDS = [
     ("owner", "Nhân viên phụ trách khách này (để trống = ai cũng làm được)"),
     ("extraDocs", "Chứng từ làm thêm khi xuất trọn bộ (mã PLX, DNTT, BBGH, DCCN, PO, BDC; cách nhau dấu phẩy)"),
     ("poGen", "Công thức số PO tự tạo (vd HT{yyyymm}{nn}; YNCGDD{yymmdd}{nnnn} = tiền tố + ngày + 4 số thứ tự)"),
+    ("bkavId", "Mã chứng từ Bkav IDChungTu (vd deli{dd}/{mm} hd; trống = mã khách + ngày.tháng)"),
     ("fixedItem", "Mã hàng cố định (khách chỉ đặt 1 mã: không đọc PO, chỉ xác nhận số PO, SL, giá)"),
     ("note", "Lưu ý đặc thù khi làm chứng từ (hiện ở trang Khách hàng và nhắc ở bước xuất)"),
 ]
@@ -2730,6 +2731,10 @@ def get_vat_and_pxk_ids(rec):
         suf = " pl" if is_pallet else ""
         return f"tesa{d}.{m}{suf}", f"tesa{d}.{m}{suf}"
     if cust not in BUILTIN_CUSTOMERS:
+        fmt = str((PROFILES.get(cust) or {}).get("bkavId") or "").strip()
+        if fmt:  # khách tự đặt mã IDChungTu (VD Deli Hải Dương 'deli{dd}/{mm} hd' -> 'deli29/10 hd'): dùng cho cả VAT và PXK
+            bid = fmt.replace("{dd}", dd).replace("{mm}", mm).replace("{d}", str(d)).replace("{m}", str(m))
+            return bid, bid
         if is_arizon(PROFILES.get(cust, {})):  # Arizon: VAT 'HĐ arizon16/10 xk', PXK 'arizon16/10'
             return f"HĐ arizon{dd}/{mm} xk", f"arizon{dd}/{mm}"
         if is_best_docset(rec):  # Best: 'best 02.11 POS261008053' (nhiều PO thì nối liền các số PO)
@@ -3042,7 +3047,7 @@ def build_pkl_standard_sheet(wb, rec, sheet_name="Invoice_PKL"):
         w_kg = it.get("kg") or 0
         has_w = w_kg > 0
         po_val = (it.get("po") or "") if prof.get("linePo") else f"No {rec.get('poNumber', '')}"
-        unit_val = (it.get("unit") or "cái") if prof.get("linePo") else "Cái"
+        unit_val = (it.get("unit") or "cái") if (prof.get("linePo") or prof.get("nameStyle") == "ma_ten") else "Cái"  # Deli: ĐVT theo mặt hàng (Chiếc)
         gross_val = xl_gross(f"H{r}", it) if (has_w or (it.get("gross") or 0) > 0) else None
         net_val = xl_net(f"E{r}", f"F{r}") if has_w else None
         row_cells = [
