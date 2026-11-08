@@ -698,3 +698,28 @@ def test_fixed_order_customer_confirms_instead_of_reading_po(win, store):
     exp = page.step5
     vis = {m for m, b in exp.btns.items() if b.isVisibleTo(exp)}
     assert vis == {"PKL", "VAT", "PXK", "PO", "BBGH", "BDC", "PLX"}
+
+
+def test_contract_customer_enters_sale_contract_instead_of_po(win, store):
+    """Khách không gửi PO (kiểu Deli): bước ② là ô lập Sale Contract (số hợp đồng theo quy chuẩn + ngày), không có nút chọn file PO;
+    dòng hàng tra mã thêm bằng tay; bước xuất có nút Sale Contract."""
+    key = store.save_learned_customer("hopdong", {"name": "CTY HỢP ĐỒNG THỬ", "mst": "0100000097", "unit": "Chiếc", "tare": 1.0,
+                                                  "poGen": "HT{yyyymmdd}-HD", "extraDocs": "SC", "nameStyle": "ma_ten"},
+                                      [{"code": "340000002", "name": "340000002 Ống giấy thử 1200*76*3mm", "price": 13966, "div": 5, "kg": 0.743}])
+    page = win.lot
+    page.step1.build_cards()
+    page.step1.pick(key)
+    page.go(1)
+    step = page.step2
+    assert step.contract_box.isVisibleTo(step) and not step.fixed_box.isVisibleTo(step) and not step.drop.isVisibleTo(step)
+    today = core.datetime.date.today().strftime("%Y%m%d")
+    assert (step.c_prefix.text(), step.c_date.text(), step.c_suffix.text()) == ("HT", today, "-HD") and not step.c_seq.isVisibleTo(step)
+    step.c_date.setText("20261010")
+    step.c_po_date.setText("10/10/2026")
+    assert step.confirm_contract()
+    assert page.lot.form["po"] == "HT20261010-HD" and page.lot.form["po_date"] == "10/10/2026"
+    page.lot.add_from_catalog(page.lot.search_items("340000002")[0], 1000)
+    assert page.lot.items[0]["po"] == "HT20261010-HD"
+    page.go(3)
+    exp = page.step5
+    assert exp.btns["SC"].isVisibleTo(exp)
