@@ -159,6 +159,9 @@ class PoStep(QWidget):
         self.fixed_box = self._build_fixed_box()
         lay.addWidget(self.fixed_box)
         self._fixed_for = None
+        self.contract_box = self._build_contract_box()
+        lay.addWidget(self.contract_box)
+        self._contract_for = None
         row = QHBoxLayout()
         self.drop = QPushButton("📂  Bấm để chọn file PO (hoặc kéo thả file vào đây)")
         self.drop.setObjectName("drop")
@@ -223,6 +226,88 @@ class PoStep(QWidget):
         form.addRow("", self.f_ok)
         return box
 
+    # ---- khách không gửi PO (Deli): lập Sale Contract, số hợp đồng theo quy chuẩn như Sunlu, dòng hàng tra mã thêm bằng tay ----
+    def _build_contract_box(self):
+        box = QGroupBox("Lập Sale Contract 销售合同 (khách không gửi PO)")
+        form = QFormLayout(box)
+        form.setLabelAlignment(Qt.AlignLeft)
+        form.setVerticalSpacing(10)
+        form.setContentsMargins(14, 18, 14, 12)
+        row = QHBoxLayout()
+        self.c_prefix, self.c_date, self.c_seq, self.c_suffix = QLineEdit(), QLineEdit(), QLineEdit(), QLineEdit()
+        for e, tip, w in ((self.c_prefix, "Tiền tố (VD HT)", 70), (self.c_date, "Ngày (mặc định hôm nay)", 90), (self.c_seq, "Số thứ tự (nếu có)", 50),
+                          (self.c_suffix, "Đuôi (VD -HD)", 60)):
+            e.setPlaceholderText(tip)
+            e.setToolTip(tip)
+            e.setMinimumWidth(w)
+            e.textEdited.connect(lambda _t: self._contract_compose())
+            row.addWidget(e)
+        self.c_po = QLabel("")
+        self.c_po.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        row.addWidget(QLabel("  →  Số hợp đồng:"))
+        row.addWidget(self.c_po, 1)
+        form.addRow("Số hợp đồng", row)
+        self.c_po_date = QLineEdit()
+        form.addRow("Ngày hợp đồng (dd/mm/yyyy)", self.c_po_date)
+        btns = QHBoxLayout()
+        self.c_ok = QPushButton("✅  Xác nhận số hợp đồng")
+        self.c_ok.clicked.connect(self.confirm_contract)
+        self.c_lookup = QPushButton("🔎  Tra mã để thêm dòng")
+        self.c_lookup.setObjectName("sec")
+        self.c_lookup.clicked.connect(self.contract_lookup)
+        btns.addWidget(self.c_ok)
+        btns.addWidget(self.c_lookup)
+        btns.addStretch(1)
+        form.addRow("", btns)
+        self.c_lines = _label("", "hint", wrap=True)
+        form.addRow("", self.c_lines)
+        return box
+
+    def _contract_text(self):
+        return "".join(e.text().strip() for e in (self.c_prefix, self.c_date, self.c_seq, self.c_suffix))
+
+    def _contract_compose(self):
+        self.c_po.setText(f"<b>{html.escape(self._contract_text())}</b>")
+
+    def fill_contract(self):
+        """Điền sẵn số hợp đồng theo quy chuẩn của khách (VD HT + ngày hôm nay + -HD) và ngày hợp đồng hôm nay; lô đã có số thì giữ số đó."""
+        d = self.lot.contract_defaults()
+        for e, k in ((self.c_prefix, "prefix"), (self.c_date, "date"), (self.c_seq, "seq"), (self.c_suffix, "suffix")):
+            e.setText(d.get(k, ""))
+        self.c_seq.setVisible(bool(d.get("width")))
+        cur = str(self.lot.form.get("po", "")).strip()
+        if cur and cur != d.get("po"):  # lô đang sửa: hiện đúng số đã có
+            for e in (self.c_date, self.c_seq, self.c_suffix):
+                e.setText("")
+            self.c_prefix.setText(cur)
+        self.c_po_date.setText(str(self.lot.form.get("po_date", "")).strip() or d.get("po_date", ""))
+        self._contract_compose()
+
+    def _contract_lines(self):
+        n = len(self.lot.items)
+        self.c_lines.setText(f"Lô đang có {n} dòng hàng." if n else "Chưa có dòng hàng: bấm “Tra mã để thêm dòng”, chọn mặt hàng và nhập số lượng.")
+
+    def confirm_contract(self):
+        try:
+            self.lot.confirm_contract(self._contract_text(), self.c_po_date.text())
+        except ValueError as e:
+            widgets.warn(self, "Chưa xác nhận được số hợp đồng", str(e))
+            return False
+        self.set_status(self.lot.read_text, ok=True)
+        self._contract_lines()
+        self.changed.emit()
+        return True
+
+    def contract_lookup(self):
+        if str(self.lot.form.get("po", "")).strip() != self._contract_text() and not self.confirm_contract():
+            return
+        dlg = LookupDialog(self.lot, self)
+        dlg.exec()
+        if dlg.added:
+            self._contract_lines()
+            self.set_status(f"Sale Contract {self.lot.form.get('po', '')}: lô có {len(self.lot.items)} dòng hàng. Bấm “Tiếp tục” để kiểm tra.", ok=True)
+            self.changed.emit()
+
     def _fixed_compose(self):
         self.f_po.setText(f"<b>{html.escape(self.f_prefix.text().strip() + self.f_date.text().strip() + self.f_seq.text().strip())}</b>")
 
@@ -255,16 +340,25 @@ class PoStep(QWidget):
         c = self.lot.customer
         self.who.setText(f"Khách hàng: {self.lot.profile.get('label') or c} — {self.lot.profile.get('name', '')}" if c else "Chưa chọn khách hàng. Bấm “Quay lại” để chọn.")
         fixed = self.lot.fixed_order
+        contract = self.lot.contract_order and not fixed
         self.fixed_box.setVisible(fixed)
+        self.contract_box.setVisible(contract)
         for w in (self.pick_title, self.drop, self.no_file_hint):
-            w.setVisible(not fixed)
+            w.setVisible(not fixed and not contract)
         if fixed and (self._fixed_for != c or not self.lot.items):
             self._fixed_for = c
             self.fill_fixed()
+        if contract and self._contract_for != c:
+            self._contract_for = c
+            self.fill_contract()
+        if contract:
+            self._contract_lines()
         self.drop.setEnabled(bool(c) and not self.busy.isVisible())
-        self.add_po.setVisible(self.lot.multi_po and not fixed)
+        self.add_po.setVisible(self.lot.multi_po and not fixed and not contract)
         self.refresh_dates()
-        if not self.status.text() and c and fixed:
+        if not self.status.text() and c and contract:
+            self.set_status("Kiểm tra số hợp đồng, bấm “Xác nhận số hợp đồng”, rồi “Tra mã để thêm dòng”.", ok=None)
+        elif not self.status.text() and c and fixed:
             self.set_status("Kiểm tra số PO, số lượng, đơn giá rồi bấm “Xác nhận đơn hàng”.", ok=None)
         elif not self.status.text() and c:
             n = len(self.lot.items)
@@ -795,7 +889,7 @@ class InfoStep(QWidget):
 # --------------------------------------------------------------------------- ④ xuất & lưu
 EXPORTS = [("VAT", "Hóa đơn VAT (Bkav)"), ("PKL", "Invoice / Packing List"), ("PXK", "Phiếu xuất kho (Bkav)"),
            ("DNTT", "Đề nghị thanh toán"), ("PLX", "Phụ lục X"), ("BBGH", "Biên bản bàn giao"), ("PO", "Đơn đặt hàng (PO)"), ("BDC", "Bảng đối chiếu hàng hóa"),
-           ("BEST", "Mẫu riêng của Best")]
+           ("SC", "Sale Contract 销售合同"), ("BEST", "Mẫu riêng của Best")]
 
 
 def _lines_html(lines):
@@ -893,6 +987,7 @@ class ExportStep(QWidget):
         self.btns["PO"].setVisible(bool(self.lot.customer) and "PO" in self.lot.core.lot_bundle_modes({"customer": self.lot.customer}))
         self.btns["PLX"].setVisible(self.lot.customer in ("tesa", "kodi", "shirai") or bool(self.lot.customer and "PLX" in self.lot.core.lot_bundle_modes({"customer": self.lot.customer})))
         self.btns["BDC"].setVisible(bool(self.lot.customer) and "BDC" in self.lot.core.lot_bundle_modes({"customer": self.lot.customer}))
+        self.btns["SC"].setVisible(bool(self.lot.customer) and "SC" in self.lot.core.lot_bundle_modes({"customer": self.lot.customer}))
         if self.lot.fixed_order and self.lot.core.is_sunlu(self.lot.profile):  # Sunlu: chỉ đúng bộ của khách (không ĐNTT)
             modes = set(self.lot.core.lot_bundle_modes({"customer": self.lot.customer}))
             for m, b in self.btns.items():

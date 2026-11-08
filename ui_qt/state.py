@@ -101,6 +101,30 @@ class Lot:
         return items
 
     @property
+    def contract_order(self):
+        """Khách không gửi PO (VD Deli): Hồng Thiên lập Sale Contract, nhập số hợp đồng rồi tra mã thêm dòng hàng bằng tay."""
+        return bool(self.customer) and self.customer not in self.core.BUILTIN_CUSTOMERS and self.core.is_contract_order(self.profile)
+
+    def contract_defaults(self):
+        return self.core.lot_contract_defaults(self.store, self.customer, self.form.get("doc_date", ""))
+
+    def confirm_contract(self, po, po_date):
+        """Đặt số hợp đồng (dùng làm số PO của lô) + ngày hợp đồng; gán số này cho các dòng hàng đã có. Ném ValueError nếu thiếu."""
+        po, po_date = str(po or "").strip(), str(po_date or "").strip()
+        if not po:
+            raise ValueError("Chưa có số hợp đồng.")
+        if po_date and not self.core._parse_dmy(po_date):
+            raise ValueError("Ngày hợp đồng phải dạng dd/mm/yyyy.")
+        self.form["po"], self.form["po_date"] = po, po_date
+        self.po_dates = {po: po_date}
+        self.po_touched, self.po_auto = True, False
+        self.schedules, self.selected_dates, self.po_files = None, [], []
+        for it in self.items:
+            it["po"] = po
+        self.read_text = f"Sale Contract {po} ngày {po_date}: thêm dòng hàng bằng nút “Tra mã để thêm dòng”."
+        self.saved = False
+
+    @property
     def multi_po(self):
         """Khách gom nhiều PO một lô (khách đã học)."""
         return bool(self.customer) and self.customer not in self.core.BUILTIN_CUSTOMERS
