@@ -723,3 +723,20 @@ def test_contract_customer_enters_sale_contract_instead_of_po(win, store):
     page.go(3)
     exp = page.step5
     assert exp.btns["SC"].isVisibleTo(exp)
+
+
+def test_catalog_follows_deleted_folder_without_switching_pages(win, store):
+    """Xóa thư mục hồ sơ trên ổ đĩa thì dòng đó trong Danh mục tự biến mất (không cần đổi trang hay mở lại app)."""
+    import shutil
+    d = os.path.join(store.customs_root(), "Arizon", "2026_Thang_11", "2026-11-02")
+    os.makedirs(d)
+    open(os.path.join(d, "308389024810_tokhai.pdf"), "w").write("x")
+    win.nav.setCurrentRow(3)
+    win.catalog.tabs.setCurrentIndex(0)
+    win.catalog.by_month.refresh("2026-11")
+    mv = win.catalog.by_month
+    win.watch_folders()  # lần đầu chỉ ghi nhớ
+    assert any("308389024810" in (mv.table.item(r, 2).text() if mv.table.item(r, 2) else "") for r in range(mv.table.rowCount()))
+    shutil.rmtree(os.path.join(store.customs_root(), "Arizon"))
+    win.watch_folders()
+    assert not any("308389024810" in (mv.table.item(r, 2).text() if mv.table.item(r, 2) else "") for r in range(mv.table.rowCount()))

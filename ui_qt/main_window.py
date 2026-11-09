@@ -120,6 +120,23 @@ class MainWindow(QMainWindow):
         lay.addWidget(right, 1)
         self.setCentralWidget(root)
         self.nav.setCurrentRow(0)
+        self._folder_sig = None
+        self.folder_timer = QTimer(self)  # Danh mục / Tờ khai đang làm theo thư mục THẬT: xóa hay thêm thư mục ngoài Explorer thì danh sách tự đổi
+        self.folder_timer.timeout.connect(self.watch_folders)
+        self.folder_timer.start(3000)
+
+    def watch_folders(self):
+        page = self.pages.currentWidget()
+        if page not in (self.declarations, self.catalog) or not hasattr(page, "refresh"):
+            self._folder_sig = None
+            return
+        try:
+            sig = self.store.folders_signature()
+        except Exception:
+            return
+        if self._folder_sig is not None and sig != self._folder_sig:
+            page.refresh()
+        self._folder_sig = sig
 
     def sync_shared(self):
         try:

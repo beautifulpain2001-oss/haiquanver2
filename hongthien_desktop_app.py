@@ -1816,6 +1816,24 @@ class DedicatedDataStore:
             key = next((k for k, p in PROFILES.items() if self._khach_match(p, cust_label)), None)
         return lot_bundle_modes({"customer": key}) if key in PROFILES else None
 
+    def folders_signature(self):
+        """Dấu hiệu rẻ của cây thư mục HAI_QUAN (chỉ tên thư mục, sâu 5 cấp, kèm số file trong mỗi thư mục lá): đổi khi có thư mục/file bị thêm hay xóa."""
+        sig = []
+
+        def walk(d, depth):
+            try:
+                with os.scandir(d) as it:
+                    entries = list(it)
+            except OSError:
+                return
+            files = sum(1 for e in entries if e.is_file() and not e.name.startswith((".", "~$")))
+            sig.append((d, files))
+            if depth < 5:
+                for e in sorted((e for e in entries if e.is_dir() and not e.name.startswith((".", "_"))), key=lambda e: e.name):
+                    walk(e.path, depth + 1)
+        walk(self.customs_root(), 0)
+        return tuple(sig)
+
     def declaration_folders(self):
         """Các thư mục tờ khai đang có trong HAI_QUAN (quét thật trên ổ đĩa/OneDrive) ghép với thông tin hồ sơ nếu có.
         Mỗi mục: {customer, label, day, path, record (hoặc None), files}. Mới nhất trước. Thư mục bắt đầu bằng _ bị bỏ qua."""
