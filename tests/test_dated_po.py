@@ -340,3 +340,11 @@ def test_code_put_in_name_field_moves_to_code_and_resolves_name(tmp_path):
     assert (row["ma_sp"], row["ten_sp"], row["kg"]) == ("39764-90019-00", ten_kh, 0.005) and keep["ma_sp"] == "X1"
     page = "tesa Purchase Order: 8600228821\n 1 39764‑90019‑00 Ống 136000 EA 265.00 1 EA 36,040,000.00\n"
     assert app.parse_tesa_po_page(page + "@@HDR@@ 8600228821")["code"] == "39764-90019-00"
+
+
+def test_tesa_v2_code_only_in_material_column(tmp_path):
+    """PO Tesa không có dòng 'Your Material No.': mã nằm ở cột Material -> phải vào ô mã hàng, không vào ô tên."""
+    store = app.DedicatedDataStore(base_dir=str(tmp_path / "d"))
+    t = ("tesa Purchase Order: 8600228821\n1 136000 EA 39777-90019-00 Nov 02, 2026 265.00 1 EA 36,040,000.00\nNet Value: VND 36,040,000.00\n@@HDR@@\ntesa Purchase Order: 8600228821\n")
+    _po, ls = app.parse_tesa_po_text(t, store.tesa_items, store)
+    assert ls[0]["ma_sp"] == "39777-90019-00" and ls[0]["ten_sp"] != "39777-90019-00" and "39777-90019-00" in ls[0]["ten_sp"]
