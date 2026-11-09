@@ -1295,7 +1295,8 @@ class DedicatedDataStore:
         cands = self.dt_items_for(cust_key)
         code = str(code or "").strip()
         if code:
-            hit = [x for x in cands if code and code in (str(x.get("ma_hang") or "").strip(), str(x.get("ma_erp") or "").strip(), str(x.get("ma_kh") or "").strip())]
+            hit = [x for x in cands if code and (code in (str(x.get("ma_hang") or "").strip(), str(x.get("ma_erp") or "").strip(), str(x.get("ma_kh") or "").strip())
+                                                 or f"({code})" in str(x.get("ten_kh") or "").replace(" ", ""))]  # mã Tesa nằm trong ngoặc tên theo khách
             if hit:
                 return max(hit, key=lambda x: (bool(x.get("kg")) + bool(x.get("kien")), self.DT_RANK.get(x.get("kg_nguon", ""), 0)))
         nk = clean_str(name)
@@ -1409,6 +1410,9 @@ class DedicatedDataStore:
                 m = re.search(r"(?<![A-Za-z0-9])(\d[A-Z0-9]{9,})(?![A-Za-z0-9])", ten_kh)
                 ma_kh = m.group(1) if m else ""
                 ten_sach = re.sub(r"\s+", " ", re.sub(r"\(?\s*" + re.escape(ma_kh) + r"\s*\)?", " ", ten_kh)).strip() if ma_kh else ten_kh
+                if not ma_kh:  # mã Tesa 39764-90019-00 trong ngoặc: ghi làm mã khách, giữ nguyên tên (tên chuẩn của Tesa có sẵn mã)
+                    m2 = re.search(r"\((\d{5}-\d{5}-\d{2})\)", ten_kh)
+                    ma_kh = m2.group(1) if m2 else ""
                 targets = by_erp.get(erp) or []
                 created = False
                 if not targets:
@@ -2613,8 +2617,10 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
         for r2 in parse_tesa_po_page_v2(p):
             item, name, code, src = resolve_tesa_item(r2, tesa_catalog, getattr(data_store, "erp_catalog", None))
             dt = tesa_erp_entry(data_store, r2["code"], r2["desc"])
-            if dt and dt.get("ten"):  # tên theo danh mục sản phẩm của khách trong ERP (Data tổng) là tên chuẩn
-                name, src = re.sub(r"\s+", " ", str(dt["ten"])).strip(), "erp"
+            if dt and (dt.get("ten") or dt.get("ten_kh")):  # tên theo danh mục sản phẩm của khách trong ERP (Data tổng) là tên chuẩn
+                # mã chưa có trong danh mục riêng của Tesa: dùng cột "Tên sản phẩm theo KH" của ERP
+                erp_name = dt["ten_kh"] if (item is None and dt.get("ten_kh")) else (dt.get("ten") or dt.get("ten_kh"))
+                name, src = re.sub(r"\s+", " ", str(erp_name)).strip(), "erp"
                 code = code or str(dt.get("ma_erp") or dt.get("ma_hang") or "")
                 item = next((x for x in tesa_catalog if x.get("name") == name or (code and x.get("code") == code)), None)
             if not name:  # không có trong danh mục Tesa lẫn ERP: dựng tên từ quy cách trên PO, người dùng bổ sung kg/SL kiện
@@ -2649,8 +2655,8 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
         known = next((x for x in tesa_catalog if x["code"] == res["code"]), None)
         name = known["name"] if known else f"Ống lõi giấy {res['desc']} ({res['code']})"
         dt = tesa_erp_entry(data_store, res["code"], name)
-        if dt and dt.get("ten"):  # tên theo danh mục sản phẩm của khách trong ERP (Data tổng)
-            name = re.sub(r"\s+", " ", str(dt["ten"])).strip()
+        if dt and (dt.get("ten") or dt.get("ten_kh")):  # tên theo danh mục sản phẩm của khách trong ERP (Data tổng); mã chưa có trong danh mục Tesa: tên theo KH
+            name = re.sub(r"\s+", " ", str(dt["ten_kh"] if (known is None and dt.get("ten_kh")) else (dt.get("ten") or dt.get("ten_kh")))).strip()
         mem = data_store.get_item_norm(name) if data_store else None
         div = mem["div"] if (mem and mem.get("div")) else (known["div"] if known else 0)
         kg = mem["kg"] if (mem and mem.get("kg")) else (known["kg"] if known else 0)

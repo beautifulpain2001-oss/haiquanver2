@@ -298,3 +298,30 @@ def test_po_number_from_order_cell_label():
     assert f("Mã đơn đặt hàng/ 订单编号\nYNCGDD2611050001\nNgày giao") == "YNCGDD2611050001"
     assert f("Mã đơn đặt hàng/\n订单编号\n13060706026 Tên hàng") == "13060706026"
     assert f("mã PO: 4500123456") == "4500123456" and f("không có nhãn 13060706026") == ""
+
+
+def test_tesa_new_code_takes_name_from_erp_customer_product_name(tmp_path):
+    """Mã Tesa chưa có trong danh mục riêng: tên lấy từ cột 'Tên sản phẩm theo KH' của ERP (tìm theo mã nằm trong ngoặc tên), kèm mã hàng."""
+    store = app.DedicatedDataStore(base_dir=str(tmp_path / "d"))
+    ten_kh = "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Blue (39764-90019-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550)"
+    store.tesa_items = [x for x in store.tesa_items if x.get("code") != "39764-90019-00"]
+    store.data_tong = [{"khach": "Tesa", "ten": "ống 33.02x2.65x19", "ma_hang": "", "ma_erp": "FG10291-004-00000", "ten_kh": ten_kh, "khach_day_du": "CÔNG TY TNHH TESA SITE HẢI PHÒNG", "kg": 0.005, "kg_nguon": "erp"}]
+    store._dt_cache = {}
+    old = "tesa Purchase Order: 8600229092\n 1 39764-90019-00 Ống 136000 EA 265.00 1 EA 36,040,000.00\n"
+    _po, ls = app.parse_tesa_po_text(old + "@@HDR@@ 8600229092", store.tesa_items, store)
+    assert ls and ls[0]["ten_sp"] == ten_kh and ls[0]["ma_sp"] == "39764-90019-00"
+    assert store.dt_lookup("tesa", "", "39764-90019-00")["ten_kh"] == ten_kh
+
+
+def test_mapping_import_keeps_tesa_code_in_customer_name(tmp_path):
+    import openpyxl
+    store = app.DedicatedDataStore(base_dir=str(tmp_path / "d"))
+    store.data_tong = [{"khach": "Tesa", "ten": "ống 33x2", "ma_erp": "FG10291-004-00000", "kg": 0.005, "kg_nguon": "erp"}]
+    ten_kh = "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Blue (39764-90019-00)- FSC RECYCLED 100%"
+    wb = openpyxl.Workbook()
+    wb.active.append(["Mã sản phẩm gốc", "Tên sản phẩm gốc", "Mã khách hàng", "Tên khách hàng", "Mã sản phẩm theo KH", "Tên sản phẩm theo KH"])
+    wb.active.append(["FG10291-004-00000", "ống 33", "10291", "CÔNG TY TNHH TESA SITE HẢI PHÒNG", "FG10291-004-0", ten_kh])
+    f = tmp_path / "m.xlsx"
+    wb.save(f)
+    store.dt_import_mapping(str(f))
+    assert store.data_tong[0]["ma_kh"] == "39764-90019-00" and store.data_tong[0]["ten_kh"] == ten_kh
