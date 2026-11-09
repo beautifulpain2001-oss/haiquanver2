@@ -155,6 +155,8 @@ class Lot:
                 fixed = self.core.apply_read_rules(self.items, rules)
                 self.core.lot_recalc(self.items, self.customer, self.form.get("tare", ""))
                 self.rule_note = f"Đã đọc theo quy tắc đã học cho khách này (sửa {fixed} dòng)." if fixed else "Đã áp quy tắc đọc đã học cho khách này."
+        self.core.lot_fix_code_names(self.store, self.customer, self.items)  # mã bị điền nhầm vào ô tên -> chuyển sang ô mã
+        self.core.lot_recalc(self.items, self.customer, self.form.get("tare", ""))
         self.core.mark_read(self.items, catalog)
         for it in self.items:  # nhớ file PO và trang của từng dòng để mở đúng chỗ khi cần soát
             it.setdefault("po_file", res.get("path") or "")

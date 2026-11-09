@@ -325,3 +325,18 @@ def test_mapping_import_keeps_tesa_code_in_customer_name(tmp_path):
     wb.save(f)
     store.dt_import_mapping(str(f))
     assert store.data_tong[0]["ma_kh"] == "39764-90019-00" and store.data_tong[0]["ten_kh"] == ten_kh
+
+
+def test_code_put_in_name_field_moves_to_code_and_resolves_name(tmp_path):
+    """OCR đọc gạch nối mã Tesa thành gạch khác -> mã vào ô tên: phải chuyển về ô mã và tra tên theo mã."""
+    store = app.DedicatedDataStore(base_dir=str(tmp_path / "d"))
+    ten_kh = "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Blue (39764-90019-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550)"
+    store.tesa_items = [x for x in store.tesa_items if x.get("code") != "39764-90019-00"]
+    store.data_tong = [{"khach": "Tesa", "ten": "ống 33x2", "ma_erp": "FG10291-004-00000", "ma_kh": "39764-90019-00", "ten_kh": ten_kh, "kg": 0.005, "kg_nguon": "erp"}]
+    store._dt_cache = {}
+    row = {"ma_sp": "", "ten_sp": "39764‑90019‑00", "qty": 136000, "div": 0, "kg": 0}
+    keep = {"ma_sp": "X1", "ten_sp": "Ống A"}
+    assert app.lot_fix_code_names(store, "tesa", [row, keep]) == 1
+    assert (row["ma_sp"], row["ten_sp"], row["kg"]) == ("39764-90019-00", ten_kh, 0.005) and keep["ma_sp"] == "X1"
+    page = "tesa Purchase Order: 8600228821\n 1 39764‑90019‑00 Ống 136000 EA 265.00 1 EA 36,040,000.00\n"
+    assert app.parse_tesa_po_page(page + "@@HDR@@ 8600228821")["code"] == "39764-90019-00"

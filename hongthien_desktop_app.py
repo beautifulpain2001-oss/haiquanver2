@@ -2480,7 +2480,11 @@ def parse_kodi_po_text(text, kodi_catalog, data_store=None, tare_val=1.0):
     return po_no, po_date, lines
 
 
+_DASHES = re.compile("[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\ufe63\uff0d]")
+
+
 def parse_tesa_po_page(t0):
+    t0 = _DASHES.sub("-", t0)  # OCR hay đọc gạch nối của mã Tesa thành gạch khác: không nhận ra mã thì mã bị đẩy vào ô tên
     parts = t0.split("@@HDR@@")
     t = parts[0]
     hdr = parts[1] if len(parts) > 1 else ""
@@ -2550,6 +2554,7 @@ def parse_tesa_po_page_v2(t0):
     """PO Tesa dạng mới: số PO 52xxxxxxxx, dòng 'Item | SL | ĐV | Material | Ngày giao | Đơn giá | Per | Thành tiền' và dòng
     'Your Material No.: …' (mã vật tư của Tesa, hoặc chỉ là quy cách Ø153 x 15 x 1500mm khi không có mã). Trả danh sách
     [{po, code, desc, qty, price, net, check}]; chỉ nhận dòng có SL x đơn giá = thành tiền."""
+    t0 = _DASHES.sub("-", t0)
     t = t0.split("@@HDR@@")[0]
     hdr = t0.split("@@HDR@@")[1] if "@@HDR@@" in t0 else ""
     m = re.search(r"Purchase\s*Order:?\s*(\d{10})", t, re.I) or re.search(r"Purchase\s*Order:?\s*(\d{10})", hdr, re.I)
@@ -7289,6 +7294,28 @@ def best_scan_lines(path, prof, store, po_no, po_date, tare_v):
                  f"PRS0000000000 PackingF001 QC VAI\n")
     _, _, lines = parse_generic_po_text(text, prof, catalog, data_store=store, tare_val=tare_v)
     return lines if len(lines) == len(rows) else []
+
+
+_BARE_CODE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/\u2010-\u2015-]{6,}")
+
+
+def lot_fix_code_names(store, customer, items):
+    """Dòng mà máy điền MÃ hàng vào ô tên (tên chỉ là một mã, ô mã trống): chuyển sang ô mã rồi tra tên/định mức theo mã. Trả số dòng đã sửa."""
+    n = 0
+    for it in items:
+        name = _DASHES.sub("-", str(it.get("ten_sp") or "").strip())
+        if it.get("ma_sp") or " " in name or not _BARE_CODE.fullmatch(name) or not re.search(r"\d", name) or not re.search(r"[-_/.]", name):
+            continue
+        code = name
+        it["ma_sp"] = code
+        hit = lot_lookup_code(store, customer, code)
+        if hit and hit.get("ten_sp"):
+            it["ten_sp"] = re.sub(r"\s+", " ", str(hit["ten_sp"])).strip()
+            for k_hit, k_it in (("div", "div"), ("kg", "kg"), ("hs", "hs"), ("unit", "unit")):
+                if hit.get(k_hit) and not it.get(k_it):
+                    it[k_it] = hit[k_hit]
+        n += 1
+    return n
 
 
 def lot_load_po(store, path, customer, tare_text="", existing_items=None, append=False, po_dates=None, progress=None):
