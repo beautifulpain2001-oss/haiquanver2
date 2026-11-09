@@ -90,5 +90,5 @@ QScrollArea {{ background: transparent; border: none; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}
 QListWidget::item {{ padding: 9px 10px; }}
 QListWidget::item:selected {{ background: {SOFT}; color: {DEEP}; }}
-QTableWidget QPushButton {{ padding: 5px 10px; }}
+QTableWidget QPushButton {{ padding: 2px 10px; min-height: 26px; border-radius: 13px; border-width: 1px; }}
 """

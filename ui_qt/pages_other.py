@@ -29,6 +29,7 @@ def _table(headers, stretch_col=None):
     t.setSelectionMode(QAbstractItemView.SingleSelection)
     t.setEditTriggers(QAbstractItemView.NoEditTriggers)
     t.verticalHeader().hide()
+    t.verticalHeader().setDefaultSectionSize(38)  # đủ cao cho nút trong ô (không bị đè lên dòng khác)
     t.setAlternatingRowColors(True)
     hh = t.horizontalHeader()
     hh.setSectionResizeMode(QHeaderView.ResizeToContents)
