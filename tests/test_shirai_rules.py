@@ -252,7 +252,7 @@ def test_learned_customer_default_bundle_and_arizon_plx(store, tmp_path):
              {"po": "VN-3501-1", "ma_sp": "3609100620001", "ten_sp": "Ống giấy phi 76.2( 3inch) x 5 x62 mm", "qty": 1050, "price": 2954, "amount": 3101700, "unit": "chiếc"}]
     base = {"docDate": "2026-10-16", "hdNo": "00004113", "pxkNo": "00000292", "items": items, "poNumber": "VN-3501-1", "poDates": {}}
     assert app.lot_bundle_modes(dict(base, customer="khgia")) == ["PKL", "VAT", "PXK"]
-    assert app.lot_bundle_modes(dict(base, customer="arz")) == ["PKL", "VAT", "PXK", "PLX"]
+    assert app.lot_bundle_modes(dict(base, customer="arz")) == ["PKL", "VAT", "PXK", "PLX", "M22"]
     assert "DNTT" in app.lot_bundle_modes(dict(base, customer="kodi")) and "CHECK" in app.lot_bundle_modes(dict(base, customer="tesa"))  # khách cũ giữ nguyên
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
@@ -307,5 +307,5 @@ def test_arizon_ids_vat_and_pxk_follow_customer_sample(store):
 def test_arizon_always_has_plx_even_with_other_extra_docs(store):
     store.save_learned_customer("arz2", {"name": "CÔNG TY TNHH CÔNG NGHỆ ARIZON VIỆT NAM", "unit": "Chiếc", "addr": "BN", "mst": "0100000015", "extraDocs": "DNTT"},
                                 [{"name": "Ống giấy 40 x 3 x 500mm", "code": "A1", "unit": "Chiếc", "price": 1000, "div": 10, "kg": 0.5}])
-    assert app.customer_extra_docs(app.PROFILES["arz2"]) == ["PLX", "DNTT"]
-    assert app.lot_bundle_modes({"customer": "arz2"}) == ["PKL", "VAT", "PXK", "PLX", "DNTT"]
+    assert app.customer_extra_docs(app.PROFILES["arz2"]) == ["PLX", "DNTT", "M22"]
+    assert app.lot_bundle_modes({"customer": "arz2"}) == ["PKL", "VAT", "PXK", "PLX", "DNTT", "M22"]

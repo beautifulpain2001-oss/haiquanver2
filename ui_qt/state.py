@@ -30,7 +30,7 @@ class Lot:
         self.files = []  # mọi file đã xuất trong lô này, để hiển thị
         self.saved = False
         self.skip_h = False  # Kodi: Invoice không lấy cột Thành Tiền
-        self.form = {"doc_date": datetime.date.today().strftime("%Y-%m-%d"), "po": "", "po_date": "", "pxk": "", "hd": "", "tk": ""}
+        self.form = {"doc_date": datetime.date.today().strftime("%Y-%m-%d"), "po": "", "po_date": "", "pxk": "", "hd": "", "tk": "", "tk_nhap": ""}
         if customer:
             self.apply_defaults()
 
@@ -393,6 +393,8 @@ class Lot:
             warns.append("Chưa nhập số PO.")
         if not str(self.form.get("pxk", "")).strip():
             warns.append("Chưa nhập số PXK (file Invoice sẽ dùng số tạm).")
+        if self.core.is_arizon(self.profile) and not str(self.form.get("tk_nhap", "")).strip():
+            warns.append("Chưa nhập số tờ khai nhập khẩu của khách: Mẫu số 22 sẽ để dấu chấm ở chỗ đó để điền tay.")
         warns += [w for w in self.core.check_lot(self.record()) if w not in warns]
         note = str(self.profile.get("note") or "").strip()
         if note:  # lưu ý đặc thù của khách (ghi ở trang Khách hàng) luôn nhắc ở bước xuất
@@ -437,7 +439,7 @@ class Lot:
         self.reset(rec.get("customer") or "kodi")
         g = lambda k, d="": rec.get(k, d) or d
         self.form.update(doc_date=g("docDate", self.form["doc_date"]), po=g("poNumber"), po_date=g("poDate"), pxk=g("pxkNo"),
-                         hd=g("hdNo"), tk=g("tkNo"), luong=g("luong", "Xanh"), xe=g("xeNo", self.form.get("xe", "")),
+                         hd=g("hdNo"), tk=g("tkNo"), tk_nhap=g("tkNhap"), luong=g("luong", "Xanh"), xe=g("xeNo", self.form.get("xe", "")),
                          driver=g("driver", self.form.get("driver", "")), ldd=g("lddSeq", self.form.get("ldd", "")))
         if rec.get("payDays"):
             self.form["pay_days"] = str(rec["payDays"])

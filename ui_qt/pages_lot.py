@@ -824,7 +824,8 @@ class InfoStep(QWidget):
         self.groups = {}
         spec = [
             ("doc", "Chứng từ", [("po", "Số PO"), ("po_date", "Ngày PO (dd/mm/yyyy)"), ("doc_date", "Ngày chứng từ (yyyy-mm-dd)"),
-                                 ("pxk", "Số PXK (phiếu xuất kho)"), ("hd", "Số hóa đơn VAT"), ("tk", "Số tờ khai hải quan")]),
+                                 ("pxk", "Số PXK (phiếu xuất kho)"), ("hd", "Số hóa đơn VAT"), ("tk", "Số tờ khai hải quan"),
+                                 ("tk_nhap", "Số tờ khai nhập khẩu của khách (Mẫu số 22 Arizon)")]),
             ("ship", "Vận chuyển", [("xe", "Biển số xe"), ("driver", "Họ tên lái xe"), ("ldd", "Số lệnh điều động"), ("tare", "Bì cộng thêm mỗi dòng (kg, vd 0.02; hoặc % như 0.08%)")]),
             ("pay", "Thanh toán và giao hàng", [("pay_days", "Hạn thanh toán (số ngày)"), ("delivery", "Ngày giao phiếu giao hàng (yyyy-mm-dd, để trống = ngày chứng từ + 1)")]),
         ]
@@ -881,6 +882,9 @@ class InfoStep(QWidget):
         for k, e in self.edits.items():
             e.setText(str(self.lot.form.get(k, "")))
         self.groups["pay"].setVisible(self.lot.is_best)
+        arz = bool(self.lot.customer) and self.lot.core.is_arizon(self.lot.profile)
+        self.edits["tk_nhap"].setVisible(arz)
+        self.edits["tk_nhap"].parentWidget().layout().labelForField(self.edits["tk_nhap"]).setVisible(arz)
         self.skip_h.setVisible(self.lot.customer == "kodi")
         self.skip_h.setChecked(self.lot.skip_h)
         self.mark_missing()
@@ -889,7 +893,7 @@ class InfoStep(QWidget):
 # --------------------------------------------------------------------------- ④ xuất & lưu
 EXPORTS = [("VAT", "Hóa đơn VAT (Bkav)"), ("PKL", "Invoice / Packing List"), ("PXK", "Phiếu xuất kho (Bkav)"),
            ("DNTT", "Đề nghị thanh toán"), ("PLX", "Phụ lục X"), ("BBGH", "Biên bản bàn giao"), ("PO", "Đơn đặt hàng (PO)"), ("BDC", "Bảng đối chiếu hàng hóa"),
-           ("SC", "Sale Contract 销售合同"), ("BEST", "Mẫu riêng của Best")]
+           ("SC", "Sale Contract 销售合同"), ("M22", "Mẫu số 22 (nhập khẩu tại chỗ)"), ("BKLS", "Bảng kê lâm sản (pallet)"), ("BEST", "Mẫu riêng của Best")]
 
 
 def _lines_html(lines):
@@ -988,6 +992,9 @@ class ExportStep(QWidget):
         self.btns["PLX"].setVisible(self.lot.customer in ("tesa", "kodi", "shirai") or bool(self.lot.customer and "PLX" in self.lot.core.lot_bundle_modes({"customer": self.lot.customer})))
         self.btns["BDC"].setVisible(bool(self.lot.customer) and "BDC" in self.lot.core.lot_bundle_modes({"customer": self.lot.customer}))
         self.btns["SC"].setVisible(bool(self.lot.customer) and "SC" in self.lot.core.lot_bundle_modes({"customer": self.lot.customer}))
+        modes_now = set(self.lot.core.lot_bundle_modes({"customer": self.lot.customer, "items": self.lot.items})) if self.lot.customer else set()
+        self.btns["M22"].setVisible("M22" in modes_now)
+        self.btns["BKLS"].setVisible("BKLS" in modes_now)
         if self.lot.fixed_order and self.lot.core.is_sunlu(self.lot.profile):  # Sunlu: chỉ đúng bộ của khách (không ĐNTT)
             modes = set(self.lot.core.lot_bundle_modes({"customer": self.lot.customer}))
             for m, b in self.btns.items():

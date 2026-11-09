@@ -3601,7 +3601,7 @@ def build_dntt_sheet(wb, rec, sheet_name="DNTT"):
     return ws
 
 
-EXTRA_DOC_CODES = ("PLX", "DNTT", "BBGH", "DCCN", "PO", "BDC", "SC")
+EXTRA_DOC_CODES = ("PLX", "DNTT", "BBGH", "DCCN", "PO", "BDC", "SC", "M22")
 
 
 def customer_extra_docs(prof):
@@ -3612,7 +3612,14 @@ def customer_extra_docs(prof):
     codes = [c for c in re.split(r"[,;\s]+", raw.upper()) if c in EXTRA_DOC_CODES]
     if "ARIZON" in str((prof or {}).get("name") or "").upper() and "PLX" not in codes:
         codes = ["PLX"] + codes  # Arizon luôn có Phụ lục X, kể cả khi mục "chứng từ làm thêm" đã ghi chứng từ khác
+        if "M22" not in codes:
+            codes.append("M22")  # và Mẫu số 22 (thông báo hoàn thành thủ tục nhập khẩu tại chỗ)
     return codes
+
+
+def is_pallet_item(it):
+    """Dòng hàng là pallet gỗ (HS 4415 hoặc tên có 'pallet'): lô có hàng này phải kèm bảng kê lâm sản."""
+    return str(it.get("hs") or "").startswith("4415") or "PALLET" in strip_accents_upper(str(it.get("ten_sp") or it.get("name") or ""))
 
 
 def code_name_style(prof):
@@ -6598,6 +6605,7 @@ def parse_generic_po_text(text, profile, catalog_items, data_store=None, tare_va
                     refs[ref_key] = re.sub(r"^P[a-z]+ing", "Packing", refs[ref_key])
                 ref_spans.append(m.span())
         loose = _loose_po_line(raw, catalog_items, ref_spans) if profile.get("ocrLoose") else None
+        conf = None
         if loose:
             known, qty, price = loose
         else:
@@ -6621,11 +6629,14 @@ def parse_generic_po_text(text, profile, catalog_items, data_store=None, tare_va
                         cand.append((-conf, abs(p - (it.get("price") or 0)) / max(p, 1), it, q, p))
                 if not cand:
                     continue
-                _, _, known, qty, price = min(cand, key=lambda c: c[:2])
+                nconf, _, known, qty, price = min(cand, key=lambda c: c[:2])
+                conf = -nconf
             else:
-                qty, price, _ = _qty_price_from_numbers(nums, known.get("price") or 0)
+                qty, price, conf = _qty_price_from_numbers(nums, known.get("price") or 0)
         if qty <= 0:
             continue
+        if conf == 0 and lines and lines[-1]["ten_sp"] == known["name"]:
+            continue  # PO song ngữ: dòng chữ Hán/OCR lặp lại quy cách của dòng ngay trên, không có giá hay thành tiền -> không phải dòng hàng mới
         qty = int(qty) if float(qty).is_integer() else qty
         mem = data_store.get_item_norm(known["name"]) if data_store else None
         div = (mem or {}).get("div") or known.get("div") or profile.get("defaultDiv") or 0
@@ -6713,6 +6724,7 @@ def lot_build_record(store, form, items):
         "pxkNo": g("pxk"),
         "hdNo": g("hd"),
         "tkNo": g("tk"),
+        "tkNhap": g("tk_nhap"),
         "luong": g("luong"),
         "xeNo": g("xe"),
         "driver": g("driver"),
@@ -6786,6 +6798,10 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
         raise ValueError("Khách này chưa đặt bộ mẫu 'best'. Thêm khách bằng nút 'Thêm Khách Mới' và chọn bộ mẫu best.")
     if mode == "SO" and rec["customer"] != "shirai":
         raise ValueError("Phiếu SO chỉ dùng cho khách Shirai.")
+    if mode == "M22" and not is_arizon(PROFILES.get(rec["customer"], {})):
+        raise ValueError("Mẫu số 22 chỉ dùng cho khách Arizon.")
+    if mode == "BKLS" and not any(is_pallet_item(x) for x in rec["items"]):
+        raise ValueError("Bảng kê lâm sản chỉ dùng cho lô hàng pallet; lô hàng ống không có.")
     folder = store.get_record_folder_path(rec)
     work_dir = folder  # file do phần mềm tạo nằm thẳng trong thư mục ngày, cùng scan/PDF/file hải quan
     os.makedirs(work_dir, exist_ok=True)
@@ -6799,6 +6815,19 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
     s_key = rec.get("scheduleKey", "30.10")
     if mode.startswith("R:"):  # mẫu riêng của khách (Word/Excel): điền ô {{...}} rồi xuất lại đúng định dạng file mẫu
         return lot_export_custom_form(store, rec, mode[2:], work_dir, s_key)
+    if mode in ("M22", "BKLS"):  # hai mẫu Word đúng nguyên bản, chỉ thay số liệu (mau_word_forms)
+        import mau_word_forms
+        d = _iso_to_date(rec.get("docDate"))
+        if mode == "M22":
+            data, fname = mau_word_forms.m22_arizon(d, rec.get("tkNo"), rec.get("tkNhap")), f"MauSo22_{rec['customer']}_{s_key}.docx"
+        else:
+            pal = [{"code": x.get("ma_sp"), "qty": float(x.get("qty") or 0), "weight": float(x.get("net") or 0) or float(x.get("qty") or 0) * float(x.get("kg") or 0)}
+                   for x in rec["items"] if is_pallet_item(x)]
+            data, fname = mau_word_forms.bkls_tesa(d, pal), f"BangKeLamSan_{rec['customer']}_{s_key}.docx"
+        out_path = os.path.join(work_dir, fname)
+        with open(out_path, "wb") as f:
+            f.write(data)
+        return {"path": out_path, "fname": fname, "problems": [], "dsh": None}
     form = store.form_override(rec["customer"], mode) if mode in FORM_MODES else None
     if form:  # khách đã sửa form của chứng từ này ở Kho mẫu: xuất theo form đó thay cho mẫu dựng sẵn
         return lot_export_form_file(rec, form, f"{FORM_FILE_PREFIX[mode]}_{rec['customer']}_{s_key}", work_dir)
@@ -6886,7 +6915,7 @@ LOT_MODE_LABELS = {
     "SO": "Phiếu SO", "PKL": "Invoice / Packing List", "PACK": "Chi tiết đóng gói", "VAT": "Hóa đơn VAT", "PXK": "Phiếu xuất kho",
     "PLX": "Phụ lục X", "PGH": "Phiếu giao hàng", "DCCN": "Đối chiếu công nợ", "DNTT": "Đề nghị thanh toán",
     "CHECK": "Kiểm tra chéo", "BBGH": "Biên bản bàn giao", "PO": "Đơn đặt hàng (PO)",
-    "BDC": "Bảng đối chiếu hàng hóa", "SC": "Sale Contract 销售合同",
+    "BDC": "Bảng đối chiếu hàng hóa", "SC": "Sale Contract 销售合同", "M22": "Mẫu số 22 (nhập khẩu tại chỗ)", "BKLS": "Bảng kê lâm sản (pallet)",
 }
 
 
@@ -6906,6 +6935,8 @@ def lot_bundle_modes(rec):
     modes += ["VAT", "PXK"]
     if cust == "tesa":
         modes.append("PLX")
+        if any(is_pallet_item(x) for x in rec.get("items") or []):
+            modes.append("BKLS")  # bảng kê lâm sản chỉ có khi kê khai hàng pallet; hàng ống không có
     if best:
         modes += ["PGH", "DCCN"]
     modes.append("DNTT")

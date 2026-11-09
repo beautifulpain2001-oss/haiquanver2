@@ -212,3 +212,37 @@ def test_bkav_vat_and_pxk_merge_identical_lines(store):
         first = 6 if mode == "VAT" else 3
         qtys = [ws[f"{col_qty}{r}"].value for r in range(first, first + 5) if ws[f"{col_qty}{r}"].value is not None]
         assert qtys == [160, 5, 7], (mode, qtys)
+
+
+def test_m22_and_lam_san_forms_only_when_due(qapp, store, tmp_path):
+    """Arizon có Mẫu số 22 (điền số tờ khai); Tesa chỉ có bảng kê lâm sản khi lô có pallet."""
+    import mau_rieng
+    store.save_learned_customer("arz22", {"name": "CÔNG TY TNHH CÔNG NGHỆ ARIZON (VIỆT NAM)", "label": "Arz22", "mst": "0901155231", "addr": "HY", "unit": "Chiếc"},
+                                [{"name": "Ống A", "code": "A1", "price": 10, "div": 50, "kg": 0.1}])
+    item = {"stt": 1, "po": "P", "ma_sp": "A1", "ten_sp": "Ống A", "unit": "chiếc", "qty": 100, "price": 10, "amount": 1000, "div": 50, "kg": 0.1, "kien": 2, "net": 10.0, "gross": 11.0}
+    rec = dict(make_rec(store, "arz22", [item]), tkNo="308800000001", tkNhap="108500000002", docDate="2026-11-09")
+    assert "M22" in app.lot_bundle_modes(rec)
+    res = app.lot_export(store, rec, "M22")
+    text = mau_rieng.preview("docx", open(res["path"], "rb").read())["text"]
+    assert "308800000001" in text and "108500000002" in text and "9/11/2026" in text and "308829221060" not in text
+    # Tesa: ống không có bảng kê lâm sản, pallet thì có
+    tube = dict(item, ma_sp="X", ten_sp="Ống lõi giấy phi 76")
+    pallet = dict(item, ma_sp="39776-90000-00", ten_sp="Pallet bằng gỗ", unit="cái", qty=180, kg=21.0, net=3780.0, gross=3780.0, hs="44152000")
+    assert "BKLS" not in app.lot_bundle_modes(dict(make_rec(store, "tesa", [tube]), items=[tube]))
+    rec_p = dict(make_rec(store, "tesa", [pallet]), docDate="2026-11-02")
+    assert "BKLS" in app.lot_bundle_modes(rec_p)
+    with pytest.raises(ValueError, match="pallet"):
+        app.lot_export(store, dict(rec_p, items=[tube]), "BKLS")
+    res = app.lot_export(store, rec_p, "BKLS")
+    text = mau_rieng.preview("docx", open(res["path"], "rb").read())["text"]
+    assert "3.780" in text and "180" in text and "2026.02.11" in text and "7.560" not in text
+
+
+def test_bilingual_po_duplicate_line_is_not_a_new_item(store):
+    """PO song ngữ: dòng chữ Hán OCR lặp lại quy cách (không có giá/thành tiền) không được đọc thành dòng hàng thứ ba."""
+    cat = [{"name": "Ống lõi giấy 78 x 6 x 1002mm", "code": "", "price": 32023, "div": 5, "kg": 1.366, "unit": "Cái"},
+           {"name": "Ống lõi giấy 78 x 6 x 1030mm", "code": "", "price": 33000, "div": 5, "kg": 0, "unit": "Cái"}]
+    text = ("Số 28102026-01 HT-SS\nSTT Tên Hàng DVT\nOng lõi giấy quy cách Cái\n01 | 78*6*1002mm 18 2000 32.023 64.046.000\n"
+            "Z4 BLAS 78%6*1002mm__|\nÔng lõi giấy quy cách Cái\n02 | 78*6*1030mm ez 200 33.000 6.600.000 | mau đã\nRRS BF ALA 78*6*1030mm h-\n")
+    _po, _d, lines = app.parse_generic_po_text(text, {"po_pattern": r"\d{8}-\d{2}\s*HT-SS", "unit": "cái"}, cat)
+    assert [(x["ten_sp"][-6:], x["qty"], x["price"]) for x in lines] == [("1002mm", 2000, 32023), ("1030mm", 200, 33000)]
