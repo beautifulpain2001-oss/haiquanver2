@@ -369,6 +369,7 @@ class Lot:
 
     # ---- hồ sơ, kiểm tra, xuất, lưu -------------------------------------------
     def record(self):
+        self.core.lot_fix_code_names(self.store, self.customer, self.items)  # dòng đã đọc từ bản cũ có tên = mã: sửa trước khi xuất
         self.normalize()
         self.core.lot_recalc(self.items, self.customer, self.form.get("tare", ""))  # cả bì = tịnh + bì cộng thêm mỗi dòng đang nhập ở bước ④, cho mọi invoice
         form = dict(self.form, customer=self.customer, schedule="", po_dates=self.po_dates, record_id=self.record_id, po_files=self.po_files)

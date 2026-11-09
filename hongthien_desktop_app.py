@@ -2624,7 +2624,7 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
             dt = tesa_erp_entry(data_store, r2["code"], r2["desc"])
             if dt and (dt.get("ten") or dt.get("ten_kh")):  # tên theo danh mục sản phẩm của khách trong ERP (Data tổng) là tên chuẩn
                 # mã chưa có trong danh mục riêng của Tesa: dùng cột "Tên sản phẩm theo KH" của ERP
-                erp_name = dt["ten_kh"] if (item is None and dt.get("ten_kh")) else (dt.get("ten") or dt.get("ten_kh"))
+                erp_name = dt.get("ten_kh") or dt.get("ten")  # tên hàng hóa = "Tên sản phẩm theo KH" của ERP (tên Tesa dùng trên chứng từ); chưa có thì tên ERP
                 name, src = re.sub(r"\s+", " ", str(erp_name)).strip(), "erp"
                 code = code or str(dt.get("ma_erp") or dt.get("ma_hang") or "")
                 item = next((x for x in tesa_catalog if x.get("name") == name or (code and x.get("code") == code)), None)
@@ -2663,7 +2663,7 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
         name = known["name"] if known else f"Ống lõi giấy {res['desc']} ({res['code']})"
         dt = tesa_erp_entry(data_store, res["code"], name)
         if dt and (dt.get("ten") or dt.get("ten_kh")):  # tên theo danh mục sản phẩm của khách trong ERP (Data tổng); mã chưa có trong danh mục Tesa: tên theo KH
-            name = re.sub(r"\s+", " ", str(dt["ten_kh"] if (known is None and dt.get("ten_kh")) else (dt.get("ten") or dt.get("ten_kh")))).strip()
+            name = re.sub(r"\s+", " ", str(dt.get("ten_kh") or dt.get("ten"))).strip()
         mem = data_store.get_item_norm(name) if data_store else None
         div = mem["div"] if (mem and mem.get("div")) else (known["div"] if known else 0)
         kg = mem["kg"] if (mem and mem.get("kg")) else (known["kg"] if known else 0)
@@ -7305,14 +7305,20 @@ def lot_fix_code_names(store, customer, items):
     """Dòng mà máy điền MÃ hàng vào ô tên (tên chỉ là một mã, ô mã trống): chuyển sang ô mã rồi tra tên/định mức theo mã. Trả số dòng đã sửa."""
     n = 0
     for it in items:
+        hq = _DASHES.sub("-", str(it.get("ten_hq") or "").strip())
+        if hq and " " not in hq and _BARE_CODE.fullmatch(hq) and re.search(r"\d", hq) and re.search(r"[-_/.]", hq) and str(it.get("ten_sp") or "").strip() != hq:
+            it["ten_hq"] = ""  # tên khai hải quan chỉ là mã (do bản cũ ghi nhầm): bỏ để chứng từ dùng tên hàng hóa
         name = _DASHES.sub("-", str(it.get("ten_sp") or "").strip())
-        if it.get("ma_sp") or " " in name or not _BARE_CODE.fullmatch(name) or not re.search(r"\d", name) or not re.search(r"[-_/.]", name):
+        if (it.get("ma_sp") and _DASHES.sub("-", str(it["ma_sp"]).strip()) != name) or " " in name or not _BARE_CODE.fullmatch(name) or not re.search(r"\d", name) \
+                or not re.search(r"[-_/.]", name):
             continue
         code = name
         it["ma_sp"] = code
         hit = lot_lookup_code(store, customer, code)
         if hit and hit.get("ten_sp"):
             it["ten_sp"] = re.sub(r"\s+", " ", str(hit["ten_sp"])).strip()
+            if _DASHES.sub("-", str(it.get("ten_hq") or "").strip()) in ("", code):
+                it["ten_hq"] = ""
             for k_hit, k_it in (("div", "div"), ("kg", "kg"), ("hs", "hs"), ("unit", "unit")):
                 if hit.get(k_hit) and not it.get(k_it):
                     it[k_it] = hit[k_hit]

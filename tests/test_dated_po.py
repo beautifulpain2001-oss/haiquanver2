@@ -361,3 +361,15 @@ def test_tesa_line_with_complete_info_is_not_flagged(tmp_path):
     t = "tesa Purchase Order: 8600228821\n10 136,000 PC 39764-90019-00 Nov 26, 2026 26,500.00 100 PC 36,040,000.00\n@@HDR@@\ntesa Purchase Order: 8600228821\n"
     _po, ls = app.parse_tesa_po_text(t, store.tesa_items, store)
     assert ls[0]["ten_sp"] == ten_kh and ls[0]["read"] == "ok" and ls[0]["read_note"] == ""
+
+
+def test_tesa_name_prefers_customer_product_name_and_old_code_names_are_fixed(tmp_path):
+    store = app.DedicatedDataStore(base_dir=str(tmp_path / "d"))
+    ten_kh = "Ống lõi giấy phi 33.2 x 2.65 x 19mm_51036 (39777-90019-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550)"
+    store.data_tong = [{"khach": "Tesa", "ten": "ống 33.02x2.65x19, T.tem Tesa 51036 đỏ (39777-90019-00)", "ma_erp": "FG10291-001-00000", "ma_kh": "39777-90019-00", "ten_kh": ten_kh, "kg": 0.005, "kg_nguon": "erp"}]
+    store._dt_cache = {}
+    t = "tesa Purchase Order: 8600229092\n10 136,000 PC 39777-90019-00 Dec 16, 2026 26,500.00 100 PC 36,040,000.00\n@@HDR@@\ntesa Purchase Order: 8600229092\n"
+    _po, ls = app.parse_tesa_po_text(t, store.tesa_items, store)
+    assert ls[0]["ten_sp"] == ten_kh
+    old = {"ma_sp": "39777-90019-00", "ten_sp": "39777-90019-00", "qty": 1, "div": 0, "kg": 0}  # lô lưu từ bản cũ: tên = mã
+    assert app.lot_fix_code_names(store, "tesa", [old]) == 1 and old["ten_sp"] == ten_kh
