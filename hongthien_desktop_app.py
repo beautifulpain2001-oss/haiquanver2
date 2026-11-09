@@ -2581,7 +2581,7 @@ def parse_tesa_po_page_v2(t0):
                 break
             if _TESA_ROW2.match(nxt):
                 break
-        code_m = re.search(r"\b\d{5}-\d{5}-\d{2}\b", mat_no) or re.search(r"\b\d{5}-\d{5}-\d{2}\b", r.group("mat"))  # PO không có dòng 'Your Material No.': mã nằm ở cột Material
+        code_m = re.search(r"\b\d{5}-\d{5}-\d{2}\b", r.group("mat")) or re.search(r"\b\d{5}-\d{5}-\d{2}\b", mat_no)  # mã Tesa nằm ngay ở cột Material của dòng hàng (trang 2); dòng 'Your Material No.' chỉ là dự phòng cho PO dạng mới
         out.append({"po": po, "code": code_m.group(0) if code_m else "", "desc": mat_no or r.group("mat").strip(),
                     "qty": int(qty) if qty == int(qty) else qty, "price": price, "net": net,
                     "check": abs(qty * price - net) <= max(1.0, net * 1e-6)})
