@@ -740,3 +740,21 @@ def test_catalog_follows_deleted_folder_without_switching_pages(win, store):
     shutil.rmtree(os.path.join(store.customs_root(), "Arizon"))
     win.watch_folders()
     assert not any("308389024810" in (mv.table.item(r, 2).text() if mv.table.item(r, 2) else "") for r in range(mv.table.rowCount()))
+
+
+def test_invoice_pxk_and_declaration_numbers_are_read_from_file_names(win, store):
+    """Số hóa đơn (C26TAA-00004591-…), số PXK (C26NAA-00000320-…) và số tờ khai (…_309138556000) lấy từ tên file trong thư mục thật khi hồ sơ chưa ghi."""
+    rec = add_record(store, "kodi", "2026-11-04", tk="", po="PO-TEN-FILE")
+    rec.update(hdNo="", pxkNo="", tkNo="")
+    folder = store.get_record_folder_path(rec)
+    for n in ("C26NAA-00000320-YZ667I387H1-DPH.pdf", "C26TAA-00004591-PZ668MD4AFA-DPH.pdf", "ToKhaiHQ7X_QDTQ_309138556000 320.xls", "invoice_arizon_00000320_04.11.xlsx"):
+        open(os.path.join(folder, n), "w").write("x")
+    facts = store.folder_facts(rec)
+    assert (facts["hd"], facts["pxk"], facts["tk"]) == ("00004591", "00000320", "309138556000")
+    win.nav.setCurrentRow(2)
+    win.records.refresh()
+    row = [[win.records.table.item(r, c).text() for c in range(9)] for r in range(win.records.table.rowCount())]
+    mine = next(x for x in row if x[2] == "PO-TEN-FILE")
+    assert (mine[3], mine[4], mine[5]) == ("00000320", "00004591", "309138556000")
+    ent = next(e for e in store.declaration_entries() if e.get("_path") == folder)
+    assert (ent["hdNo"], ent["pxkNo"], ent["tkNo"]) == ("00004591", "00000320", "309138556000")

@@ -1798,6 +1798,15 @@ class DedicatedDataStore:
             m = re.search(r"(?<!\d)(\d{12})(?!\d)", n)
             if m and not tk:
                 tk = m.group(1)
+        hd = pxk = ""
+        for n in other:  # số hóa đơn / số PXK đọc từ tên file PDF Bkav: C26TAA-00004591-… (hóa đơn), C26NAA-00000320-… (PXK), hoặc 'HĐ 4591', 'PXK 320'
+            base = os.path.splitext(n)[0]
+            m = re.search(r"C\d{2}T[A-Z]{2}[-_ ]?(\d{3,8})", base, re.I) or re.match(r"h[đd][\s_-]*(\d{3,8})(?!\d)", base, re.I)
+            if m and not hd:
+                hd = m.group(1)
+            m = re.search(r"C\d{2}N[A-Z]{2}[-_ ]?(\d{3,8})", base, re.I) or re.match(r"pxk[\s_-]*(\d{3,8})(?!\d)", base, re.I)
+            if m and not pxk:
+                pxk = m.group(1)
         missing = []
         if modes:
             made, out = cls.folder_checklist(modes)
@@ -1807,7 +1816,15 @@ class DedicatedDataStore:
         else:
             head = f"Đã khai · số tờ khai {tk} · " if tk else ""
             status = head + ("Đủ bộ hồ sơ" if modes and not missing else (f"Thiếu: {', '.join(missing[:4])}{'…' if len(missing) > 4 else ''}" if missing else f"Đã chuẩn bị {len(prepared)} chứng từ"))
-        return {"prepared": prepared, "other": other, "have": sorted(have), "missing": missing, "tk": tk, "status": status}
+        return {"prepared": prepared, "other": other, "have": sorted(have), "missing": missing, "tk": tk, "hd": hd, "pxk": pxk, "status": status}
+
+    def folder_facts(self, rec):
+        """Số tờ khai / số hóa đơn / số PXK đọc từ tên file trong thư mục thật của hồ sơ ({} nếu chưa có thư mục)."""
+        try:
+            path = self.get_record_folder_path(rec)
+            return self.folder_activity(path) if os.path.isdir(path) else {}
+        except Exception:
+            return {}
 
     def _modes_for_folder(self, cust_label, rec):
         """Các chứng từ thuộc bộ của khách (theo hồ sơ nếu có, không thì theo tên thư mục khách); None nếu không nhận ra khách."""
@@ -1989,7 +2006,8 @@ class DedicatedDataStore:
             mon = next((re.match(r"(\d{4})_Thang_(\d{2})", x) for x in parts if re.match(r"\d{4}_Thang_\d{2}", x)), None)
             day = rec.get("docDate") or self.guess_date(o["day"], mon.group(1) if mon else None) or (f"{mon.group(1)}-{mon.group(2)}-01" if mon else "")
             rec.update({"customer": key, "_label": PROFILES[key].get("label", key) if key in PROFILES else o["customer"], "_dir": o["customer"],
-                        "docDate": day, "tkNo": rec.get("tkNo") or o.get("tk") or "", "_path": o["path"], "_status": o.get("status", "")})
+                        "docDate": day, "tkNo": rec.get("tkNo") or o.get("tk") or "", "hdNo": rec.get("hdNo") or o.get("hd") or "",
+                        "pxkNo": rec.get("pxkNo") or o.get("pxk") or "", "_path": o["path"], "_status": o.get("status", "")})
             out.append(rec)
         out.sort(key=lambda r: (str(r.get("docDate") or ""), r["_path"]), reverse=True)
         return out

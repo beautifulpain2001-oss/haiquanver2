@@ -539,8 +539,9 @@ class RecordsPage(_Page):
                 continue
             files = r.get("files") or {}
             label = self.core.PROFILES.get(r.get("customer", ""), {}).get("label", r.get("customer", ""))
-            rows.append([label, r.get("docDate", ""), r.get("poNumber", ""), r.get("pxkNo") or "Chờ cấp", r.get("hdNo") or "Chờ ký",
-                         r.get("tkNo") or "Chưa khai", widgets.fmt_num(r.get("totalAmount")),
+            facts = self.store.folder_facts(r)  # số HĐ, PXK, tờ khai đọc từ tên file trong thư mục thật nếu hồ sơ chưa ghi
+            rows.append([label, r.get("docDate", ""), r.get("poNumber", ""), r.get("pxkNo") or facts.get("pxk") or "Chờ cấp", r.get("hdNo") or facts.get("hd") or "Chờ ký",
+                         r.get("tkNo") or facts.get("tk") or "Chưa khai", widgets.fmt_num(r.get("totalAmount")),
                          f"{r.get('totalGross', 0):,.1f} / {r.get('totalNet', 0):,.1f}", f"{sum(1 for k, _, _ in slots if files.get(k))}/{len(slots)}"])
             self.shown.append(r)
         _fill(self.table, rows, right=(6, 7))
