@@ -290,7 +290,7 @@ def test_tesa_name_comes_from_erp_product_list_of_customer(tmp_path):
     r = app.parse_tesa_po_page(old + "@@HDR@@ 8600123456")
     if r:
         _po, ls = app.parse_tesa_po_text(old + "@@HDR@@ 8600123456", store.tesa_items, store)
-        assert ls and ls[0]["ten_sp"] == "Ống lõi giấy ERP 76.5x3x1390 Blue"
+        assert ls and ls[0]["ten_sp"] == app.tesa_names_for("39753-91390-00")[1]  # mã có trong bảng tên chuẩn của Tesa: bảng này thắng tên ERP
 
 
 def test_po_number_from_order_cell_label():
@@ -375,9 +375,14 @@ def test_tesa_name_prefers_customer_product_name_and_old_code_names_are_fixed(tm
     assert app.lot_fix_code_names(store, "tesa", [old]) == 1 and old["ten_sp"] == ten_kh
 
 
-def test_tesa_name_missing_fsc_suffix_is_completed():
-    short = "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Blue (39764-90019-00)"
-    full = short + "- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550)"
-    assert app.tesa_full_name(short) == full and app.tesa_full_name(full) == full and app.tesa_full_name("Ống lõi giấy phi 153 x 15 x 1500mm") == "Ống lõi giấy phi 153 x 15 x 1500mm"
-    row = {"ma_sp": "39764-90019-00", "ten_sp": short, "ten_hq": short}
-    assert app.lot_fix_code_names(None, "tesa", [row]) == 2 and row["ten_sp"] == full and row["ten_hq"] == full
+def test_tesa_standard_names_hq_for_invoice_and_invoice_name_for_bkav(tmp_path):
+    """Mã Tesa trong bảng 'tên hải quan tesa': tên HQ vào ten_hq (Invoice), tên xuất hóa đơn vào ten_sp (Bkav); áp cả khi xuất lô đã đọc trước đây."""
+    store = app.DedicatedDataStore(base_dir=str(tmp_path / "d"))
+    hq, hd = app.tesa_names_for("39764-90019-00")
+    assert hq.endswith("có logo tesa, chữ tesa màu trắng, nền màu đỏ, có vạch xanh dương trên lõi") and hd.endswith("- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550)") and "(39764-90019-00)" in hd
+    assert app.tesa_names_for("X-0") == ("", "")
+    t = "tesa Purchase Order: 8600228820\n10 136,000 PC 39764-90019-00 Nov 19, 2026 26,500.00 100 PC 36,040,000.00\n@@HDR@@\ntesa Purchase Order: 8600228820\n"
+    _po, ls = app.parse_tesa_po_text(t, store.tesa_items, store)
+    assert ls[0]["ten_sp"] == hd and ls[0]["ten_hq"] == hq
+    old = {"ma_sp": "39764-90019-00", "ten_sp": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Blue (39764-90019-00)", "ten_hq": ""}
+    assert app.lot_fix_code_names(store, "tesa", [old]) == 1 and (old["ten_sp"], old["ten_hq"]) == (hd, hq)

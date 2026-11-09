@@ -57,6 +57,7 @@ def build():
         "--hidden-import", "po_scan",
         "--hidden-import", "mau_word",
         "--hidden-import", "mau_word_forms",
+        "--hidden-import", "tesa_names",
         "--add-data", os.path.join(ROOT, "fonts") + os.pathsep + "fonts",  # font Be Vietnam Pro (OFL) kèm trong exe
         *[a for m in QT_EXCLUDES for a in ("--exclude-module", m)],
         "hongthien_desktop_app.py",

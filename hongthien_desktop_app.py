@@ -2667,7 +2667,9 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
                 name, src = re.sub(r"\s+", " ", str(erp_name)).strip(), "erp"
                 code = code or str(dt.get("ma_erp") or dt.get("ma_hang") or "")
                 item = next((x for x in tesa_catalog if x.get("name") == name or (code and x.get("code") == code)), None)
-            name = tesa_full_name(name)
+            hq_std, hd_std = tesa_names_for(code)  # bảng tên chuẩn của Tesa thắng mọi nguồn tên khác
+            if hd_std:
+                name = hd_std
             if not name:  # không có trong danh mục Tesa lẫn ERP: dựng tên từ quy cách trên PO, người dùng bổ sung kg/SL kiện
                 dims = desc_dims(r2["desc"])
                 name = ("Ống lõi giấy phi " + " x ".join(str(int(float(d))) if float(d) == int(float(d)) else d for d in dims) + "mm") if dims else (r2["desc"] or "Ống lõi giấy")
@@ -2684,7 +2686,7 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
             found_lines.append({
                 "stt": len(found_lines) + 1, "po": r2["po"],
                 "hs": (mem or {}).get("hs") or (item or {}).get("hs") or "48229090",
-                "ma_sp": code, "ten_sp": name, "ten_hq": (item or {}).get("ten_hq", ""), "unit": (item or {}).get("unit", "ống"),
+                "ma_sp": code, "ten_sp": name, "ten_hq": hq_std or (item or {}).get("ten_hq", ""), "unit": (item or {}).get("unit", "ống"),
                 "qty": qty, "price": price, "amount": round(qty * price), "div": div, "kg": kg, "kien": kien,
                 "net": net, "gross": exact(net + tare) if net > 0 else 0.0, "tare": tare,
                 # SL x đơn giá = thành tiền và đã đủ mã, tên, kg, SL/kiện: dòng ĐỌC ĐỦ; chỉ còn thiếu thông tin thì mới bắt người dùng soát
@@ -2704,7 +2706,9 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
         dt = tesa_erp_entry(data_store, res["code"], name)
         if dt and (dt.get("ten") or dt.get("ten_kh")):  # tên theo danh mục sản phẩm của khách trong ERP (Data tổng); mã chưa có trong danh mục Tesa: tên theo KH
             name = re.sub(r"\s+", " ", str(dt.get("ten_kh") or dt.get("ten"))).strip()
-        name = tesa_full_name(name)
+        hq_std, hd_std = tesa_names_for(res["code"])
+        if hd_std:
+            name = hd_std
         mem = data_store.get_item_norm(name) if data_store else None
         div = mem["div"] if (mem and mem.get("div")) else (known["div"] if known else 0)
         kg = mem["kg"] if (mem and mem.get("kg")) else (known["kg"] if known else 0)
@@ -2720,7 +2724,7 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
             "hs": (mem.get("hs") if mem else None) or (known.get("hs", "48229090") if known else "48229090"),
             "ma_sp": res["code"],
             "ten_sp": name,
-            "ten_hq": known.get("ten_hq", "") if known else "",
+            "ten_hq": hq_std or (known.get("ten_hq", "") if known else ""),
             "unit": known.get("unit", "ống") if known else "ống",
             "qty": qty,
             "price": price,
@@ -7345,14 +7349,10 @@ def best_scan_lines(path, prof, store, po_no, po_date, tare_v):
     return lines if len(lines) == len(rows) else []
 
 
-TESA_NAME_SUFFIX = "- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550)"
-_TESA_NAME_ENDS_WITH_CODE = re.compile(r"\(\d{5}-\d{5}-\d{2}\)\s*$")
-
-
-def tesa_full_name(name):
-    """Tên hàng Tesa chuẩn kết thúc bằng '…(mã)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550)'. Tên mới dừng ở '(mã)' thì bổ sung phần còn lại."""
-    n = re.sub(r"\s+", " ", str(name or "")).strip()
-    return n + TESA_NAME_SUFFIX if _TESA_NAME_ENDS_WITH_CODE.search(n) else n
+def tesa_names_for(code):
+    """(tên HQ, tên xuất hóa đơn) chuẩn của mã Tesa theo bảng 'tên hải quan tesa'; ('', '') nếu mã không có trong bảng."""
+    import tesa_names
+    return tesa_names.TESA_NAMES.get(str(code or "").strip(), ("", ""))
 
 
 _BARE_CODE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/\u2010-\u2015-]{6,}")
@@ -7362,11 +7362,13 @@ def lot_fix_code_names(store, customer, items):
     """Dòng mà máy điền MÃ hàng vào ô tên (tên chỉ là một mã, ô mã trống): chuyển sang ô mã rồi tra tên/định mức theo mã. Trả số dòng đã sửa."""
     n = 0
     for it in items:
-        if customer == "tesa":  # tên Tesa dừng ở '(mã)' thì thiếu phần '- FSC RECYCLED 100%(Số chứng chỉ:…)'
-            for k in ("ten_sp", "ten_hq"):
-                full = tesa_full_name(it.get(k))
-                if full != str(it.get(k) or ""):
-                    it[k], n = full, n + 1
+        if customer == "tesa":  # mã có trong bảng tên chuẩn của Tesa: tên HQ cho Invoice, tên xuất hóa đơn cho Bkav
+            hq_std, hd_std = tesa_names_for(it.get("ma_sp"))
+            if hd_std and (it.get("ten_sp") != hd_std or (hq_std and it.get("ten_hq") != hq_std)):
+                it["ten_sp"] = hd_std
+                if hq_std:
+                    it["ten_hq"] = hq_std
+                n += 1
         hq = _DASHES.sub("-", str(it.get("ten_hq") or "").strip())
         if hq and " " not in hq and _BARE_CODE.fullmatch(hq) and re.search(r"\d", hq) and re.search(r"[-_/.]", hq) and str(it.get("ten_sp") or "").strip() != hq:
             it["ten_hq"] = ""  # tên khai hải quan chỉ là mã (do bản cũ ghi nhầm): bỏ để chứng từ dùng tên hàng hóa
