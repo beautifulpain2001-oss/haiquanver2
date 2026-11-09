@@ -378,7 +378,7 @@ def exact(x):
     return float(format(float(x), ".12g"))
 
 
-ACC3 = '_(* #,##0.000_);_(* \\(#,##0.000\\);_(* "-"??_);_(@_)'  # trọng lượng: 3 số lẻ, không làm tròn
+ACC3 = '#,##0.00##'  # trọng lượng: tối thiểu 2 số lẻ (.07, .00), có số lẻ thứ 3-4 khác 0 thì hiện (.006), không làm tròn
 
 
 def xl_net(qty_ref, kg_ref):
@@ -2667,6 +2667,7 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
                 name, src = re.sub(r"\s+", " ", str(erp_name)).strip(), "erp"
                 code = code or str(dt.get("ma_erp") or dt.get("ma_hang") or "")
                 item = next((x for x in tesa_catalog if x.get("name") == name or (code and x.get("code") == code)), None)
+            name = tesa_full_name(name)
             if not name:  # không có trong danh mục Tesa lẫn ERP: dựng tên từ quy cách trên PO, người dùng bổ sung kg/SL kiện
                 dims = desc_dims(r2["desc"])
                 name = ("Ống lõi giấy phi " + " x ".join(str(int(float(d))) if float(d) == int(float(d)) else d for d in dims) + "mm") if dims else (r2["desc"] or "Ống lõi giấy")
@@ -2703,6 +2704,7 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
         dt = tesa_erp_entry(data_store, res["code"], name)
         if dt and (dt.get("ten") or dt.get("ten_kh")):  # tên theo danh mục sản phẩm của khách trong ERP (Data tổng); mã chưa có trong danh mục Tesa: tên theo KH
             name = re.sub(r"\s+", " ", str(dt.get("ten_kh") or dt.get("ten"))).strip()
+        name = tesa_full_name(name)
         mem = data_store.get_item_norm(name) if data_store else None
         div = mem["div"] if (mem and mem.get("div")) else (known["div"] if known else 0)
         kg = mem["kg"] if (mem and mem.get("kg")) else (known["kg"] if known else 0)
@@ -3222,7 +3224,7 @@ def build_pkl_standard_sheet(wb, rec, sheet_name="Invoice_PKL"):
             (3, po_val, Font(name="Calibri Light", size=12), "center", None),
             (4, unit_val, Font(name="Calibri Light", size=12), "center", None),
             (5, it.get("qty", 0), Font(name="Calibri Light", size=14), "right", "#,##0"),
-            (6, w_kg if has_w else None, Font(name="Calibri Light", size=13), "right", "0.000"),
+            (6, w_kg if has_w else None, Font(name="Calibri Light", size=13), "right", ACC3),
             (7, gross_val, Font(name="Calibri Light", size=13), "right", ACC3),
             (8, net_val, Font(name="Calibri Light", size=13), "right", ACC3),
             (9, f"=ROUNDUP(E{r}/{float(it.get('div') or 0):g},0)" if float(it.get("div") or 0) > 0 else (it.get("kien") or None), Font(name="Calibri Light", size=13), "right", "#,##0"),  # số kiện luôn làm tròn LÊN
@@ -3423,7 +3425,7 @@ def build_pkl_shirai_sheet(wb, rec, sheet_name=None):
 
     acc0 = '_(* #,##0_);_(* \\(#,##0\\);_(* "-"??_);_(@_)'
     acc2 = '_(* #,##0.00_);_(* \\(#,##0.00\\);_(* "-"??_);_(@_)'
-    acc3 = '_(* #,##0.000_);_(* \\(#,##0.000\\);_(* "-"??_);_(@_)'
+    acc3 = ACC3
     thin = Side(style="thin", color="000000")
 
     def font(sz=16, b=False, u=None):
@@ -3514,7 +3516,7 @@ def build_pkl_shirai_sheet(wb, rec, sheet_name=None):
         put(f"D{r}", f"Po.No {it.get('po', '')}", 18, False, None, "center", True)
         put(f"E{r}", it.get("unit") or "cái", 18, False, "center", "center")
         put(f"F{r}", it.get("qty", 0), 14, False, "center", "center", True, nf=acc0)
-        put(f"G{r}", it.get("kg", 0), 14, False, "left", "center", True, nf=acc2)
+        put(f"G{r}", it.get("kg", 0), 14, False, "left", "center", True, nf=ACC3)
         has_kg = float(it.get("kg") or 0) > 0
         put(f"H{r}", xl_gross(f"I{r}", it) if has_kg else it.get("gross", 0), 14, False, "right", "center", True, nf=ACC3)
         put(f"I{r}", xl_net(f"F{r}", f"G{r}") if has_kg else it.get("net", 0), 16, False, "right", "center", True, nf=ACC3)
@@ -4142,7 +4144,7 @@ def build_pkl_sunlu_sheet(wb, rec, sheet_name="Invoice"):
         tare = round(gross - net, 3) if gross > 0 else 0
         div = float(it.get("div") or 0)
         vals = [(f"=ROW()-{r0 - 1}", "center", None), (it.get("ma_sp", ""), "center", "@"), (it.get("ten_sp", ""), "left", None), (it.get("unit") or prof.get("unit", ""), "center", None),
-                (it.get("qty", 0), "right", "#,##0"), (it.get("kg", 0), "right", '_(* #,##0.000_);_(* \\(#,##0.000\\);_(* "-"??_);_(@_)'),
+                (it.get("qty", 0), "right", "#,##0"), (it.get("kg", 0), "right", ACC3),
                 (xl_gross(f"H{r}", dict(it, tare=tare)), "right", ACC3), (xl_net(f"E{r}", f"F{r}"), "right", ACC3),
                 (f"=ROUNDUP(E{r}/{div:g},0)" if div > 0 else it.get("kien", 0), "right", _ACC), (it.get("price", 0), "center", _ACC), (f"=J{r}*E{r}", "center", _ACC)]
         for c_i, (v, al, fmt) in enumerate(vals, 1):
@@ -7343,6 +7345,16 @@ def best_scan_lines(path, prof, store, po_no, po_date, tare_v):
     return lines if len(lines) == len(rows) else []
 
 
+TESA_NAME_SUFFIX = "- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550)"
+_TESA_NAME_ENDS_WITH_CODE = re.compile(r"\(\d{5}-\d{5}-\d{2}\)\s*$")
+
+
+def tesa_full_name(name):
+    """Tên hàng Tesa chuẩn kết thúc bằng '…(mã)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550)'. Tên mới dừng ở '(mã)' thì bổ sung phần còn lại."""
+    n = re.sub(r"\s+", " ", str(name or "")).strip()
+    return n + TESA_NAME_SUFFIX if _TESA_NAME_ENDS_WITH_CODE.search(n) else n
+
+
 _BARE_CODE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/\u2010-\u2015-]{6,}")
 
 
@@ -7350,6 +7362,11 @@ def lot_fix_code_names(store, customer, items):
     """Dòng mà máy điền MÃ hàng vào ô tên (tên chỉ là một mã, ô mã trống): chuyển sang ô mã rồi tra tên/định mức theo mã. Trả số dòng đã sửa."""
     n = 0
     for it in items:
+        if customer == "tesa":  # tên Tesa dừng ở '(mã)' thì thiếu phần '- FSC RECYCLED 100%(Số chứng chỉ:…)'
+            for k in ("ten_sp", "ten_hq"):
+                full = tesa_full_name(it.get(k))
+                if full != str(it.get(k) or ""):
+                    it[k], n = full, n + 1
         hq = _DASHES.sub("-", str(it.get("ten_hq") or "").strip())
         if hq and " " not in hq and _BARE_CODE.fullmatch(hq) and re.search(r"\d", hq) and re.search(r"[-_/.]", hq) and str(it.get("ten_sp") or "").strip() != hq:
             it["ten_hq"] = ""  # tên khai hải quan chỉ là mã (do bản cũ ghi nhầm): bỏ để chứng từ dùng tên hàng hóa

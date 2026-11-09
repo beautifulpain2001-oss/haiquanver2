@@ -373,3 +373,11 @@ def test_tesa_name_prefers_customer_product_name_and_old_code_names_are_fixed(tm
     assert ls[0]["ten_sp"] == ten_kh
     old = {"ma_sp": "39777-90019-00", "ten_sp": "39777-90019-00", "qty": 1, "div": 0, "kg": 0}  # lô lưu từ bản cũ: tên = mã
     assert app.lot_fix_code_names(store, "tesa", [old]) == 1 and old["ten_sp"] == ten_kh
+
+
+def test_tesa_name_missing_fsc_suffix_is_completed():
+    short = "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Blue (39764-90019-00)"
+    full = short + "- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550)"
+    assert app.tesa_full_name(short) == full and app.tesa_full_name(full) == full and app.tesa_full_name("Ống lõi giấy phi 153 x 15 x 1500mm") == "Ống lõi giấy phi 153 x 15 x 1500mm"
+    row = {"ma_sp": "39764-90019-00", "ten_sp": short, "ten_hq": short}
+    assert app.lot_fix_code_names(None, "tesa", [row]) == 2 and row["ten_sp"] == full and row["ten_hq"] == full
