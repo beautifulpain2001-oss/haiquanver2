@@ -348,3 +348,16 @@ def test_tesa_v2_code_only_in_material_column(tmp_path):
     t = ("tesa Purchase Order: 8600228821\n1 136000 EA 39777-90019-00 Nov 02, 2026 265.00 1 EA 36,040,000.00\nNet Value: VND 36,040,000.00\n@@HDR@@\ntesa Purchase Order: 8600228821\n")
     _po, ls = app.parse_tesa_po_text(t, store.tesa_items, store)
     assert ls[0]["ma_sp"] == "39777-90019-00" and ls[0]["ten_sp"] != "39777-90019-00" and "39777-90019-00" in ls[0]["ten_sp"]
+
+
+def test_tesa_line_with_complete_info_is_not_flagged(tmp_path):
+    """Dòng Tesa đủ mã, tên, kg, SL/kiện và SL x giá = thành tiền: không cảnh báo 'máy phải suy ra', dù tên lấy từ ERP."""
+    store = app.DedicatedDataStore(base_dir=str(tmp_path / "d"))
+    ten_kh = "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Blue (39764-90019-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550)"
+    store.tesa_items = [x for x in store.tesa_items if x.get("code") != "39764-90019-00"]
+    store.data_tong = [{"khach": "Tesa", "ten": "ống 33x2", "ma_erp": "FG10291-004-00000", "ma_kh": "39764-90019-00", "ten_kh": ten_kh, "kg": 0.005, "kg_nguon": "erp", "kien": 34000, "kien_nguon": "tay"}]
+    store._dt_cache = {}
+    store.remember_item_norm(ten_kh, 34000, 0.005, "48229090")
+    t = "tesa Purchase Order: 8600228821\n10 136,000 PC 39764-90019-00 Nov 26, 2026 26,500.00 100 PC 36,040,000.00\n@@HDR@@\ntesa Purchase Order: 8600228821\n"
+    _po, ls = app.parse_tesa_po_text(t, store.tesa_items, store)
+    assert ls[0]["ten_sp"] == ten_kh and ls[0]["read"] == "ok" and ls[0]["read_note"] == ""

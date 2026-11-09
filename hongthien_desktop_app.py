@@ -2647,9 +2647,11 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
                 "ma_sp": code, "ten_sp": name, "ten_hq": (item or {}).get("ten_hq", ""), "unit": (item or {}).get("unit", "ống"),
                 "qty": qty, "price": price, "amount": round(qty * price), "div": div, "kg": kg, "kien": kien,
                 "net": net, "gross": exact(net + tare) if net > 0 else 0.0, "tare": tare,
-                "read": "loi" if not r2["check"] else ("ok" if src == "tesa" else "suy_ra"),
-                "read_note": ("Mã/tên lấy từ ERP theo quy cách; mã mới đã thêm vào danh mục Tesa" if src == "erp" else
-                              "Quy cách trên PO chưa có trong danh mục Tesa lẫn ERP: đã thêm mới, cần nhập kg/SL kiện" if not src else ""),
+                # SL x đơn giá = thành tiền và đã đủ mã, tên, kg, SL/kiện: dòng ĐỌC ĐỦ; chỉ còn thiếu thông tin thì mới bắt người dùng soát
+                "read": "loi" if not r2["check"] else ("ok" if (src == "tesa" or (name and kg > 0 and div > 0)) else "suy_ra"),
+                "read_note": "" if (r2["check"] and (src == "tesa" or (name and kg > 0 and div > 0))) else (
+                    "Mã/tên lấy từ ERP theo quy cách; mã mới đã thêm vào danh mục Tesa" if src == "erp" else
+                    "Quy cách trên PO chưa có trong danh mục Tesa lẫn ERP: đã thêm mới, cần nhập kg/SL kiện" if not src else ""),
             })
     if found_lines:
         return found_lines[0]["po"], found_lines

@@ -448,6 +448,11 @@ class Lot:
         self.form["delivery"] = g("deliveryDate")
         self.po_dates = dict(rec.get("poDates") or {})
         self.items = [dict(x) for x in rec.get("items", [])]
+        if self.customer == "tesa":  # hồ sơ Tesa lưu từ bản cũ: dòng đủ mã, tên, kg, SL/kiện thì không còn cảnh báo 'máy phải suy ra'
+            for it in self.items:
+                if it.get("read") == "suy_ra" and it.get("ma_sp") and it.get("ten_sp") and float(it.get("kg") or 0) > 0 and float(it.get("div") or 0) > 0 \
+                        and float(it.get("qty") or 0) > 0 and float(it.get("price") or 0) > 0:
+                    it["read"], it["read_note"] = "ok", ""
         self.exported = {k: v for k, v in (rec.get("files") or {}).items() if v}
         self.files = []
         self.record_id = rec.get("id")
