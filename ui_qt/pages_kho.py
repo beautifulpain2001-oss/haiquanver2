@@ -1021,7 +1021,7 @@ KIND_HINT = {
     "builtin": "Chứng từ đang do phần mềm dựng sẵn. Bấm “Chuyển thành form để sửa” để có file Excel/Word sửa được; từ đó xuất theo form, "
                "bỏ form thì quay lại mẫu dựng sẵn. Hình bên trái là form sẽ tạo ra (ô tô vàng là chỗ phần mềm điền).",
     "bkav": "Hóa đơn VAT / Phiếu xuất kho là file để nạp vào Bkav, phải giữ đúng định dạng Bkav nên không sửa form ở đây.",
-    "fixed": "Chứng từ này phần mềm tự dựng theo số liệu riêng (không đổi thành form được).",
+    "fixed": "Chứng từ này giữ đúng nguyên bản (Word hoặc phần mềm tự dựng theo số liệu riêng), phần mềm chỉ điền số liệu nên không đổi thành form được. Hình là bản số liệu mẫu.",
 }
 
 

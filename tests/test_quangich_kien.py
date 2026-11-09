@@ -246,3 +246,13 @@ def test_bilingual_po_duplicate_line_is_not_a_new_item(store):
             "Z4 BLAS 78%6*1002mm__|\nÔng lõi giấy quy cách Cái\n02 | 78*6*1030mm ez 200 33.000 6.600.000 | mau đã\nRRS BF ALA 78*6*1030mm h-\n")
     _po, _d, lines = app.parse_generic_po_text(text, {"po_pattern": r"\d{8}-\d{2}\s*HT-SS", "unit": "cái"}, cat)
     assert [(x["ten_sp"][-6:], x["qty"], x["price"]) for x in lines] == [("1002mm", 2000, 32023), ("1030mm", 200, 33000)]
+
+
+def test_kho_mau_lists_m22_for_arizon_and_lam_san_for_tesa(store):
+    store.save_learned_customer("arz22b", {"name": "CÔNG TY TNHH CÔNG NGHỆ ARIZON (VIỆT NAM)", "label": "Arz22b", "mst": "0901155231", "addr": "HY", "unit": "Chiếc"}, [])
+    docs = {d["mode"]: d for d in store.customer_docs("arz22b")}
+    assert docs["M22"]["ext"] == "docx" and docs["M22"]["kind"] == "fixed"
+    assert {d["mode"]: d["ext"] for d in store.customer_docs("tesa")}["BKLS"] == "docx"
+    for key, mode in (("arz22b", "M22"), ("tesa", "BKLS")):
+        ext, data, _w = app.form_from_builtin(store, key, mode, tokenize=False)
+        assert ext == "docx" and data[:2] == b"PK"

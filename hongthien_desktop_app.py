@@ -1074,10 +1074,13 @@ class DedicatedDataStore:
         kind: "form" (form đã sửa, thay mẫu dựng sẵn), "rieng" (mẫu riêng Word/Excel), "builtin" (dựng sẵn, đổi thành form được),
         "bkav" (Hóa đơn VAT / PXK: file nạp Bkav), "fixed" (dựng sẵn, không đổi được)."""
         out = []
-        for mode in lot_bundle_modes({"customer": key}):
+        modes = lot_bundle_modes({"customer": key})
+        if key == "tesa" and "BKLS" not in modes:
+            modes = modes + ["BKLS"]  # bảng kê lâm sản chỉ xuất khi lô có pallet, nhưng luôn xem được ở Kho mẫu
+        for mode in modes:
             if mode == "CHECK":
                 continue
-            d = {"mode": mode, "label": lot_mode_label(mode), "kind": "fixed", "path": None, "ext": "xlsx", "goc": False}
+            d = {"mode": mode, "label": lot_mode_label(mode), "kind": "fixed", "path": None, "ext": "docx" if mode in ("M22", "BKLS") else "xlsx", "goc": False}
             if mode.startswith("R:"):
                 d.update(kind="rieng", path=os.path.join(self.template_folder(key), "rieng", mode[2:]), ext=os.path.splitext(mode)[1].lstrip(".").lower())
             elif mode in ("VAT", "PXK"):
@@ -7087,6 +7090,12 @@ def form_from_builtin(store, key, mode, tokenize=True):
     prof = PROFILES.get(key)
     if not prof:
         raise ValueError("Không có khách này.")
+    if mode in ("M22", "BKLS"):  # mẫu Word giữ đúng nguyên bản: chỉ để xem (số liệu mẫu), không đổi thành form
+        import mau_word_forms
+        today = datetime.date.today()
+        if mode == "M22":
+            return "docx", mau_word_forms.m22_arizon(today, "", ""), []
+        return "docx", mau_word_forms.bkls_tesa(today, [{"code": "", "qty": 180, "weight": 3780}]), []
     if tokenize and mode not in FORM_MODES:
         raise ValueError(f"{lot_mode_label(mode)} giữ đúng mẫu dựng sẵn, không đổi thành form để sửa được.")
     if mode == "PLX" and key not in BUILTIN_CUSTOMERS and is_sunlu(prof):
