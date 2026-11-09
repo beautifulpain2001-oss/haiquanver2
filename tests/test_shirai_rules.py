@@ -171,7 +171,7 @@ def test_same_po_declared_on_two_days_makes_two_records_and_two_folders(store, l
     lot.export("PKL")
     rec2 = lot.save()
     assert rec1["id"] != rec2["id"] and rec1["folder"] != rec2["folder"]
-    assert rec1["folder"].endswith(os.path.join("2026_Thang_10", "2026-10-25")) and rec2["folder"].endswith(os.path.join("2026_Thang_10", "2026-10-29"))
+    assert rec1["folder"].endswith(os.path.join("2026_Thang_10", "2026-10-25_0000001")) and rec2["folder"].endswith(os.path.join("2026_Thang_10", "2026-10-29_0000002"))
     mine = [r for r in store.records if r["poNumber"] == "202699HT"]
     assert len(mine) == 2 and sorted(len(r["items"]) for r in mine) == [2, 2]  # lần khai sau không ghi đè lần trước
 

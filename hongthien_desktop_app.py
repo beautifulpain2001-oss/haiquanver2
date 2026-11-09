@@ -1896,7 +1896,7 @@ class DedicatedDataStore:
                 cdir = os.path.join(rt, cust)
                 for dirpath, dirs, _files in os.walk(cdir):
                     dirs[:] = sorted(d for d in dirs if not d.startswith((".", "_")) and d != GENERATED_DIR)
-                    if dirpath != cdir and (has_files(dirpath) or (not dirs and re.match(r"\d{4}-\d{2}-\d{2}", os.path.basename(dirpath)))):
+                    if dirpath != cdir and (has_files(dirpath) or (not dirs and re.match(r"\d{4}-\d{2}-\d", os.path.basename(dirpath)))):
                         add(cust, dirpath, os.path.basename(dirpath))
                         dirs[:] = []  # thư mục có file là thư mục tờ khai, không đi sâu thêm
                     elif dirpath == cdir and has_files(cdir) and not dirs:
@@ -2065,8 +2065,8 @@ class DedicatedDataStore:
         if os.path.isdir(nested):
             roots.append(nested)
         plan, taken = [], set()
-        def target(cust, day):
-            base = os.path.join(root, cust, f"{day[:4]}_Thang_{day[5:7]}", day)
+        def target(cust, day, pxk=""):
+            base = os.path.join(root, cust, f"{day[:4]}_Thang_{day[5:7]}", f"{day}_{pxk}" if pxk else day)
             dst, n = base, 2
             while os.path.normcase(dst) in taken or os.path.exists(dst):
                 dst = f"{base}_{n}"
@@ -2092,10 +2092,16 @@ class DedicatedDataStore:
                     if os.path.normcase(path).startswith(os.path.normcase(cdir) + os.sep) or os.path.normcase(path) == os.path.normcase(cdir):
                         if path == cdir or not os.path.isdir(path):
                             continue
+                        pxk = re.sub(r'[\\/:*?"<>|\s]+', "", str((o["record"] or {}).get("pxkNo") or o.get("pxk") or ""))
                         if standard(path, cdir):
+                            name = os.path.basename(path)
+                            new = os.path.join(os.path.dirname(path), f"{name[:10]}_{pxk}")
+                            if pxk and re.fullmatch(r"\d{4}-\d{2}-\d{2}(_\d{1,2})?", name) and not os.path.exists(new):  # tên cũ <ngày> hoặc <ngày>_2 -> <ngày>_<số PXK>
+                                taken.add(os.path.normcase(new))
+                                plan.append({"customer": cust, "src": path, "dst": new, "date": name[:10], "nguon": f"số PXK {pxk}", "loai": "thu_muc"})
                             continue
                         day, src = self._folder_date(path, cdir)
-                        plan.append({"customer": cust, "src": path, "dst": target(cust, day), "date": day, "nguon": src, "loai": "thu_muc"})
+                        plan.append({"customer": cust, "src": path, "dst": target(cust, day, pxk), "date": day, "nguon": src, "loai": "thu_muc"})
                 # file nằm lẻ trong thư mục khách: gom theo ngày
                 try:
                     loose = [f for f in os.listdir(cdir) if os.path.isfile(os.path.join(cdir, f)) and not f.startswith((".", "~$"))]
@@ -2196,6 +2202,12 @@ class DedicatedDataStore:
                 return self.legacy_folder_path(saved)
             else:
                 rel = self.new_record_folder(rec)
+                if not os.path.isdir(self.rel_to_abs(rel)):  # hồ sơ cũ chưa ghi thư mục: thư mục kiểu cũ (chỉ ngày) đang có thì dùng lại
+                    dt = str(rec.get("docDate") or "")
+                    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", dt):
+                        old_rel = os.path.join(os.path.dirname(rel), dt)
+                        if os.path.isdir(self.rel_to_abs(old_rel)):
+                            rel = old_rel
         return self.rel_to_abs(rel)
 
     def find_record(self, rec):
@@ -2206,21 +2218,24 @@ class DedicatedDataStore:
                 return i
         for i, r in enumerate(self.records):
             if (r.get("customer") == rec.get("customer") and r.get("poNumber") == rec.get("poNumber")
-                    and (r.get("docDate") or "") == (rec.get("docDate") or "")):
+                    and (r.get("docDate") or "") == (rec.get("docDate") or "")
+                    and (not (r.get("pxkNo") and rec.get("pxkNo")) or str(r["pxkNo"]).strip() == str(rec["pxkNo"]).strip())):  # cùng ngày nhưng khác số PXK là bộ hồ sơ khác
                 return i
         return -1
 
     def new_record_folder(self, rec):
-        """Đường dẫn (tương đối) cho hồ sơ mới. Cùng khách, cùng ngày, khác PO thì thêm _2, _3… để không lẫn file."""
+        """Đường dẫn (tương đối) cho hồ sơ mới: <Khách>/<năm>_Thang_<mm>/<yyyy-mm-dd>_<Số PXK>. Cùng ngày: khác số PXK là thư mục mới, cùng số PXK thì lưu chung."""
         dt = str(rec.get("docDate") or "")
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", dt):
             dt = datetime.date.today().strftime("%Y-%m-%d")
         cust = rec.get("customer") or "KHACH"
         name = re.sub(r'[\\/:*?"<>|]+', "_", str(PROFILES.get(cust, {}).get("label") or cust)).strip(" .") or "KHACH"
-        base = os.path.join(CUSTOMS_ROOT, name, f"{dt[:4]}_Thang_{dt[5:7]}", dt)
+        pxk = re.sub(r'[\\/:*?"<>|\s]+', "", str(rec.get("pxkNo") or ""))
+        leaf = f"{dt}_{pxk}" if pxk else dt  # thư mục lô = <ngày>_<số PXK> (chưa có số PXK thì tạm theo ngày)
+        base = os.path.join(CUSTOMS_ROOT, name, f"{dt[:4]}_Thang_{dt[5:7]}", leaf)
         used = {r.get("folder") for r in self.records if r.get("customer") == cust and r.get("folder")}
         rel, n = base, 2
-        while rel in used:
+        while rel in used and not pxk:  # có số PXK: cùng số thì lưu chung một thư mục; chưa có số PXK thì tách _2, _3… theo hồ sơ
             rel = f"{base}_{n}"
             n += 1
         return rel

@@ -744,9 +744,10 @@ def test_catalog_follows_deleted_folder_without_switching_pages(win, store):
 
 def test_invoice_pxk_and_declaration_numbers_are_read_from_file_names(win, store):
     """Số hóa đơn (C26TAA-00004591-…), số PXK (C26NAA-00000320-…) và số tờ khai (…_309138556000) lấy từ tên file trong thư mục thật khi hồ sơ chưa ghi."""
-    rec = add_record(store, "kodi", "2026-11-04", tk="", po="PO-TEN-FILE")
+    rec = add_record(store, "kodi", "2026-11-04", tk="", po="PO-TEN-FILE", folder_files=False)
     rec.update(hdNo="", pxkNo="", tkNo="")
     folder = store.get_record_folder_path(rec)
+    os.makedirs(folder, exist_ok=True)
     for n in ("C26NAA-00000320-YZ667I387H1-DPH.pdf", "C26TAA-00004591-PZ668MD4AFA-DPH.pdf", "ToKhaiHQ7X_QDTQ_309138556000 320.xls", "invoice_arizon_00000320_04.11.xlsx"):
         open(os.path.join(folder, n), "w").write("x")
     facts = store.folder_facts(rec)

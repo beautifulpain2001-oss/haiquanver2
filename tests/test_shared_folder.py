@@ -131,7 +131,8 @@ def test_reorganize_old_customer_folders_preview_move_and_undo(data_dir, tmp_pat
     assert n == len(plan) >= 3
     assert (hq / "Tesa" / "2026_Thang_10" / "2026-10-30" / "po.pdf").exists() and not (hq / "Tesa" / "lo 30.10.2026").exists()
     assert (hq / "Best" / "2026_Thang_10" / "2026-10-05" / "invoice_20261005.xlsx").exists()
-    assert s.plan_reorganize() == []  # đã thống nhất
+    again = s.plan_reorganize()  # thư mục chuẩn có số PXK (hồ sơ/tên file) thì đổi tên thành <ngày>_<số PXK>; còn lại đã thống nhất
+    assert all(os.path.basename(p["dst"]).startswith(os.path.basename(p["src"]) + "_") for p in again)
     assert s.undo_reorganize() == n
     assert (hq / "Tesa" / "lo 30.10.2026" / "po.pdf").exists() and (hq / "Best" / "le.pdf").exists()
 
@@ -173,3 +174,15 @@ def test_add_files_renames_pdfs_by_pxk_number_and_splits_folders(tmp_path):
     assert (day / f"HĐ {no}.pdf").exists() and (day / "invoice_IV PK.xlsx").exists() and len(done) == len(plan)
     again = app.apply_add_files(app.plan_add_files(str(root), "Able", "2026-04-01", [str(src / "ivable113.pdf")], "")[1])
     assert os.path.basename(again[0]) == f"Invoice {no}_2.pdf"  # không ghi đè
+
+
+def test_reorganize_renames_standard_folder_to_date_and_pxk(tmp_path):
+    hq = tmp_path / "HAI_QUAN"
+    d = hq / "Arizon" / "2026_Thang_11" / "2026-11-03_02"
+    d.mkdir(parents=True)
+    (d / "C26NAA-00000316-ABC-DPH.pdf").write_text("x")
+    s = make_store(hq, tmp_path / "w", "rn")
+    plan = s.plan_reorganize()
+    assert [(os.path.basename(p["src"]), os.path.basename(p["dst"])) for p in plan] == [("2026-11-03_02", "2026-11-03_00000316")]
+    s.apply_reorganize(plan)
+    assert (hq / "Arizon" / "2026_Thang_11" / "2026-11-03_00000316" / "C26NAA-00000316-ABC-DPH.pdf").exists() and s.plan_reorganize() == []

@@ -87,12 +87,15 @@ def test_save_new_adds_then_overwrites_same_customer_and_po(store, seed):
     old = app.lot_save_new(store, rec, {"vat": {"name": "vat.xlsx", "path": "x", "time": "t"}})
     assert len(store.records) == n0 + 1 and store.records[0] is old
 
-    rec2 = app.lot_build_record(store, form_of(src) | {"po": "PO-GIA-1", "pxk": "777"}, src["items"])
+    rec2 = app.lot_build_record(store, form_of(src) | {"po": "PO-GIA-1", "hd": "HD-9"}, src["items"])
     new = app.lot_save_new(store, rec2, {"pxk": {"name": "pxk.xlsx", "path": "y", "time": "t"}})
-    assert len(store.records) == n0 + 1  # cùng khách + cùng PO: ghi đè, không thêm
-    assert new["id"] == old["id"] and new["pxkNo"] == "777"
+    assert len(store.records) == n0 + 1  # cùng khách + cùng PO + cùng ngày + cùng số PXK: ghi đè, không thêm
+    assert new["id"] == old["id"] and new["hdNo"] == "HD-9"
     assert new["files"]["vat"]["name"] == "vat.xlsx"  # giữ file đã nạp ở lần trước
     assert new["files"]["pxk"]["name"] == "pxk.xlsx"
+    other = app.lot_build_record(store, form_of(src) | {"po": "PO-GIA-1", "pxk": "777"}, src["items"])
+    app.lot_save_new(store, other, {})
+    assert len(store.records) == n0 + 2  # cùng ngày nhưng khác số PXK: hồ sơ mới
 
 
 def test_save_persists_and_reloads_from_disk(store, seed, data_dir):
