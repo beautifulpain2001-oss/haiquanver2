@@ -256,3 +256,27 @@ def test_kho_mau_lists_m22_for_arizon_and_lam_san_for_tesa(store):
     for key, mode in (("arz22b", "M22"), ("tesa", "BKLS")):
         ext, data, _w = app.form_from_builtin(store, key, mode, tokenize=False)
         assert ext == "docx" and data[:2] == b"PK"
+
+
+def test_invoice_total_weights_are_not_rounded(store, tmp_path):
+    """Dòng Tổng cộng của invoice: tổng trọng lượng là công thức SUM của các dòng trên, hiện đủ 3 số lẻ (không làm tròn 2 số)."""
+    store.save_learned_customer("tot1", {"name": "CÔNG TY TOT", "label": "Tot", "mst": "0100000034", "addr": "BN", "unit": "chiếc"}, [{"name": "Ống A", "code": "A1", "price": 10, "div": 50, "kg": 0.0903}])
+    item = {"stt": 1, "po": "P", "ma_sp": "A1", "ten_sp": "Ống A", "unit": "chiếc", "qty": 150, "price": 10, "amount": 1500, "div": 50, "kg": 0.0903, "kien": 3, "net": 13.545, "gross": 14.545}
+    ws = openpyxl.load_workbook(app.lot_export(store, make_rec(store, "tot1", [item]), "PKL")["path"]).active
+    totals = [c for row in ws.iter_rows(min_row=14, max_row=14) for c in row if isinstance(c.value, str) and c.value.upper().startswith(("=SUM(", "=SUBTOTAL("))]
+    weights = [c for c in totals if c.column_letter in "GH"]
+    assert weights and all(c.number_format == app.ACC3 for c in weights)
+    # mẫu Arizon của khách: ô tổng trọng lượng cũng đủ 3 số lẻ
+    import mau_chung_tu
+    t = openpyxl.Workbook()
+    w = t.active
+    w.title = "9.2"
+    w["A24"] = "x"
+    w.print_area = "A1:N24"
+    w["I21"], w["K21"] = "=SUM(I13:I20)", "=SUM(K13:K20)"
+    w["I21"].number_format = w["K21"].number_format = "#,##0.00"
+    path = tmp_path / "arz.xlsx"
+    t.save(path)
+    out = mau_chung_tu.fill_pkl_arizon(app, openpyxl.Workbook(), {"docDate": "2026-11-05", "pxkNo": "1", "items": [item]}, {"name": "ARZ", "addr": "HY", "unit": "chiếc"}, mau_chung_tu.load_template(str(path)), "Inv")
+    tot = [c for row in out.iter_rows(min_row=14) for c in row if isinstance(c.value, str) and c.value.upper().startswith("=SUM(") and c.column_letter in "IK"]
+    assert len(tot) == 2 and all(c.number_format == app.ACC3 for c in tot)

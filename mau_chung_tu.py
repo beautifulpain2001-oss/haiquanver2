@@ -81,6 +81,15 @@ def _print_end_row(tws):
     return int(m.group(1)) if m else tws.max_row
 
 
+def acc3_totals(core, ws, cols, first_row):
+    """Dòng tổng của mẫu: ô tổng trọng lượng (=SUM/SUBTOTAL) hiện đủ 3 số lẻ, nguyên tổng các dòng trên, không làm tròn."""
+    for col in cols:
+        for r in range(first_row, ws.max_row + 1):
+            v = ws[f"{col}{r}"].value
+            if isinstance(v, str) and v.upper().startswith(("=SUM(", "=SUBTOTAL(")):
+                ws[f"{col}{r}"].number_format = core.ACC3
+
+
 def clone_sheet(wb, tws, title, regions, max_col=None):
     """Sao chép sheet mẫu `tws` sang sổ `wb` (tên `title`), nhân các vùng lặp. Trả (ws mới, Plan)."""
     end_row = _print_end_row(tws)
@@ -210,6 +219,7 @@ def fill_pkl(core, wb, rec, prof, tws, title):
             ws[f"{col}{r}"].number_format = core.ACC3
     if not _all_div(rec, 20):  # mẫu chia 20 ống/kiện; khác định mức thì ghi số kiện đã tính
         ws[f"C{pl.map(28)}"] = _kien_total(rec)
+    acc3_totals(core, ws, "JK", pl.first[15] + max(len(items), 1))
     unify_pxk(ws, rec.get("pxkNo"))
     return ws
 
@@ -240,6 +250,7 @@ def fill_pack(core, wb, rec, prof, tws, title):
             ws[f"{col}{r}"].number_format = core.ACC3
     if not _all_div(rec, 20):
         ws[f"B{pl.map(32)}"] = _kien_total(rec)
+    acc3_totals(core, ws, "EF", pl.first[18] + max(len(items), 1))
     unify_pxk(ws, rec.get("pxkNo"))
     return ws
 
@@ -393,6 +404,7 @@ def fill_pkl_arizon(core, wb, rec, prof, tws, title):
             ws[f"{col}{r}"] = v
         for col in "IK":
             ws[f"{col}{r}"].number_format = core.ACC3
+    acc3_totals(core, ws, "IK", r0 + max(len(items), 1))
     return ws
 
 

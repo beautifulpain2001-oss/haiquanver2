@@ -3244,7 +3244,7 @@ def build_pkl_standard_sheet(wb, rec, sheet_name="Invoice_PKL"):
         ws.cell(row=tot_r, column=c_i).border = BOX_BORDER
     tb = ws.cell(row=tot_r, column=2, value="Tổng cộng")
     tb.font = Font(name="Calibri Light", size=14, bold=True)
-    for col_i, let, fmt in [(5, "E", "#,##0"), (7, "G", "#,##0.00"), (8, "H", "#,##0.00"), (9, "I", "0"), (11, "K", "#,##0")]:
+    for col_i, let, fmt in [(5, "E", "#,##0"), (7, "G", ACC3), (8, "H", ACC3), (9, "I", "0"), (11, "K", "#,##0")]:
         c = ws.cell(row=tot_r, column=col_i, value=f"=SUBTOTAL(9,{let}{start_r}:{let}{end_r})")
         c.font = Font(name="Times New Roman", size=14, bold=True)
         c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -3388,7 +3388,7 @@ def build_pkl_kodi_sheet(wb, rec, sheet_name="Invoice_Kodi", skip_h=False):
     for c_i in range(1, 10):
         ws.cell(row=tot_r, column=c_i).border = BOX_BORDER
     put(f"B{tot_r}", None, "Tổng", 13, True, "center")
-    for col_i, let, sz, fmt in [(4, "D", 13, acc0), (5, "E", 12, acc2), (6, "F", 12, acc2), (7, "G", 12, acc0), (9, "I", 12, acc0)]:
+    for col_i, let, sz, fmt in [(4, "D", 13, acc0), (5, "E", 12, ACC3), (6, "F", 12, ACC3), (7, "G", 12, acc0), (9, "I", 12, acc0)]:
         if col_i == 9 and skip_h:
             continue
         c = put(f"{let}{tot_r}", None, f"=SUM({let}{start_r}:{let}{end_r})", sz, True, "center")
@@ -3399,7 +3399,7 @@ def build_pkl_kodi_sheet(wb, rec, sheet_name="Invoice_Kodi", skip_h=False):
     put(f"B{t}", None, "Tổng: ", 14, True, "center")
     put(f"C{t}", None, f"=G{tot_r}", 13, True).number_format = "#,##0"
     put(f"D{t}", None, "kiện", 10, True).number_format = acc0
-    put(f"E{t}", None, f"=E{tot_r}", 13, True).number_format = acc2
+    put(f"E{t}", None, f"=E{tot_r}", 13, True).number_format = ACC3
     put(f"F{t}", None, "/kg", 14, True, "left")
     put(f"G{t}", None, f"=F{tot_r}", 12, True).number_format = acc2
     put(f"H{t}", None, "/kg", 14, True).number_format = acc0
@@ -4155,7 +4155,7 @@ def build_pkl_sunlu_sheet(wb, rec, sheet_name="Invoice"):
     put(f"C{t}", None, "Tổng", 16, True, "center")
     for col in "EGHIK":
         c = put(f"{col}{t}", None, f"=SUM({col}{r0}:{col}{last})", 16, True, "right")
-        c.number_format = "#,##0" if col == "E" else _ACC
+        c.number_format = "#,##0" if col == "E" else (ACC3 if col in "GH" else _ACC)  # tổng trọng lượng: nguyên tổng các dòng (3 số lẻ), không làm tròn
     for row in ws.iter_rows(min_row=1, max_row=t, min_col=1, max_col=11):  # khung viền kín từ tiêu đề đến dòng Tổng (cả ô gộp)
         for c in row:
             c.border = BOX_BORDER
@@ -4874,10 +4874,10 @@ def build_pkl_best_sheet(wb, rec, sheet_name="Invoice"):
     put(f"D{sr}", None, "kiện", 12, True)
     put(f"F{sr}", None, "", 12)
     c = put(f"G{sr}", None, t["gross"], 12, True, "right")
-    c.number_format = "#,##0.00"
+    c.number_format = ACC3
     put(f"H{sr}", None, "kg", 12, True)
     c = put(f"I{sr}", None, t["net"], 12, True, "right")
-    c.number_format = "#,##0.00"
+    c.number_format = ACC3
     put(f"J{sr}", None, "kg", 12, True)
     put(f"B{sr + 1}", f"B{sr + 1}:K{sr + 1}", "Hàng được sản xuất tại Việt Nam, mới 100 %", 12, True)
     put(f"H{sr + 2}", f"H{sr + 2}:M{sr + 2}", HT_NAME, 12, True, "center")
