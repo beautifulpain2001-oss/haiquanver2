@@ -5,6 +5,7 @@ nên giao diện và các kiểm thử dùng chung một đường xử lý.
 """
 
 import datetime
+import re
 import os
 
 
@@ -30,7 +31,6 @@ class Lot:
         self.files = []  # mọi file đã xuất trong lô này, để hiển thị
         self.saved = False
         self.skip_h = False  # Kodi: Invoice không lấy cột Thành Tiền
-        self.ncu_group, self.ncu_code = {}, {}  # Shirai: nhà cung ứng chọn theo nhóm hàng / đổi riêng theo mã
         self.form = {"doc_date": datetime.date.today().strftime("%Y-%m-%d"), "po": "", "po_date": "", "pxk": "", "hd": "", "tk": "", "tk_nhap": ""}
         if customer:
             self.apply_defaults()
@@ -183,21 +183,29 @@ class Lot:
     def is_shirai(self):
         return self.customer == "shirai"
 
+    @staticmethod
+    def ncu_ident(code):
+        """Mã định danh nhà cung ứng nằm trong mã ERP: TM91177-001-00124 -> 91177 (cùng tên sản phẩm mà khác nhà cung ứng thì khác mã định danh)."""
+        m = re.match(r"[A-Za-z]{2}(\d{5})-", str(code or "").strip())
+        return m.group(1) if m else ""
+
     def apply_suppliers(self):
-        """Mỗi dòng Shirai: nhóm hàng, tên theo khách hàng (ERP, không có thì tên đã nhập tay) thay cho tên hàng, nhà cung ứng (theo mã, rồi theo nhóm, rồi lựa chọn đã nhớ)."""
+        """Mỗi dòng Shirai: nhóm hàng, tên theo khách hàng (ERP, không có thì tên đã nhập tay) thay cho tên hàng, nhà cung ứng theo mã định danh của mã ERP."""
         if not self.is_shirai:
             return
         st = self.store
         for it in self.items:
             code = str(it.get("ma_sp") or "").strip()
             goc = it.setdefault("ten_goc", it.get("ten_sp") or "")  # tên trên PO, trước khi thay bằng tên theo khách hàng
-            g = it.setdefault("ncu_nhom", st.shirai_group(goc))
-            ten, src = st.shirai_ten_kh(code, goc)
+            it.setdefault("ncu_nhom", st.shirai_group(goc))
+            ten, _src = st.shirai_ten_kh(code, goc)
             it["ten_kh"] = ten
             if ten:
                 it["ten_sp"] = ten
                 it["ten_hq"] = ten
-            it["ncu"] = (self.ncu_code.get(code) or self.ncu_group.get(g) or st.supplier_pref.get("ma:" + code) or st.supplier_pref.get("nhom:" + g) or "")
+            ident = self.ncu_ident(code)
+            it["ncu_id"] = ident
+            it["ncu"] = (st.supplier_pref.get("id:" + ident) if ident else "") or st.supplier_pref.get("ma:" + code) or ""
 
     def ncu_groups(self):
         """[(mã nhóm, tên nhóm, [chỉ số dòng])] theo thứ tự carton, inner, pad, khác; chỉ nhóm có dòng."""
@@ -208,22 +216,14 @@ class Lot:
                 out.append((key, label, idx))
         return out
 
-    def set_group_supplier(self, group, name):
-        self.ncu_group[group] = name
-        for it in self.items:
-            if it.get("ncu_nhom") == group:
-                self.ncu_code.pop(str(it.get("ma_sp") or "").strip(), None)  # chọn lại cả nhóm: bỏ các lần đổi riêng của nhóm
+    def set_ident_supplier(self, ident, name, code=""):
+        """Chọn nhà cung ứng cho một mã định danh (mọi mã cùng định danh dùng chung, nhớ cho lô sau). Mã không có định danh thì nhớ theo mã."""
+        key = ("id:" + ident) if ident else ("ma:" + str(code or ""))
         if name:
-            self.store.supplier_pref["nhom:" + group] = name
-            self.store.save_catalog()
-        self.apply_suppliers()
-        self.saved = False
-
-    def set_code_supplier(self, code, name):
-        self.ncu_code[code] = name
-        if name:
-            self.store.supplier_pref["ma:" + code] = name
-            self.store.save_catalog()
+            self.store.supplier_pref[key] = name
+        else:
+            self.store.supplier_pref.pop(key, None)
+        self.store.save_catalog()
         self.apply_suppliers()
         self.saved = False
 
@@ -233,19 +233,19 @@ class Lot:
         self.saved = False
 
     def ncu_blockers(self):
-        """Những việc phải xong trước khi sang bước sau (Shirai): tên theo khách hàng của từng mã, nhà cung ứng của từng dòng."""
+        """Những việc phải xong trước khi sang bước sau (Shirai): tên theo khách hàng của từng mã, nhà cung ứng của từng mã định danh."""
         if not self.is_shirai or not self.items:
             return []
         out = []
         missing = sorted({str(it.get("ma_sp") or "") or f"(không mã) {str(it.get('ten_goc') or '')[:30]}" for it in self.items if not it.get("ten_kh")})
         if missing:
-            out.append("Chưa có tên theo khách hàng trong ERP cho mã: " + ", ".join(missing) + ". Nhập tên rồi mới xuất được.")
+            out.append(f"Chưa có tên theo khách hàng trong ERP cho {len(missing)} mã ({', '.join(missing[:4])}{'…' if len(missing) > 4 else ''}). Nhập tên rồi mới xuất được.")
         if not self.store.suppliers:
             out.append("Chưa có nhà cung ứng nào trong danh sách: bấm “Quản lý nhà cung ứng” để thêm.")
         else:
-            nogo = [label for key, label, idx in self.ncu_groups() if any(not self.items[i].get("ncu") for i in idx)]
+            nogo = sorted({it.get("ncu_id") or str(it.get("ma_sp") or "(không mã)") for it in self.items if not it.get("ncu")})
             if nogo:
-                out.append("Chưa chọn nhà cung ứng cho nhóm: " + ", ".join(nogo) + ".")
+                out.append(f"Chưa chọn nhà cung ứng cho mã định danh: {', '.join(nogo[:6])}{'…' if len(nogo) > 6 else ''}.")
         return out
 
     def set_dates(self, keys):

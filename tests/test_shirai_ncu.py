@@ -42,40 +42,37 @@ def test_missing_customer_name_and_supplier_block_then_clear(store, lot):
     assert errors == b  # không xuất được
     lot.set_ten_kh(codes[0], "Tên nhập tay")
     nocode = next(i for i in lot.items if not i["ma_sp"])  # dòng không có mã: tên nhập tay nhớ theo tên gốc trên PO
-    assert any("(không mã)" in x for x in lot.ncu_blockers())
+    assert any("không mã" in x for x in lot.ncu_blockers())
     lot.set_ten_kh("", "Tên dòng không mã", nocode["ten_goc"])
     store.supplier_add("Công ty A")
     store.supplier_add("Công ty B")
-    for key, _label, _idx in lot.ncu_groups():
-        lot.set_group_supplier(key, "Công ty A")
+    assert any("định danh" in x for x in lot.ncu_blockers())
+    for it in lot.items:
+        lot.set_ident_supplier(it.get("ncu_id", ""), "Công ty A", it["ma_sp"])
     assert lot.ncu_blockers() == []
     assert all(it["ten_sp"].startswith("TÊN KH") or it["ten_sp"] in ("Tên nhập tay", "Tên dòng không mã") for it in lot.items)
 
 
-def test_group_choice_override_by_code_remembered_and_in_so_sheet(store, lot):
+def test_supplier_follows_erp_code_identifier_not_the_name(store, lot):
+    assert Lot.ncu_ident("TM91177-001-00124") == "91177" and Lot.ncu_ident("TM91120-001-00040") == "91120" and Lot.ncu_ident("") == ""
     erp_names(store, lot)
     store.supplier_add("Công ty A")
     store.supplier_add("Công ty B")
-    groups = lot.ncu_groups()
-    assert groups
-    first_key = groups[0][0]
-    lot.set_group_supplier(first_key, "Công ty A")
-    idx = groups[0][2]
-    idx = [i for i in idx if lot.items[i]["ma_sp"]] or idx
-    code = lot.items[idx[0]]["ma_sp"]
-    lot.set_code_supplier(code, "Công ty B")
-    assert lot.items[idx[0]]["ncu"] == "Công ty B"
-    assert all(lot.items[i]["ncu"] == "Công ty A" for i in idx if lot.items[i]["ma_sp"] != code)
-    assert store.supplier_pref["nhom:" + first_key] == "Công ty A" and store.supplier_pref["ma:" + code] == "Công ty B"
-    # lô mới nhớ lựa chọn cũ
-    other = Lot(app, store)
-    other.select_customer("shirai")
-    assert other.apply_po(other.read_po(FIXTURE))
-    assert next(i for i in other.items if i["ma_sp"] == code)["ncu"] == "Công ty B"
+    pads = [i for i in lot.items if i["ma_sp"].startswith("TM91120")]
+    assert pads
+    lot.set_ident_supplier("91120", "Công ty B")
+    assert all(i["ncu"] == "Công ty B" for i in lot.items if i["ncu_id"] == "91120")  # mọi mã cùng định danh
+    other = [i for i in lot.items if i["ncu_id"] != "91120" and i["ma_sp"]]
+    assert all(not i["ncu"] for i in other)
+    assert store.supplier_pref["id:91120"] == "Công ty B"
+    # lô mới nhớ lựa chọn theo định danh
+    again = Lot(app, store)
+    again.select_customer("shirai")
+    assert again.apply_po(again.read_po(FIXTURE))
+    assert all(i["ncu"] == "Công ty B" for i in again.items if i["ncu_id"] == "91120")
     rec = lot.record()
-    assert [i["ncu"] for i in rec["items"]]
     ws = openpyxl.load_workbook(app.lot_export(store, rec, "SO")["path"]).active
-    assert ws.cell(row=4, column=17).value == "Nhà cung ứng" and ws.cell(row=5, column=17).value in ("Công ty A", "Công ty B")
+    assert ws.cell(row=4, column=17).value == "Nhà cung ứng" and "Công ty B" in {ws.cell(row=r, column=17).value for r in range(5, 9)}
 
 
 def test_supplier_remove_drops_remembered_choices(store):

@@ -205,7 +205,15 @@ class PoStep(QWidget):
         self.setObjectName("inner")
         self.setAcceptDrops(True)
         self.lot = lot
-        lay = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()  # nhiều nhóm hàng/nhà cung ứng thì cuộn cả bước, không bị đè chữ lên nhau
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        body = QWidget()
+        scroll.setWidget(body)
+        outer.addWidget(scroll)
+        lay = QVBoxLayout(body)
         lay.setContentsMargins(28, 24, 28, 24)
         lay.setSpacing(12)
         self.who = _label("", "h2", wrap=True)
@@ -427,7 +435,7 @@ class PoStep(QWidget):
     def _build_ncu_box(self):
         box = QGroupBox("Chọn nhà cung ứng cho từng nhóm hàng")
         lay = QVBoxLayout(box)
-        lay.addWidget(_label("Mua thùng carton ở nhà này, Inner Pad hoặc Pad ở nhà khác vẫn làm chung một hồ sơ: chọn nhà cung ứng cho cả nhóm, mã nào khác thì đổi riêng ở dòng đó. "
+        lay.addWidget(_label("Nhà cung ứng được nhận theo mã định danh trong mã ERP (TM<b>91177</b>-001-00124: 91177 là định danh): chọn một lần cho mỗi định danh, các mã cùng định danh dùng chung và app nhớ cho lô sau. "
                              "Tên hàng lấy từ ERP (cột “Tên sản phẩm theo KH”); mã chưa có tên thì phải nhập tên rồi mới đi tiếp.", "hint", wrap=True))
         top = QHBoxLayout()
         self.ncu_manage = QPushButton("🏭  Quản lý nhà cung ứng…")
@@ -436,16 +444,10 @@ class PoStep(QWidget):
         top.addWidget(self.ncu_manage)
         top.addStretch(1)
         lay.addLayout(top)
-        holder = QWidget()
-        self.ncu_inner = QVBoxLayout(holder)
-        self.ncu_inner.setContentsMargins(0, 0, 0, 0)
-        self.ncu_scroll = QScrollArea()
-        self.ncu_scroll.setWidgetResizable(True)
-        self.ncu_scroll.setFrameShape(QFrame.NoFrame)
-        self.ncu_scroll.setMinimumHeight(330)
-        self.ncu_scroll.setWidget(holder)
-        lay.addWidget(self.ncu_scroll, 1)
+        self.ncu_inner = QVBoxLayout()
+        lay.addLayout(self.ncu_inner)
         self.ncu_warn = _label("", "hint", wrap=True)
+        self.ncu_warn.setMinimumHeight(44)
         lay.addWidget(self.ncu_warn)
         self.ncu_widgets = []
         return box
@@ -465,21 +467,8 @@ class PoStep(QWidget):
         for key, label, idx in self.lot.ncu_groups():
             g = QGroupBox(f"{label} ({len(idx)} mã)")
             gl = QVBoxLayout(g)
-            row = QHBoxLayout()
-            row.addWidget(QLabel("Nhà cung ứng của cả nhóm:"))
-            gc = QComboBox()
-            gc.setMinimumWidth(300)
-            gc.addItem("— chọn —", "")
-            for n in names:
-                gc.addItem(n, n)
-            cur = {self.lot.items[i].get("ncu") for i in idx}
-            gc.setCurrentIndex(max(0, gc.findData(cur.pop())) if len(cur) == 1 else 0)
-            gc.activated.connect(lambda _i, k=key, c=gc: self.on_group_supplier(k, c.currentData() or ""))
-            row.addWidget(gc)
-            row.addStretch(1)
-            gl.addLayout(row)
             t = QTableWidget(len(idx), 4)
-            t.setHorizontalHeaderLabels(["Mã", "Tên theo khách hàng (ERP)", "Số lượng", "Nhà cung ứng"])
+            t.setHorizontalHeaderLabels(["Mã", "Tên theo khách hàng (ERP)", "Số lượng", "Nhà cung ứng (theo mã định danh)"])
             t.verticalHeader().hide()
             t.verticalHeader().setDefaultSectionSize(40)
             t.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -509,10 +498,9 @@ class PoStep(QWidget):
                 for n in names:
                     cc.addItem(n, n)
                 cc.setCurrentIndex(max(0, cc.findData(it.get("ncu") or "")))
-                cc.activated.connect(lambda _i, c=code, w=cc: self.on_code_supplier(c, w.currentData() or ""))
+                cc.activated.connect(lambda _i, c=code, d=it.get("ncu_id", ""), w=cc: self.on_ident_supplier(d, c, w.currentData() or ""))
                 t.setCellWidget(r, 3, cc)
             gl.addWidget(t)
-            g.setMinimumHeight(t.height() + 90)  # đủ chỗ cho ô chọn nhóm + bảng; thiếu chỗ thì cuộn
             self.ncu_inner.addWidget(g)
             self.ncu_widgets.append(g)
         self._ncu_msg()
@@ -522,14 +510,9 @@ class PoStep(QWidget):
         self.ncu_warn.setText("⚠ " + "  ".join(b) if b else "✅ Đã đủ tên theo khách hàng và nhà cung ứng cho mọi nhóm.")
         self.ncu_warn.setStyleSheet(f"color: {theme.WARN if b else theme.OK}; font-weight: 600;")
 
-    def on_group_supplier(self, key, name):
-        self.lot.set_group_supplier(key, name)
-        self.refresh_ncu()
-        self.changed.emit()
-
-    def on_code_supplier(self, code, name):
-        self.lot.set_code_supplier(code, name)
-        self._ncu_msg()
+    def on_ident_supplier(self, ident, code, name):
+        self.lot.set_ident_supplier(ident, name, code)
+        QTimer.singleShot(0, self.refresh_ncu)  # các mã cùng định danh đổi theo
         self.changed.emit()
 
     def on_ten_kh(self, code, text, goc=""):
