@@ -5903,8 +5903,8 @@ def parse_erp_po_rows(text):
 
 
 _PCS_ROW = re.compile(
-    r"(?P<code>(?<![A-Za-z0-9])\d[A-Z0-9]{9,}(?![A-Za-z0-9]))(?P<mid>.{0,220}?)(?P<qty>(?<![\d,.])\d[\d,]*)\s*(?P<unit>PCS|EA|PC|SET)\s+(?P<amt>\d[\d,]*\.\d{2})\s+(?P<date>\d{2}/\d{2}/\d{4})\s*(?P<price>\d[\d,]*\.\d{2,4})",
-    re.S,
+    r"(?P<code>(?<![A-Za-z0-9])\d[A-Z0-9]{9,}(?![A-Za-z0-9]))(?P<mid>.{0,220}?)(?P<qty>(?<![\d,.])\d[\d,]*)\s*(?P<unit>PCS|EA|PC|SET)\s*(?P<amt>\d[\d,]*\.\d{2})(?P<tail>[^\n]*)",
+    re.S | re.I,
 )
 
 
@@ -6182,16 +6182,27 @@ def find_po_after_label(text):
 
 def parse_pcs_note_rows(text):
     """PO kiểu 'Mã SP | Mô tả | SL PCS | Thành tiền | Ngày giao + Đơn giá' (VD Quang Ích). Mỗi dòng: mã, SL, thành tiền, ngày giao, đơn giá.
-    Chỉ nhận dòng có SL x đơn giá = thành tiền. Trả [{code, qty, price, desc, ship}]."""
+    Ngày giao và đơn giá dính liền thành tiền, có thể ngược thứ tự ('27/11/202618,104.0000' hoặc '12,395.000011/11/2026'); PCS hoa hay thường.
+    Đơn giá ghi 0.0000 (hàng bù) thì lấy thành tiền / SL. Chỉ nhận dòng có SL x đơn giá = thành tiền. Trả [{code, qty, price, desc, ship}]."""
     rows = []
     for m in _PCS_ROW.finditer(text or ""):
+        tail = m.group("tail")
+        d = re.search(r"\d{2}/\d{2}/\d{4}", tail)
+        ship = d.group(0) if d else ""
+        rest = tail.replace(ship, " ", 1) if ship else tail
+        pm = re.search(r"(?<![\d,.])\d{1,3}(?:,\d{3})*\.\d{2,4}|(?<![\d,.])\d+\.\d{2,4}", rest)
         try:
-            qty, amt, price = (float(m.group(k).replace(",", "")) for k in ("qty", "amt", "price"))
+            qty, amt = (float(m.group(k).replace(",", "")) for k in ("qty", "amt"))
+            price = float(pm.group(0).replace(",", "")) if pm else 0.0
         except ValueError:
             continue
-        if qty <= 0 or price <= 0 or abs(qty * price - amt) > 1:
+        if qty <= 0 or amt <= 0:
             continue
-        rows.append({"code": m.group("code"), "qty": qty, "price": price, "ship": m.group("date"),
+        if price <= 0:
+            price = round(amt / qty, 4)  # PO ghi đơn giá 0 (hàng bù): giá = thành tiền / SL
+        if abs(qty * price - amt) > 1:
+            continue
+        rows.append({"code": m.group("code"), "qty": qty, "price": price, "ship": ship,
                      "desc": re.sub(r"\s+", " ", re.sub(r"[^\x20-\x7E\u00C0-\u1EF9]", " ", m.group("mid"))).strip()})
     return rows
 

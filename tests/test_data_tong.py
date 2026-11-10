@@ -176,3 +176,14 @@ def test_able_import_po_rows_and_dccn_template(data_dir, tmp_path):
         ws = openpyxl.load_workbook(res["path"]).worksheets[0]
         assert ws["I12"].value == 1728 and ws["J12"].value == 4725 and ws["K12"].value == "=I12*J12" and ws["D12"].value == "20260821-00231"
         assert ws["I13"].value == 100 and ws["B7"].value.endswith("CONG TY ABLE TEST")
+
+
+def test_pcs_note_rows_handle_lowercase_pcs_and_fused_price_date_in_any_order():
+    text = ("1  2V01PRK000010   Ố ắng gi y tr ng 空白管1000    PCS                 18,104,000.00  27/11/202618,104.0000\n77*4*1160mm\n"
+            "2  2V01PRK000014Ố ắng gi y tr ng 空白管2200    pcs                 23,980,000.00 10/11/202610,900.0000\n"
+            " 2V01PRK000013   Ố ắng gi y tr ng 空白管100    PCS                  1,239,500.0012,395.000011/11/2026\n"
+            " 2V01PRK000013   Ố ắng gi y tr ng 空白管100    PCS                  1,239,500.000.000009/11/2026\n")
+    rows = app.parse_pcs_note_rows(text)
+    assert [(r["code"], r["qty"], r["price"], r["ship"]) for r in rows] == [
+        ("2V01PRK000010", 1000.0, 18104.0, "27/11/2026"), ("2V01PRK000014", 2200.0, 10900.0, "10/11/2026"),
+        ("2V01PRK000013", 100.0, 12395.0, "11/11/2026"), ("2V01PRK000013", 100.0, 12395.0, "09/11/2026")]
