@@ -3020,7 +3020,7 @@ def build_vat_bkav_sheet(wb, rec, sheet_name="VAT_BKAV"):
             24: prof.get("emails", "") if idx == 1 else "",
         }
         if is_arizon(prof) and not is_best_docset(prof):  # Arizon: tên = mã + xuống dòng + tên, không ghi PO, thông tin người mua chỉ ở dòng đầu
-            vals[3] = f"{it.get('ma_sp', '')}\n{it['ten_sp']}".strip() if it.get("ma_sp") else it["ten_sp"]
+            vals[3] = f"{it.get('ma_sp', '')}\n{strip_leading_code(it['ten_sp'], it.get('ma_sp'))}".strip() if it.get("ma_sp") else it["ten_sp"]
             vals[4] = ""
             vals[10] = None
             vals[14] = prof.get("buyerPerson", "") or None
@@ -3124,7 +3124,7 @@ def build_pxk_bkav_sheet(wb, rec, sheet_name="PXK_BKAV"):
         }
         if is_arizon(prof) and not is_best_docset(prof):  # Arizon: tên = mã + xuống dòng + tên, không ghi PO, thông tin chuyến chỉ ở dòng đầu
             vals[4] = ""
-            vals[5] = f"{it.get('ma_sp', '')}\n{it['ten_sp']}".strip() if it.get("ma_sp") else it["ten_sp"]
+            vals[5] = f"{it.get('ma_sp', '')}\n{strip_leading_code(it['ten_sp'], it.get('ma_sp'))}".strip() if it.get("ma_sp") else it["ten_sp"]
             if idx > 1:
                 for k in range(10, 24):
                     vals.pop(k, None)
@@ -3226,7 +3226,7 @@ def build_pkl_standard_sheet(wb, rec, sheet_name="Invoice_PKL"):
     items = rec.get("items", [])
     for idx, it in enumerate(items):
         r = start_r + idx
-        _nm = (f"{it['ma_sp']}\n" if prof.get("custom") and it.get("ma_sp") else "") + (it.get("ten_hq") or it["ten_sp"])
+        _nm = invoice_item_name(prof, it)
         _lines = sum(max(1, math.ceil(len(part) / 40)) for part in _nm.split("\n"))  # cột Tên hàng rộng ~40 ký tự chữ 11
         ws.row_dimensions[r].height = max(36, 15 * _lines + 4)
         w_kg = it.get("kg") or 0
@@ -3238,7 +3238,7 @@ def build_pkl_standard_sheet(wb, rec, sheet_name="Invoice_PKL"):
         row_cells = [
             (1, "=ROW()-12", Font(name="Times New Roman", size=13), "center", None),
             # khách mới có mã hàng riêng (VD ARIZON 3609100670001): ghi mã trên dòng đầu như Invoice mẫu của khách
-            (2, (f"{it['ma_sp']}\n" if prof.get("custom") and it.get("ma_sp") else "") + (it.get("ten_hq") or it["ten_sp"]),
+            (2, invoice_item_name(prof, it),
              Font(name="Calibri", size=11), "left", None),
             (3, po_val, Font(name="Calibri Light", size=12), "center", None),
             (4, unit_val, Font(name="Calibri Light", size=12), "center", None),
@@ -3700,10 +3700,31 @@ def code_name_style(prof):
     return (prof or {}).get("nameStyle") == "ma_ten" or "QUANG ICH" in strip_accents_upper(str((prof or {}).get("name") or ""))
 
 
+def strip_leading_code(name, code):
+    """Bỏ mã hàng đứng đầu tên (kể cả lặp 2-3 lần, xuống dòng hay dấu ngăn), để ghép 'mã + tên' không bị ghi mã hai lần."""
+    n = str(name or "").strip()
+    code = str(code or "").strip()
+    if not code:
+        return n
+    out = re.sub(r"^(?:\s*" + re.escape(code) + r"(?![A-Za-z0-9])[\s:,;.\-]*)+", "", n, flags=re.I).strip()
+    return out or n
+
+
 def with_code(prof, it, name):
-    """Tên hàng kèm mã hàng đứng trước nếu khách dùng kiểu 'mã + tên' (không ghi lặp khi tên đã bắt đầu bằng mã)."""
+    """Tên hàng kèm mã hàng đứng trước nếu khách dùng kiểu 'mã + tên': luôn dạng '<mã> <tên>' đúng một lần (tên đã có mã ở đầu thì không ghi lặp)."""
     code = str(it.get("ma_sp") or "").strip()
-    return f"{code} {name}" if code_name_style(prof) and code and not str(name).strip().startswith(code) else name
+    return f"{code} {strip_leading_code(name, code)}" if code_name_style(prof) and code else name
+
+
+def invoice_item_name(prof, it):
+    """Ô Tên hàng của Invoice chuẩn: khách 'mã + tên' ghi '<mã> <tên>' một dòng; khách riêng khác ghi mã rồi xuống dòng tên. Không bao giờ lặp mã."""
+    name = it.get("ten_hq") or it["ten_sp"]
+    code = str(it.get("ma_sp") or "").strip()
+    if code_name_style(prof) and code:
+        return f"{code} {strip_leading_code(name, code)}"
+    if prof.get("custom") and code:
+        return f"{code}\n{strip_leading_code(name, code)}"
+    return name
 
 
 def is_arizon(prof):

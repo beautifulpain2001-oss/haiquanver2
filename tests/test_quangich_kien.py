@@ -280,3 +280,16 @@ def test_invoice_total_weights_are_not_rounded(store, tmp_path):
     out = mau_chung_tu.fill_pkl_arizon(app, openpyxl.Workbook(), {"docDate": "2026-11-05", "pxkNo": "1", "items": [item]}, {"name": "ARZ", "addr": "HY", "unit": "chiếc"}, mau_chung_tu.load_template(str(path)), "Inv")
     tot = [c for row in out.iter_rows(min_row=14) for c in row if isinstance(c.value, str) and c.value.upper().startswith("=SUM(") and c.column_letter in "IK"]
     assert len(tot) == 2 and all(c.number_format == app.ACC3 for c in tot)
+
+
+def test_code_plus_name_never_repeats_the_code(store):
+    """Khách 'mã + tên' (Quang Ích): mọi chứng từ ghi '<mã> <tên>' đúng một lần, kể cả khi tên đã có mã ở đầu."""
+    assert app.strip_leading_code("2V01PRK000013 2V01PRK000013 Ống giấy trắng 77 x 3 x 1120 mm", "2V01PRK000013") == "Ống giấy trắng 77 x 3 x 1120 mm"
+    assert app.strip_leading_code("2v01prk000013Ống giấy", "2V01PRK000013") == "Ống giấy"
+    prof = {"name": "CÔNG TY TNHH CÔNG NGHIỆP BAO BÌ QUANG ÍCH VIỆT NAM", "custom": True}
+    expect = "2V01PRK000013 Ống giấy trắng 77 x 3 x 1120 mm"
+    for name in ("Ống giấy trắng 77 x 3 x 1120 mm", "2V01PRK000013 Ống giấy trắng 77 x 3 x 1120 mm", "2V01PRK000013\n2V01PRK000013 Ống giấy trắng 77 x 3 x 1120 mm"):
+        it = {"ma_sp": "2V01PRK000013", "ten_sp": name, "ten_hq": ""}
+        assert app.with_code(prof, it, name) == expect and app.invoice_item_name(prof, it) == expect
+    other = {"name": "CÔNG TY KHÁC", "custom": True}
+    assert app.invoice_item_name(other, {"ma_sp": "A1", "ten_sp": "A1 Ống", "ten_hq": ""}) == "A1\nỐng"
