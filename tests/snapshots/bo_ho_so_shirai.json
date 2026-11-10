@@ -1395,11 +1395,6 @@
     "b": false,
     "fmt": "General",
     "v": "Non.FSC"
-   },
-   "Q4": {
-    "b": true,
-    "fmt": "General",
-    "v": "Nhà cung ứng"
    }
   },
   "merged": [],
@@ -1419,8 +1414,7 @@
    "M": 22.0,
    "N": 22.0,
    "O": 22.0,
-   "P": 22.0,
-   "Q": 22.0
+   "P": 22.0
   }
  },
  "VAT_BKAV_30.10": {
