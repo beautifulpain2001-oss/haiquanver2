@@ -22,7 +22,7 @@ def test_round_half_up_matches_excel(x, expected):
 
 @pytest.mark.parametrize("net,tare,expected", [
     (18.36, "0.02", 18.38), (18.36, "0.01", 18.37), (18.36, "0,02", 18.38),  # dấu phẩy thập phân kiểu Việt Nam
-    (18.36, "", 18.36), (18.36, "0.08%", 18.374688), (110.66, "0.08%", 110.748528), (0, "0.02", 0.0),
+    (18.36, "", 18.36), (18.36, "0.08%", 18.38), (110.66, "0.08%", 110.75), (0, "0.02", 0.0),
 ])
 def test_lot_gross_fixed_or_percent(net, tare, expected):
     assert app.lot_gross(net, tare) == expected
@@ -98,7 +98,7 @@ def test_names_follow_invoice_convention(items):
 def test_kien_net_gross_use_rules_and_half_up(items):
     box = items["Thùng Carton Box FUL-1080SDNA (W936xD186xH405)"]
     assert box["div"] == 10 and box["kien"] == 6  # 53 / 10 làm tròn lên
-    assert box["net"] == app.exact(53 * box["kg"]) and box["gross"] == app.exact(box["net"] + 0.02)
+    assert box["net"] == app.round_up(53 * box["kg"]) and box["gross"] == app.exact(box["net"] + 0.02)
     pad = items["Tấm lót Pad FUL-1065D (AF_1B: W125xD105xH360)"]
     assert pad["div"] == 50 and pad["kien"] == 5  # 204 / 50
 
@@ -114,7 +114,7 @@ def test_remembered_norm_beats_default_rule(store):
 def test_tare_percent_option_reproduces_percentage_gross(store):
     _, schedules = app.parse_shirai_po_excel(FIXTURE, store, "0.08%")
     box = schedules["25.10"]["items"][0]
-    assert box["gross"] == app.exact(box["net"] * 1.0008)
+    assert box["gross"] == app.round_up(box["net"] * 1.0008)
 
 
 # ---------------------------------------------------------------- thành tiền = SL x đơn giá; lệch thì báo

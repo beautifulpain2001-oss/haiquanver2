@@ -265,7 +265,7 @@ def test_invoice_total_weights_are_not_rounded(store, tmp_path):
     ws = openpyxl.load_workbook(app.lot_export(store, make_rec(store, "tot1", [item]), "PKL")["path"]).active
     totals = [c for row in ws.iter_rows(min_row=14, max_row=14) for c in row if isinstance(c.value, str) and c.value.upper().startswith(("=SUM(", "=SUBTOTAL("))]
     weights = [c for c in totals if c.column_letter in "GH"]
-    assert weights and all(c.number_format == app.ACC3 for c in weights)
+    assert weights and all(c.number_format == app.WT2 for c in weights)
     # mẫu Arizon của khách: ô tổng trọng lượng cũng đủ 3 số lẻ
     import mau_chung_tu
     t = openpyxl.Workbook()
@@ -279,7 +279,7 @@ def test_invoice_total_weights_are_not_rounded(store, tmp_path):
     t.save(path)
     out = mau_chung_tu.fill_pkl_arizon(app, openpyxl.Workbook(), {"docDate": "2026-11-05", "pxkNo": "1", "items": [item]}, {"name": "ARZ", "addr": "HY", "unit": "chiếc"}, mau_chung_tu.load_template(str(path)), "Inv")
     tot = [c for row in out.iter_rows(min_row=14) for c in row if isinstance(c.value, str) and c.value.upper().startswith("=SUM(") and c.column_letter in "IK"]
-    assert len(tot) == 2 and all(c.number_format == app.ACC3 for c in tot)
+    assert len(tot) == 2 and all(c.number_format == app.WT2 for c in tot)
 
 
 def test_code_plus_name_never_repeats_the_code(store):
@@ -293,3 +293,31 @@ def test_code_plus_name_never_repeats_the_code(store):
         assert app.with_code(prof, it, name) == expect and app.invoice_item_name(prof, it) == expect
     other = {"name": "CÔNG TY KHÁC", "custom": True}
     assert app.invoice_item_name(other, {"ma_sp": "A1", "ten_sp": "A1 Ống", "ten_hq": ""}) == "A1\nỐng"
+
+
+def test_invoice_weights_round_up_to_two_decimals_gross_is_net_plus_tare():
+    """Trọng lượng tịnh tối đa 2 số lẻ làm tròn LÊN (.346 -> .35); cả bì = tịnh + bì (1 + .35 = 1.35); dòng tổng cộng các dòng đã làm tròn."""
+    assert app.round_up(0.346) == 0.35 and app.round_up(804.52) == 804.52 and app.round_up(13.545) == 13.55 and app.round_up(2.0) == 2.0
+    assert app.lot_gross(0.35, "1") == 1.35
+    lines = [{"qty": 1000, "kg": 0.346}, {"qty": 3, "kg": 0.1234}]
+    app.lot_recalc(lines, "tesa", "1")
+    assert [(x["net"], x["gross"]) for x in lines] == [(346.0, 347.0), (0.38, 1.38)]  # 3 x 0.1234 = 0.3702 -> 0.38
+    assert round(sum(x["net"] for x in lines), 2) == 346.38  # tổng = cộng các dòng, không làm tròn lên thêm
+
+
+def test_deli_two_factories_share_one_item_catalog(store):
+    """Deli Hải Dương và Deli Bắc Ninh dùng chung danh mục mã hàng; thêm mã ở nhà nào thì nhà kia cũng có."""
+    base = {"unit": "chiếc", "mst": "0100000040", "addr": "HD"}
+    store.save_learned_customer("delihd", dict(base, name="CÔNG TY TNHH DELI HẢI DƯƠNG", label="Deli Hải Dương"), [{"name": "Ống A", "code": "340025128", "price": 1, "div": 5, "kg": 0.78}])
+    store.save_learned_customer("delibn", dict(base, name="CÔNG TY TNHH DELI BẮC NINH", label="Deli Bắc Ninh"), [{"name": "Ống B", "code": "340025472", "price": 2, "div": 20, "kg": 0.378}])
+    assert {x["code"] for x in store.items_for_customer("delihd")} == {"340025128", "340025472"}
+    assert store.items_for_customer("delibn") is store.items_for_customer("delihd")
+    store.save_learned_customer("delibn", dict(base, name="CÔNG TY TNHH DELI BẮC NINH", label="Deli Bắc Ninh"), [{"name": "Ống C", "code": "340015528", "price": 3, "div": 5, "kg": 0.78}])
+    assert "340015528" in {x["code"] for x in store.items_for_customer("delihd")}
+    reloaded = app.DedicatedDataStore(base_dir=store.base_dir)
+    assert {x["code"] for x in reloaded.items_for_customer("delibn")} == {"340025128", "340025472", "340015528"}
+    # khách khác không bị gộp; khách chọn 'dùng chung với' khách khác thì chung
+    store.save_learned_customer("riengx", dict(base, name="CÔNG TY KHÁC X", label="X"), [{"name": "Ống Z", "code": "Z1", "price": 1}])
+    assert "Z1" not in {x["code"] for x in store.items_for_customer("delihd")}
+    store.save_learned_customer("riengy", dict(base, name="CÔNG TY KHÁC Y", label="Y", shareItems="riengx"), [{"name": "Ống W", "code": "W1", "price": 1}])
+    assert {x["code"] for x in store.items_for_customer("riengx")} == {"Z1", "W1"} == {x["code"] for x in store.items_for_customer("riengy")}

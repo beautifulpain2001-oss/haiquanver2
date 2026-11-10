@@ -89,7 +89,7 @@ def test_export_each_documents(store, cust):
     ws = openpyxl.load_workbook(path["PKL"]).active
     assert ws["E3"].value == "Số ĐĐH:ABCDE2609190002" and ws["I3"].value == "Ngày: 19/09/2026" and ws["E2"].value == "PXKKVCNB :00000279"
     assert ws["E13"].value == 20000 and ws["F13"].value == 0.03 and ws["G13"].value == "=H13+1" and ws["I13"].value == "=ROUNDUP(E13/50,0)"
-    assert ws["B13"].value == "90000001" and ws["H13"].value == "=E13*F13" and ws["H12"].value.startswith("Trọng lượng") and ws.max_column == 11  # đã bỏ cột H trống
+    assert ws["B13"].value == "90000001" and ws["H13"].value == "=ROUNDUP(E13*F13,2)" and ws["H12"].value.startswith("Trọng lượng") and ws.max_column == 11  # đã bỏ cột H trống
     merged_in = {(r, c) for rg in ws.merged_cells.ranges for r in range(rg.min_row, rg.max_row + 1) for c in range(rg.min_col, rg.max_col + 1)} - {(rg.min_row, rg.min_col) for rg in ws.merged_cells.ranges}
     assert all(all([ws.cell(row=r, column=c).border.left.style, ws.cell(row=r, column=c).border.right.style, ws.cell(row=r, column=c).border.top.style, ws.cell(row=r, column=c).border.bottom.style])
                for r in range(1, 15) for c in range(1, 12) if (r, c) not in merged_in)  # đủ viền khắp khung (ô nằm trong vùng gộp lấy viền theo vùng)

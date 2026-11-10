@@ -78,7 +78,7 @@ def test_form_rows_and_totals_follow_item_count(store, rec):
     store.form_make("arz", "PKL")
     rec["items"].append(dict(ITEMS[1], ma_sp="A3", ten_sp="Ống C", qty=7, amount=3500))
     ws = openpyxl.load_workbook(app.lot_export(store, rec, "PKL")["path"]).worksheets[0]
-    assert [ws[f"H{r}"].value for r in (13, 14, 15)] == ["=E13*F13", "=E14*F14", "=E15*F15"]  # công thức dòng hàng dời theo dòng
+    assert [ws[f"H{r}"].value for r in (13, 14, 15)] == ["=ROUNDUP(E13*F13,2)", "=ROUNDUP(E14*F14,2)", "=ROUNDUP(E15*F15,2)"]  # công thức dòng hàng dời theo dòng
     assert ws["E16"].value == "=SUBTOTAL(9,E13:E15)" and ws["D17"].value == "=I16"  # tổng kéo dài, ô dưới dời xuống
     assert ws["B15"].value == "A3\nỐng C"
 

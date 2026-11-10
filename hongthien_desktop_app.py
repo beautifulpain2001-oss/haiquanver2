@@ -267,6 +267,7 @@ CUSTOMER_FIELDS = [
     ("deliveryTerm", "Điều kiện giao hàng ghi trên Sale Contract (vd DAP BAC NINH)"),
     ("poGen", "Công thức số PO tự tạo (vd HT{yyyymm}{nn}; YNCGDD{yymmdd}{nnnn} = tiền tố + ngày + 4 số thứ tự)"),
     ("bkavId", "Mã chứng từ Bkav IDChungTu (vd deli{dd}/{mm} hd; trống = mã khách + ngày.tháng)"),
+    ("shareItems", "Dùng chung danh mục mã hàng với khách khác (nhập mã khách, vd delihd; Deli Hải Dương / Bắc Ninh tự dùng chung)"),
     ("fixedItem", "Mã hàng cố định (khách chỉ đặt 1 mã: không đọc PO, chỉ xác nhận số PO, SL, giá)"),
     ("note", "Lưu ý đặc thù khi làm chứng từ (hiện ở trang Khách hàng và nhắc ở bước xuất)"),
 ]
@@ -381,13 +382,22 @@ def exact(x):
 ACC3 = '#,##0.00##'  # trọng lượng: tối thiểu 2 số lẻ (.07, .00), có số lẻ thứ 3-4 khác 0 thì hiện (.006), không làm tròn
 
 
+WT2 = '#,##0.00'  # trọng lượng tịnh / cả bì / dòng tổng của invoice: đúng 2 số sau dấu chấm
+
+
+def round_up(x, nd=2):
+    """Làm tròn LÊN như hàm ROUNDUP của Excel (bỏ sai số số thực trước): 0.346 -> 0.35."""
+    from decimal import ROUND_UP, Decimal
+    return float(Decimal(format(float(x), ".12g")).quantize(Decimal(1).scaleb(-nd), rounding=ROUND_UP))
+
+
 def xl_net(qty_ref, kg_ref):
-    """Công thức Excel cho trọng lượng tịnh = SL x kg/chiếc (nguyên bản)."""
-    return f"={qty_ref}*{kg_ref}"
+    """Công thức Excel cho trọng lượng tịnh = SL x kg/chiếc, làm tròn LÊN 2 số lẻ (.346 -> .35)."""
+    return f"=ROUNDUP({qty_ref}*{kg_ref},2)"
 
 
 def xl_gross(net_ref, it):
-    """Công thức Excel cho trọng lượng cả bì = tịnh + bì (kg) của dòng, nguyên bản."""
+    """Công thức Excel cho trọng lượng cả bì = tịnh (đã làm tròn) + bì (kg) của dòng: 1 + 0.35 = 1.35."""
     tare = float(it.get("tare") or 0)
     gross, net = float(it.get("gross") or 0), float(it.get("net") or 0)
     if tare <= 0 and gross > net > 0:
@@ -402,7 +412,7 @@ def lot_gross(net, tare_text):
     if net <= 0:
         return 0.0
     if t.endswith("%"):
-        return exact(net * (1 + float(t[:-1] or 0) / 100))
+        return round_up(net * (1 + float(t[:-1] or 0) / 100))
     return exact(net + float(t or 0))
 
 
@@ -684,6 +694,7 @@ class DedicatedDataStore:
             except Exception:
                 pass
         self.register_custom_profiles()
+        self._link_shared_catalogs()
         apply_company(self.company)  # luôn áp lại: mỗi kho dữ liệu có thông tin công ty riêng
         apply_profile_overrides(self.profile_overrides)
         self.rebuild_erp_map()
@@ -762,6 +773,41 @@ class DedicatedDataStore:
     def items_for_customer(self, key):
         return {"kodi": self.kodi_items, "tesa": self.tesa_items}.get(key) or self.custom_items.get(key, [])
 
+    def _catalog_group(self, key):
+        """Nhóm các khách dùng CHUNG danh mục mã hàng: khách ghi 'shareItems' = mã khách khác, hoặc cả hai nhà máy Deli (tên có chữ DELI). None nếu dùng riêng."""
+        prof = PROFILES.get(key) or self.custom_profiles.get(key) or {}
+        share = str(prof.get("shareItems") or "").strip().lower()
+        if share:
+            other = next((k for k, p in {**self.custom_profiles, **{k: v for k, v in PROFILES.items() if k not in BUILTIN_CUSTOMERS}}.items()
+                          if k != key and (k.lower() == share or str(p.get("label") or "").strip().lower() == share)), None)
+            if other:
+                return "pair:" + "|".join(sorted((key, other)))
+        if re.search(r"\bDELI\b", strip_accents_upper(str(prof.get("name") or ""))):
+            return "deli"
+        return None
+
+    def _link_shared_catalogs(self):
+        """Khách cùng nhóm dùng chung MỘT danh sách mã hàng (cùng đối tượng danh sách): thêm/sửa mã ở khách nào cũng có ở khách kia. Danh mục riêng cũ được gộp (trùng mã hoặc tên thì giữ bản đầu)."""
+        groups = {}
+        for key in list(self.custom_items):
+            g = self._catalog_group(key)
+            if g:
+                groups.setdefault(g, []).append(key)
+        for g, keys in groups.items():
+            if g.startswith("pair:"):
+                keys = g[5:].split("|")
+            for k in keys:
+                self.custom_items.setdefault(k, [])
+            merged = []
+            for k in keys:
+                for it in self.custom_items.get(k) or []:
+                    if not any((it.get("code") and x.get("code") == it.get("code")) or x.get("name") == it.get("name") for x in merged):
+                        merged.append(it)
+            base = self.custom_items[keys[0]]
+            base[:] = merged
+            for k in keys[1:]:
+                self.custom_items[k] = base
+
     def save_learned_customer(self, key, profile_fields, items):
         """Lưu khách hàng mới (đã được người dùng xác nhận) vào master_catalog.json."""
         key = re.sub(r"[^a-z0-9_]", "", (key or "").lower())
@@ -793,6 +839,7 @@ class DedicatedDataStore:
             if row["div"] or row["kg"] or row["hs"]:
                 self.item_mem[name] = {"div": row["div"], "kg": row["kg"], "hs": row["hs"]}
         PROFILES[key] = prof
+        self._link_shared_catalogs()
         self.save_catalog()
         return key
 
@@ -1522,7 +1569,7 @@ class DedicatedDataStore:
             if changed:
                 qty, kg, div, tare = float(ln.get("qty") or 0), float(ln.get("kg") or 0), float(ln.get("div") or 0), float(ln.get("tare") or 0)
                 ln["kien"] = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
-                ln["net"] = exact(qty * kg) if kg > 0 else 0.0
+                ln["net"] = round_up(qty * kg) if kg > 0 else 0.0
                 ln["gross"] = exact(ln["net"] + tare) if ln["net"] > 0 else 0.0
                 n += 1
         return n
@@ -1655,6 +1702,7 @@ class DedicatedDataStore:
                             else:
                                 have.append(row)
                     self.custom_items = items
+                    self._link_shared_catalogs()
                 if disk:
                     seen = {json.dumps(x, sort_keys=True) for x in self.read_fixes}
                     self.read_fixes = [x for x in (disk.get("read_fixes") or []) if json.dumps(x, sort_keys=True) not in seen] + self.read_fixes
@@ -2574,7 +2622,7 @@ def parse_kodi_po_text(text, kodi_catalog, data_store=None, tare_val=1.0):
             div = mem["div"] if (mem and mem.get("div")) else (known["div"] if known else 5)
             kg = mem["kg"] if (mem and mem.get("kg")) else (known["kg"] if known else 1.96)
             kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
-            net = exact(qty * kg) if kg > 0 else 0.0
+            net = round_up(qty * kg) if kg > 0 else 0.0
             gross = exact(net + tare_val) if net > 0 else 0.0
             lines.append({
                 "stt": len(lines) + 1,
@@ -2760,7 +2808,7 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
             qty = r2["qty"]
             price = r2["price"] or (item or {}).get("price", 0)
             kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
-            net = exact(qty * kg) if kg > 0 else 0.0
+            net = round_up(qty * kg) if kg > 0 else 0.0
             found_lines.append({
                 "stt": len(found_lines) + 1, "po": r2["po"],
                 "hs": (mem or {}).get("hs") or (item or {}).get("hs") or "48229090",
@@ -2794,7 +2842,7 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
         qty = res["qty"]
         price = res["price"] or (known["price"] if known else 0)
         kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
-        net = exact(qty * kg) if kg > 0 else 0.0
+        net = round_up(qty * kg) if kg > 0 else 0.0
         gross = exact(net + tare) if net > 0 else 0.0
         found_lines.append({
             "stt": len(found_lines) + 1,
@@ -2896,7 +2944,7 @@ def parse_shirai_po_excel(file_path, data_store, tare_text="0.02"):
             div = float(mem.get("div") or 0) or float(shirai_default_div(final_name))
             kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
 
-            net_w = exact(qty * w_kg) if w_kg else 0.0
+            net_w = round_up(qty * w_kg) if w_kg else 0.0
             try:
                 gross_w = lot_gross(net_w, tare_text)
             except ValueError:
@@ -3307,8 +3355,8 @@ def build_pkl_standard_sheet(wb, rec, sheet_name="Invoice_PKL"):
             (4, unit_val, Font(name="Calibri Light", size=12), "center", None),
             (5, it.get("qty", 0), Font(name="Calibri Light", size=14), "right", "#,##0"),
             (6, w_kg if has_w else None, Font(name="Calibri Light", size=13), "right", ACC3),
-            (7, gross_val, Font(name="Calibri Light", size=13), "right", ACC3),
-            (8, net_val, Font(name="Calibri Light", size=13), "right", ACC3),
+            (7, gross_val, Font(name="Calibri Light", size=13), "right", WT2),
+            (8, net_val, Font(name="Calibri Light", size=13), "right", WT2),
             (9, f"=ROUNDUP(E{r}/{float(it.get('div') or 0):g},0)" if float(it.get("div") or 0) > 0 else (it.get("kien") or None), Font(name="Calibri Light", size=13), "right", "#,##0"),  # số kiện luôn làm tròn LÊN
             (10, it.get("price", 0), Font(name="Times New Roman", size=13), "center", "#,##0"),
             (11, f"=J{r}*E{r}", Font(name="Times New Roman", size=14), "center", "#,##0"),
@@ -3328,7 +3376,7 @@ def build_pkl_standard_sheet(wb, rec, sheet_name="Invoice_PKL"):
         ws.cell(row=tot_r, column=c_i).border = BOX_BORDER
     tb = ws.cell(row=tot_r, column=2, value="Tổng cộng")
     tb.font = Font(name="Calibri Light", size=14, bold=True)
-    for col_i, let, fmt in [(5, "E", "#,##0"), (7, "G", ACC3), (8, "H", ACC3), (9, "I", "0"), (11, "K", "#,##0")]:
+    for col_i, let, fmt in [(5, "E", "#,##0"), (7, "G", WT2), (8, "H", WT2), (9, "I", "0"), (11, "K", "#,##0")]:
         c = ws.cell(row=tot_r, column=col_i, value=f"=SUBTOTAL(9,{let}{start_r}:{let}{end_r})")
         c.font = Font(name="Times New Roman", size=14, bold=True)
         c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -3452,8 +3500,8 @@ def build_pkl_kodi_sheet(wb, rec, sheet_name="Invoice_Kodi", skip_h=False):
             (2, it["ten_sp"], 12, "left", None),
             (3, it.get("unit") or "chiếc", 13, "center", None),
             (4, it.get("qty", 0), 13, "right", acc0),
-            (5, gross_formula, 12, "right", ACC3),
-            (6, net_formula, 12, "right", ACC3),
+            (5, gross_formula, 12, "right", WT2),
+            (6, net_formula, 12, "right", WT2),
             (7, kien_formula, 12, "right", acc0),
             (8, it.get("price", 0), 13, "center", acc0),
             (9, amt_formula, 13, "center", acc0),
@@ -3472,7 +3520,7 @@ def build_pkl_kodi_sheet(wb, rec, sheet_name="Invoice_Kodi", skip_h=False):
     for c_i in range(1, 10):
         ws.cell(row=tot_r, column=c_i).border = BOX_BORDER
     put(f"B{tot_r}", None, "Tổng", 13, True, "center")
-    for col_i, let, sz, fmt in [(4, "D", 13, acc0), (5, "E", 12, ACC3), (6, "F", 12, ACC3), (7, "G", 12, acc0), (9, "I", 12, acc0)]:
+    for col_i, let, sz, fmt in [(4, "D", 13, acc0), (5, "E", 12, WT2), (6, "F", 12, WT2), (7, "G", 12, acc0), (9, "I", 12, acc0)]:
         if col_i == 9 and skip_h:
             continue
         c = put(f"{let}{tot_r}", None, f"=SUM({let}{start_r}:{let}{end_r})", sz, True, "center")
@@ -3483,7 +3531,7 @@ def build_pkl_kodi_sheet(wb, rec, sheet_name="Invoice_Kodi", skip_h=False):
     put(f"B{t}", None, "Tổng: ", 14, True, "center")
     put(f"C{t}", None, f"=G{tot_r}", 13, True).number_format = "#,##0"
     put(f"D{t}", None, "kiện", 10, True).number_format = acc0
-    put(f"E{t}", None, f"=E{tot_r}", 13, True).number_format = ACC3
+    put(f"E{t}", None, f"=E{tot_r}", 13, True).number_format = WT2
     put(f"F{t}", None, "/kg", 14, True, "left")
     put(f"G{t}", None, f"=F{tot_r}", 12, True).number_format = acc2
     put(f"H{t}", None, "/kg", 14, True).number_format = acc0
@@ -3600,8 +3648,8 @@ def build_pkl_shirai_sheet(wb, rec, sheet_name=None):
         put(f"F{r}", it.get("qty", 0), 14, False, "center", "center", True, nf=acc0)
         put(f"G{r}", it.get("kg", 0), 14, False, "left", "center", True, nf=ACC3)
         has_kg = float(it.get("kg") or 0) > 0
-        put(f"H{r}", xl_gross(f"I{r}", it) if has_kg else it.get("gross", 0), 14, False, "right", "center", True, nf=ACC3)
-        put(f"I{r}", xl_net(f"F{r}", f"G{r}") if has_kg else it.get("net", 0), 16, False, "right", "center", True, nf=ACC3)
+        put(f"H{r}", xl_gross(f"I{r}", it) if has_kg else it.get("gross", 0), 14, False, "right", "center", True, nf=WT2)
+        put(f"I{r}", xl_net(f"F{r}", f"G{r}") if has_kg else it.get("net", 0), 16, False, "right", "center", True, nf=WT2)
         put(f"J{r}", f"=ROUNDUP(F{r}/{float(it.get('div') or 0):g},0)" if float(it.get("div") or 0) > 0 else it.get("kien", 0), 14, False, "center", "center", True)  # số kiện làm tròn LÊN
         put(f"K{r}", it.get("price", 0), 16, False, None, "center", None, nf=acc0)
         put(f"L{r}", f"=K{r}*F{r}", 16, False, "center", "center", True, nf=acc0)
@@ -4248,7 +4296,7 @@ def build_pkl_sunlu_sheet(wb, rec, sheet_name="Invoice"):
         div = float(it.get("div") or 0)
         vals = [(f"=ROW()-{r0 - 1}", "center", None), (it.get("ma_sp", ""), "center", "@"), (it.get("ten_sp", ""), "left", None), (it.get("unit") or prof.get("unit", ""), "center", None),
                 (it.get("qty", 0), "right", "#,##0"), (it.get("kg", 0), "right", ACC3),
-                (xl_gross(f"H{r}", dict(it, tare=tare)), "right", ACC3), (xl_net(f"E{r}", f"F{r}"), "right", ACC3),
+                (xl_gross(f"H{r}", dict(it, tare=tare)), "right", WT2), (xl_net(f"E{r}", f"F{r}"), "right", WT2),
                 (f"=ROUNDUP(E{r}/{div:g},0)" if div > 0 else it.get("kien", 0), "right", _ACC), (it.get("price", 0), "center", _ACC), (f"=J{r}*E{r}", "center", _ACC)]
         for c_i, (v, al, fmt) in enumerate(vals, 1):
             c = put(f"{get_column_letter(c_i)}{r}", None, v, 16, False, al, wrap=(c_i in (2, 3)))
@@ -4260,7 +4308,7 @@ def build_pkl_sunlu_sheet(wb, rec, sheet_name="Invoice"):
     put(f"C{t}", None, "Tổng", 16, True, "center")
     for col in "EGHIK":
         c = put(f"{col}{t}", None, f"=SUM({col}{r0}:{col}{last})", 16, True, "right")
-        c.number_format = "#,##0" if col == "E" else (ACC3 if col in "GH" else _ACC)  # tổng trọng lượng: nguyên tổng các dòng (3 số lẻ), không làm tròn
+        c.number_format = "#,##0" if col == "E" else (WT2 if col in "GH" else _ACC)  # tổng trọng lượng: tổng các dòng đã làm tròn, giữ 2 số lẻ
     for row in ws.iter_rows(min_row=1, max_row=t, min_col=1, max_col=11):  # khung viền kín từ tiêu đề đến dòng Tổng (cả ô gộp)
         for c in row:
             c.border = BOX_BORDER
@@ -4982,10 +5030,10 @@ def build_pkl_best_sheet(wb, rec, sheet_name="Invoice"):
     put(f"D{sr}", None, "kiện", 12, True)
     put(f"F{sr}", None, "", 12)
     c = put(f"G{sr}", None, t["gross"], 12, True, "right")
-    c.number_format = ACC3
+    c.number_format = WT2
     put(f"H{sr}", None, "kg", 12, True)
     c = put(f"I{sr}", None, t["net"], 12, True, "right")
-    c.number_format = ACC3
+    c.number_format = WT2
     put(f"J{sr}", None, "kg", 12, True)
     put(f"B{sr + 1}", f"B{sr + 1}:K{sr + 1}", "Hàng được sản xuất tại Việt Nam, mới 100 %", 12, True)
     put(f"H{sr + 2}", f"H{sr + 2}:M{sr + 2}", HT_NAME, 12, True, "center")
@@ -6687,7 +6735,7 @@ def lines_from_erp_rows(rows, po_no, profile, catalog_items, data_store=None, ta
         qty = int(round(r["qty"])) if abs(r["qty"] - round(r["qty"])) < 1e-9 else r["qty"]
         rp = r["price"] or float(known.get("price") or 0)
         price = int(round(rp)) if abs(rp - round(rp)) < 1e-9 else rp
-        net = exact(qty * kg) if kg > 0 else 0.0
+        net = round_up(qty * kg) if kg > 0 else 0.0
         lines.append({
             "stt": len(lines) + 1, "po": po_no, "hs": (mem or {}).get("hs") or known.get("hs", "") or (profile.get("customs") or {}).get("hs", ""),
             "ma_sp": code, "ten_sp": name, "ten_hq": known.get("ten_hq") or name,
@@ -6813,7 +6861,7 @@ def parse_generic_po_text(text, profile, catalog_items, data_store=None, tare_va
         div = (mem or {}).get("div") or known.get("div") or profile.get("defaultDiv") or 0
         kg = (mem or {}).get("kg") or known.get("kg") or 0
         kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
-        net = exact(qty * kg) if kg > 0 else 0.0
+        net = round_up(qty * kg) if kg > 0 else 0.0
         gross = exact(net + tare_val) if net > 0 else 0.0
         # Mã vật liệu / Inquiry / Customs No: ưu tiên giá trị đã nhớ (người dùng đã sửa ở Bước 1) hơn chữ OCR
         code = known.get("code") or refs.get("itemCode", "")
@@ -6863,7 +6911,7 @@ def lot_recalc(items, customer, tare_text):
         if div > 0:
             it["kien"] = math.ceil(round(qty / div * 1e6) / 1e6)
         if kg > 0:
-            it["net"] = exact(qty * kg)
+            it["net"] = round_up(qty * kg)
             it["gross"] = lot_gross(it["net"], spec)
             it["tare"] = 0.0 if str(spec).strip().endswith("%") else _tare_number(spec, 0.0)  # bì cộng thêm mỗi dòng theo ô trên màn hình: invoice ghi công thức tịnh + bì
 
@@ -7685,7 +7733,7 @@ def lot_item_from_values(store, customer, vals, tare_text="1.0", base=None):
     best = is_best_docset(PROFILES[customer])
     name, hs, code = g("ten_sp"), g("hs"), g("ma_sp")
     kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
-    net = exact(qty * kg) if kg > 0 else 0.0
+    net = round_up(qty * kg) if kg > 0 else 0.0
     gross = lot_gross(net, tare_spec)
     store.remember_item_norm(name, div, kg, hs, code=code, customer=customer if customer not in BUILTIN_CUSTOMERS else "")
     if customer not in BUILTIN_CUSTOMERS and (kg > 0 or div > 0):
