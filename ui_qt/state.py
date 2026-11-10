@@ -30,6 +30,7 @@ class Lot:
         self.files = []  # mọi file đã xuất trong lô này, để hiển thị
         self.saved = False
         self.skip_h = False  # Kodi: Invoice không lấy cột Thành Tiền
+        self.ncu_group, self.ncu_code = {}, {}  # Shirai: nhà cung ứng chọn theo nhóm hàng / đổi riêng theo mã
         self.form = {"doc_date": datetime.date.today().strftime("%Y-%m-%d"), "po": "", "po_date": "", "pxk": "", "hd": "", "tk": "", "tk_nhap": ""}
         if customer:
             self.apply_defaults()
@@ -174,7 +175,78 @@ class Lot:
             self.schedules, self.selected_dates = None, []
         self.record_id = None
         self.saved = False
+        self.apply_suppliers()
         return True
+
+    # ---- Shirai: nhà cung ứng theo nhóm hàng + tên theo khách hàng (ERP) --------------------------------------------------
+    @property
+    def is_shirai(self):
+        return self.customer == "shirai"
+
+    def apply_suppliers(self):
+        """Mỗi dòng Shirai: nhóm hàng, tên theo khách hàng (ERP, không có thì tên đã nhập tay) thay cho tên hàng, nhà cung ứng (theo mã, rồi theo nhóm, rồi lựa chọn đã nhớ)."""
+        if not self.is_shirai:
+            return
+        st = self.store
+        for it in self.items:
+            code = str(it.get("ma_sp") or "").strip()
+            goc = it.setdefault("ten_goc", it.get("ten_sp") or "")  # tên trên PO, trước khi thay bằng tên theo khách hàng
+            g = it.setdefault("ncu_nhom", st.shirai_group(goc))
+            ten, src = st.shirai_ten_kh(code, goc)
+            it["ten_kh"] = ten
+            if ten:
+                it["ten_sp"] = ten
+                it["ten_hq"] = ten
+            it["ncu"] = (self.ncu_code.get(code) or self.ncu_group.get(g) or st.supplier_pref.get("ma:" + code) or st.supplier_pref.get("nhom:" + g) or "")
+
+    def ncu_groups(self):
+        """[(mã nhóm, tên nhóm, [chỉ số dòng])] theo thứ tự carton, inner, pad, khác; chỉ nhóm có dòng."""
+        out = []
+        for key, label in self.store.SHIRAI_GROUPS:
+            idx = [i for i, it in enumerate(self.items) if it.get("ncu_nhom") == key]
+            if idx:
+                out.append((key, label, idx))
+        return out
+
+    def set_group_supplier(self, group, name):
+        self.ncu_group[group] = name
+        for it in self.items:
+            if it.get("ncu_nhom") == group:
+                self.ncu_code.pop(str(it.get("ma_sp") or "").strip(), None)  # chọn lại cả nhóm: bỏ các lần đổi riêng của nhóm
+        if name:
+            self.store.supplier_pref["nhom:" + group] = name
+            self.store.save_catalog()
+        self.apply_suppliers()
+        self.saved = False
+
+    def set_code_supplier(self, code, name):
+        self.ncu_code[code] = name
+        if name:
+            self.store.supplier_pref["ma:" + code] = name
+            self.store.save_catalog()
+        self.apply_suppliers()
+        self.saved = False
+
+    def set_ten_kh(self, code, name, goc=""):
+        self.store.set_ten_kh_tay(code, name, goc)
+        self.apply_suppliers()
+        self.saved = False
+
+    def ncu_blockers(self):
+        """Những việc phải xong trước khi sang bước sau (Shirai): tên theo khách hàng của từng mã, nhà cung ứng của từng dòng."""
+        if not self.is_shirai or not self.items:
+            return []
+        out = []
+        missing = sorted({str(it.get("ma_sp") or "") or f"(không mã) {str(it.get('ten_goc') or '')[:30]}" for it in self.items if not it.get("ten_kh")})
+        if missing:
+            out.append("Chưa có tên theo khách hàng trong ERP cho mã: " + ", ".join(missing) + ". Nhập tên rồi mới xuất được.")
+        if not self.store.suppliers:
+            out.append("Chưa có nhà cung ứng nào trong danh sách: bấm “Quản lý nhà cung ứng” để thêm.")
+        else:
+            nogo = [label for key, label, idx in self.ncu_groups() if any(not self.items[i].get("ncu") for i in idx)]
+            if nogo:
+                out.append("Chưa chọn nhà cung ứng cho nhóm: " + ", ".join(nogo) + ".")
+        return out
 
     def set_dates(self, keys):
         """Chọn các ngày giao để khai (invoice và tờ khai chỉ gồm những ngày này). Ném ValueError nếu không chọn ngày nào."""
@@ -183,6 +255,7 @@ class Lot:
             raise ValueError("Phải chọn ít nhất một ngày giao để khai.")
         self.selected_dates = keys
         self.items = self.core.lot_merge_dates(self.schedules, keys)
+        self.apply_suppliers()
         self.saved = False
 
     # ---- dòng hàng -------------------------------------------------------------
@@ -369,6 +442,7 @@ class Lot:
 
     # ---- hồ sơ, kiểm tra, xuất, lưu -------------------------------------------
     def record(self):
+        self.apply_suppliers()
         self.core.lot_fix_code_names(self.store, self.customer, self.items)  # dòng đã đọc từ bản cũ có tên = mã: sửa trước khi xuất
         self.normalize()
         self.core.lot_recalc(self.items, self.customer, self.form.get("tare", ""))  # cả bì = tịnh + bì cộng thêm mỗi dòng đang nhập ở bước ④, cho mọi invoice
@@ -385,6 +459,9 @@ class Lot:
             return ["Chưa chọn khách hàng."], warns
         if not self.items:
             return ["Chưa có dòng hàng nào. Hãy nạp file PO ở bước ② hoặc thêm dòng ở bước ③."], warns
+        blockers = self.ncu_blockers()
+        if blockers:
+            return blockers, warns
         bad = [i for i, it in enumerate(self.items, 1) if it.get("read") == "loi"]
         if bad:
             errors.append(f"Còn {len(bad)} dòng chưa đọc được từ PO (dòng {', '.join(map(str, bad))}). Hãy nhập tay (bấm đúp vào dòng) hoặc xóa dòng đó.")

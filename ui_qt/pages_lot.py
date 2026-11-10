@@ -6,8 +6,8 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from shiboken6 import isValid
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame, QGridLayout, QGroupBox,
-    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QProgressBar, QPushButton, QScrollArea, QSplitter, QStackedWidget,
+    QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QGridLayout, QGroupBox,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QProgressBar, QPushButton, QScrollArea, QSplitter, QStackedWidget,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -141,6 +141,62 @@ class CustomerStep(QWidget):
 PO_FILTER = "File PO (*.pdf *.xlsx *.xls *.png *.jpg *.jpeg *.tif *.tiff *.txt)"
 
 
+class SupplierDialog(QDialog):
+    """Danh sách nhà cung ứng của Shirai: thêm / xóa (tên, MST, địa chỉ)."""
+
+    def __init__(self, store, parent=None):
+        super().__init__(parent)
+        self.store = store
+        self.setWindowTitle("Nhà cung ứng")
+        self.resize(560, 420)
+        lay = QVBoxLayout(self)
+        self.listw = QListWidget()
+        lay.addWidget(self.listw, 1)
+        form = QFormLayout()
+        self.e_name, self.e_mst, self.e_addr = QLineEdit(), QLineEdit(), QLineEdit()
+        form.addRow("Tên nhà cung ứng", self.e_name)
+        form.addRow("Mã số thuế", self.e_mst)
+        form.addRow("Địa chỉ", self.e_addr)
+        lay.addLayout(form)
+        row = QHBoxLayout()
+        add = QPushButton("➕  Thêm")
+        add.clicked.connect(self.add)
+        rm = QPushButton("🗑  Xóa nhà đang chọn")
+        rm.setObjectName("dng")
+        rm.clicked.connect(self.remove)
+        close = QPushButton("Đóng")
+        close.setObjectName("sec")
+        close.clicked.connect(self.accept)
+        for b in (add, rm):
+            row.addWidget(b)
+        row.addStretch(1)
+        row.addWidget(close)
+        lay.addLayout(row)
+        self.fill()
+
+    def fill(self):
+        self.listw.clear()
+        for x in self.store.suppliers:
+            self.listw.addItem(f"{x['name']}" + (f"  ·  MST {x['mst']}" if x.get("mst") else "") + (f"  ·  {x['addr']}" if x.get("addr") else ""))
+
+    def add(self):
+        try:
+            self.store.supplier_add(self.e_name.text(), self.e_mst.text(), self.e_addr.text())
+        except ValueError as e:
+            widgets.warn(self, "Chưa thêm được", str(e))
+            return
+        self.e_name.clear()
+        self.e_mst.clear()
+        self.e_addr.clear()
+        self.fill()
+
+    def remove(self):
+        i = self.listw.currentRow()
+        if 0 <= i < len(self.store.suppliers) and widgets.ask(self, "Xóa nhà cung ứng", f"Xóa “{self.store.suppliers[i]['name']}” khỏi danh sách? Các lựa chọn đã nhớ cho nhà này cũng bị bỏ."):
+            self.store.supplier_remove(self.store.suppliers[i]["name"])
+            self.fill()
+
+
 class PoStep(QWidget):
     changed = Signal()
 
@@ -188,6 +244,8 @@ class PoStep(QWidget):
         dl.addLayout(self.dates_row)
         self.date_checks = {}
         lay.addWidget(self.dates_box)
+        self.ncu_box = self._build_ncu_box()  # Shirai: chọn nhà cung ứng theo nhóm hàng sau khi chọn ngày
+        lay.addWidget(self.ncu_box)
         self.no_file_hint = _label("Không có file PO? Bấm “Tiếp tục” rồi thêm dòng hàng bằng tay ở bước ③.", "hint", wrap=True)
         lay.addWidget(self.no_file_hint)
         lay.addStretch(1)
@@ -356,6 +414,7 @@ class PoStep(QWidget):
         self.drop.setEnabled(bool(c) and not self.busy.isVisible())
         self.add_po.setVisible(self.lot.multi_po and not fixed and not contract)
         self.refresh_dates()
+        self.refresh_ncu()
         if not self.status.text() and c and contract:
             self.set_status("Kiểm tra số hợp đồng, bấm “Xác nhận số hợp đồng”, rồi “Tra mã để thêm dòng”.", ok=None)
         elif not self.status.text() and c and fixed:
@@ -363,6 +422,128 @@ class PoStep(QWidget):
         elif not self.status.text() and c:
             n = len(self.lot.items)
             self.set_status(f"Lô đang có {n} dòng hàng." if n else "Chọn file PO để phần mềm tự đọc các dòng hàng.", ok=None)
+
+    # ---- Shirai: chọn nhà cung ứng theo nhóm hàng (carton / inner pad / pad) + tên theo khách hàng từ ERP ------------------
+    def _build_ncu_box(self):
+        box = QGroupBox("Chọn nhà cung ứng cho từng nhóm hàng")
+        lay = QVBoxLayout(box)
+        lay.addWidget(_label("Mua thùng carton ở nhà này, Inner Pad hoặc Pad ở nhà khác vẫn làm chung một hồ sơ: chọn nhà cung ứng cho cả nhóm, mã nào khác thì đổi riêng ở dòng đó. "
+                             "Tên hàng lấy từ ERP (cột “Tên sản phẩm theo KH”); mã chưa có tên thì phải nhập tên rồi mới đi tiếp.", "hint", wrap=True))
+        top = QHBoxLayout()
+        self.ncu_manage = QPushButton("🏭  Quản lý nhà cung ứng…")
+        self.ncu_manage.setObjectName("sec")
+        self.ncu_manage.clicked.connect(self.manage_suppliers)
+        top.addWidget(self.ncu_manage)
+        top.addStretch(1)
+        lay.addLayout(top)
+        holder = QWidget()
+        self.ncu_inner = QVBoxLayout(holder)
+        self.ncu_inner.setContentsMargins(0, 0, 0, 0)
+        self.ncu_scroll = QScrollArea()
+        self.ncu_scroll.setWidgetResizable(True)
+        self.ncu_scroll.setFrameShape(QFrame.NoFrame)
+        self.ncu_scroll.setMinimumHeight(330)
+        self.ncu_scroll.setWidget(holder)
+        lay.addWidget(self.ncu_scroll, 1)
+        self.ncu_warn = _label("", "hint", wrap=True)
+        lay.addWidget(self.ncu_warn)
+        self.ncu_widgets = []
+        return box
+
+    def refresh_ncu(self):
+        show = self.lot.is_shirai and bool(self.lot.items)
+        self.ncu_box.setVisible(show)
+        for w in self.ncu_widgets:
+            self.ncu_inner.removeWidget(w)
+            w.setParent(None)  # biến mất ngay, không chồng lên hình mới
+            w.deleteLater()
+        self.ncu_widgets = []
+        if not show:
+            return
+        self.lot.apply_suppliers()
+        names = self.lot.store.supplier_names()
+        for key, label, idx in self.lot.ncu_groups():
+            g = QGroupBox(f"{label} ({len(idx)} mã)")
+            gl = QVBoxLayout(g)
+            row = QHBoxLayout()
+            row.addWidget(QLabel("Nhà cung ứng của cả nhóm:"))
+            gc = QComboBox()
+            gc.setMinimumWidth(300)
+            gc.addItem("— chọn —", "")
+            for n in names:
+                gc.addItem(n, n)
+            cur = {self.lot.items[i].get("ncu") for i in idx}
+            gc.setCurrentIndex(max(0, gc.findData(cur.pop())) if len(cur) == 1 else 0)
+            gc.activated.connect(lambda _i, k=key, c=gc: self.on_group_supplier(k, c.currentData() or ""))
+            row.addWidget(gc)
+            row.addStretch(1)
+            gl.addLayout(row)
+            t = QTableWidget(len(idx), 4)
+            t.setHorizontalHeaderLabels(["Mã", "Tên theo khách hàng (ERP)", "Số lượng", "Nhà cung ứng"])
+            t.verticalHeader().hide()
+            t.verticalHeader().setDefaultSectionSize(40)
+            t.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            t.setSelectionMode(QAbstractItemView.NoSelection)
+            hh = t.horizontalHeader()
+            hh.setSectionResizeMode(1, QHeaderView.Stretch)
+            t.setColumnWidth(0, 170)
+            t.setColumnWidth(2, 90)
+            t.setColumnWidth(3, 280)
+            t.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            t.setFixedHeight(40 * len(idx) + 38)
+            for r, i in enumerate(idx):
+                it = self.lot.items[i]
+                code = str(it.get("ma_sp") or "")
+                t.setItem(r, 0, QTableWidgetItem(code))
+                if it.get("ten_kh"):
+                    t.setItem(r, 1, QTableWidgetItem(it["ten_kh"]))
+                else:
+                    ed = QLineEdit()
+                    ed.setPlaceholderText("❌ Chưa có tên theo khách hàng trong ERP — nhập tên rồi Enter")
+                    ed.setStyleSheet("border: 2px solid #F87171;")
+                    ed.editingFinished.connect(lambda c=code, g=it.get("ten_goc", ""), e=ed: self.on_ten_kh(c, e.text(), g))
+                    t.setCellWidget(r, 1, ed)
+                t.setItem(r, 2, QTableWidgetItem(f"{float(it.get('qty') or 0):,.0f}"))
+                cc = QComboBox()
+                cc.addItem("— chọn —", "")
+                for n in names:
+                    cc.addItem(n, n)
+                cc.setCurrentIndex(max(0, cc.findData(it.get("ncu") or "")))
+                cc.activated.connect(lambda _i, c=code, w=cc: self.on_code_supplier(c, w.currentData() or ""))
+                t.setCellWidget(r, 3, cc)
+            gl.addWidget(t)
+            g.setMinimumHeight(t.height() + 90)  # đủ chỗ cho ô chọn nhóm + bảng; thiếu chỗ thì cuộn
+            self.ncu_inner.addWidget(g)
+            self.ncu_widgets.append(g)
+        self._ncu_msg()
+
+    def _ncu_msg(self):
+        b = self.lot.ncu_blockers()
+        self.ncu_warn.setText("⚠ " + "  ".join(b) if b else "✅ Đã đủ tên theo khách hàng và nhà cung ứng cho mọi nhóm.")
+        self.ncu_warn.setStyleSheet(f"color: {theme.WARN if b else theme.OK}; font-weight: 600;")
+
+    def on_group_supplier(self, key, name):
+        self.lot.set_group_supplier(key, name)
+        self.refresh_ncu()
+        self.changed.emit()
+
+    def on_code_supplier(self, code, name):
+        self.lot.set_code_supplier(code, name)
+        self._ncu_msg()
+        self.changed.emit()
+
+    def on_ten_kh(self, code, text, goc=""):
+        if not str(text).strip():
+            return
+        self.lot.set_ten_kh(code, text, goc)
+        QTimer.singleShot(0, self.refresh_ncu)  # dựng lại sau khi ô nhập xong sự kiện
+        self.changed.emit()
+
+    def manage_suppliers(self):
+        dlg = SupplierDialog(self.lot.store, self)
+        dlg.exec()
+        self.refresh_ncu()
+        self.changed.emit()
 
     def choose_file(self, append):
         path, _ = QFileDialog.getOpenFileName(self, "Chọn file PO", "", PO_FILTER)
@@ -1147,7 +1328,10 @@ class LotPage(QWidget):
         idx = self.bar.current
         self.back.setEnabled(idx > 0)
         # Bước ① phải chọn khách rồi mới đi tiếp
-        self.next.setEnabled(idx < len(STEPS) - 1 and (idx > 0 or self.lot.customer is not None))
+        ok = idx < len(STEPS) - 1 and (idx > 0 or self.lot.customer is not None)
+        if idx == 1 and self.lot.ncu_blockers():  # Shirai: đủ tên theo khách hàng và nhà cung ứng rồi mới sang bước ③
+            ok = False
+        self.next.setEnabled(ok)
 
     def start_new(self):
         self.lot.reset(None)

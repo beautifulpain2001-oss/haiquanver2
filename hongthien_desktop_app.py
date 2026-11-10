@@ -579,6 +579,9 @@ class DedicatedDataStore:
         self.kodi_items = list(DEFAULT_KODI_ITEMS)
         self.tesa_items = list(DEFAULT_TESA_ITEMS)
         self.item_mem = {}
+        self.suppliers = []  # nhà cung ứng của Shirai: [{name, mst, addr}]
+        self.supplier_pref = {}  # lựa chọn đã nhớ: 'nhom:carton' / 'ma:<mã>' -> tên nhà cung ứng
+        self.ten_kh_tay = {}  # tên theo khách hàng do người dùng nhập khi ERP chưa có: {mã: tên}
         self.read_fixes = []  # nhật ký các lần người dùng sửa số liệu máy đọc sai từ PO (khách, trường, đọc sai, đúng, dòng PO)
         self.custom_profiles = {}
         self.custom_items = {}
@@ -675,6 +678,9 @@ class DedicatedDataStore:
                 self.custom_items = data.get("custom_items") or {}
                 self.company = data.get("company_info") or {}
                 self.profile_overrides = data.get("profile_overrides") or {}
+                self.suppliers = list(data.get("suppliers") or [])
+                self.supplier_pref = dict(data.get("supplier_pref") or {})
+                self.ten_kh_tay = dict(data.get("ten_kh_tay") or {})
             except Exception:
                 pass
         self.register_custom_profiles()
@@ -1635,7 +1641,7 @@ class DedicatedDataStore:
             with self._lock():
                 disk = self._read_json(self.catalog_file, {}) if self.changed_on_disk() else {}
                 if disk:  # gộp phần máy khác vừa thêm; mục trùng thì bản của máy này thắng
-                    for k in ("item_mem", "custom_profiles", "profile_overrides", "weights_db"):
+                    for k in ("item_mem", "custom_profiles", "profile_overrides", "weights_db", "supplier_pref", "ten_kh_tay"):
                         merged = dict(disk.get(k) or {})
                         merged.update(getattr(self, k, {}) or {})
                         setattr(self, k, merged)
@@ -1666,10 +1672,67 @@ class DedicatedDataStore:
                     "item_mem": self.item_mem,
                     "custom_profiles": self.custom_profiles,
                     "custom_items": self.custom_items,
+                    "suppliers": self.suppliers,
+                    "supplier_pref": self.supplier_pref,
+                    "ten_kh_tay": self.ten_kh_tay,
                 })
                 self._sigs[self.catalog_file] = self._sig(self.catalog_file)
         except Exception as e:
             print("Warning saving catalog:", e)
+
+    # ---- Shirai: nhà cung ứng theo nhóm hàng (carton / inner pad / pad) và tên theo khách hàng lấy từ ERP -------------------------
+    SHIRAI_GROUPS = (("carton", "Thùng carton"), ("inner", "Inner Pad"), ("pad", "Pad"), ("khac", "Hàng khác"))
+
+    @staticmethod
+    def shirai_group(name):
+        """Nhóm hàng Shirai theo tên: carton (thùng), inner (Inner Pad), pad (tấm lót Pad); không nhận ra thì 'khac'."""
+        n = strip_accents_upper(str(name or ""))
+        if "INNER" in n:
+            return "inner"
+        if "CARTON" in n or "THUNG" in n:
+            return "carton"
+        if re.search(r"\bPAD\b", n) or "TAM LOT" in n:
+            return "pad"
+        return "khac"
+
+    def shirai_ten_kh(self, code, goc=""):
+        """(tên theo khách hàng, nguồn 'erp'|'tay'|'') của một mã Shirai: cột 'Tên sản phẩm theo KH' của ERP, không có thì tên người dùng đã nhập.
+        Dòng không có mã thì tên nhập tay nhớ theo tên gốc trên PO (`goc`)."""
+        code = str(code or "").strip()
+        if code:
+            try:
+                m = self.dt_merged("shirai", code)
+            except Exception:
+                m = None
+            if m and str(m.get("ten_kh") or "").strip():
+                return re.sub(r"\s+", " ", str(m["ten_kh"])).strip(), "erp"
+        key = code or ("ten:" + str(goc or "").strip())
+        t = str(self.ten_kh_tay.get(key) or "").strip() if key not in ("", "ten:") else ""
+        return (t, "tay") if t else ("", "")
+
+    def set_ten_kh_tay(self, code, name, goc=""):
+        code, name = str(code or "").strip(), re.sub(r"\s+", " ", str(name or "")).strip()
+        key = code or ("ten:" + str(goc or "").strip())
+        if key not in ("", "ten:") and name:
+            self.ten_kh_tay[key] = name
+            self.save_catalog()
+
+    def supplier_names(self):
+        return [x["name"] for x in self.suppliers if x.get("name")]
+
+    def supplier_add(self, name, mst="", addr=""):
+        name = re.sub(r"\s+", " ", str(name or "")).strip()
+        if not name:
+            raise ValueError("Chưa nhập tên nhà cung ứng.")
+        if name.lower() in {x["name"].lower() for x in self.suppliers}:
+            raise ValueError("Nhà cung ứng này đã có trong danh sách.")
+        self.suppliers.append({"name": name, "mst": str(mst or "").strip(), "addr": str(addr or "").strip()})
+        self.save_catalog()
+
+    def supplier_remove(self, name):
+        self.suppliers = [x for x in self.suppliers if x["name"] != name]
+        self.supplier_pref = {k: v for k, v in self.supplier_pref.items() if v != name}
+        self.save_catalog()
 
     def save_records(self):
         try:
@@ -4589,6 +4652,9 @@ def build_so_shirai_sheet(wb, rec, sheet_name="SO"):
         "Thành tiền sau CK (NT)", "Tổng cộng (NT)", "Ngày giao", "Yêu cầu sản phẩm (Mô tả SP)",
         "Ghi chú SP SO", "FSC"
     ]
+    has_ncu = any(it.get("ncu") for it in rec.get("items", []))  # cột cuối chỉ thêm khi đã chọn nhà cung ứng; bình thường giữ đúng 16 cột để nhập ERP
+    if has_ncu:
+        heads.append("Nhà cung ứng")
     ws.append(heads)
     for c_i in range(1, len(heads) + 1):
         ws.cell(row=4, column=c_i).font = Font(bold=True)
@@ -4598,7 +4664,7 @@ def build_so_shirai_sheet(wb, rec, sheet_name="SO"):
             it.get("ma_sp", ""), it["ten_sp"], it["ten_sp"], "2000", "pcs",
             it.get("qty", 0), it.get("qty", 0), it.get("price", 0), "OUT0", 0,
             it.get("amount", 0), it.get("amount", 0), rec.get("docDate", ""),
-            "HÀNG THƯƠNG MẠI", it.get("ma_kh", ""), "Non.FSC"
+            "HÀNG THƯƠNG MẠI", it.get("ma_kh", ""), "Non.FSC", *([it.get("ncu", "")] if has_ncu else [])
         ])
     return ws
 
