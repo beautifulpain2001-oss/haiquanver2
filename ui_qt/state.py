@@ -490,17 +490,41 @@ class Lot:
         if mode == "PLX" and "tk" not in self.exported:
             self.exported["tk"] = {"name": name, "path": path, "time": now}
 
+    def _repoint(self, old_dir, new_dir):
+        """Thư mục hồ sơ vừa được đổi tên theo số PXK mới: các file đã xuất trước đó trỏ sang thư mục mới (invoice đổi số PXK trong tên thì tìm theo tiền tố)."""
+        def fix(path):
+            if os.path.dirname(path) != old_dir:
+                return path
+            np = os.path.join(new_dir, os.path.basename(path))
+            if os.path.exists(np):
+                return np
+            pre = "_".join(os.path.basename(path).split("_")[:2]) + "_"
+            alt = next((f for f in sorted(os.listdir(new_dir)) if f.startswith(pre)), None) if os.path.isdir(new_dir) else None
+            return os.path.join(new_dir, alt) if alt else path
+        for f in self.files:
+            f["path"] = fix(f["path"])
+            f["name"] = os.path.basename(f["path"])
+        for v in self.exported.values():
+            if isinstance(v, dict) and v.get("path"):
+                v["path"] = fix(v["path"])
+                v["name"] = os.path.basename(v["path"])
+
     def export(self, mode):
         """mode "ALL": mỗi chứng từ một file riêng. Mode khác: chỉ chứng từ đó.
         Trả {"files": [...], "problems": [...], "dsh": None}."""
         rec = self.record()
+        old_dir = os.path.dirname(self.files[0]["path"]) if self.files else ""
         now = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
         if mode == "ALL":
             res = self.core.lot_export_each(self.store, rec, skip_h=self.skip_h)
+            if old_dir and res["files"] and os.path.dirname(res["files"][0]["path"]) != old_dir:
+                self._repoint(old_dir, os.path.dirname(res["files"][0]["path"]))
             for f in res["files"]:
                 self._note_file(f["mode"], f["name"], f["path"], now)
             return {"files": res["files"], "problems": res["problems"], "dsh": None}
         res = self.core.lot_export(self.store, rec, mode, skip_h=self.skip_h)
+        if old_dir and os.path.dirname(res["path"]) != old_dir:
+            self._repoint(old_dir, os.path.dirname(res["path"]))
         self._note_file(mode, res["fname"], res["path"], now)
         one = {"mode": mode, "label": self.core.lot_mode_label(mode), "name": res["fname"], "path": res["path"]}
         return {"files": [one], "problems": res["problems"], "dsh": res["dsh"]}

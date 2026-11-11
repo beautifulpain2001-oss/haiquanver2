@@ -113,3 +113,20 @@ def test_same_day_same_po_but_other_pxk_is_a_new_record_and_folder(store, seed):
     assert store.get_record_folder_path(b).endswith(os.path.join("2026_Thang_11", "2026-11-09_00000330"))
     c = dict(a, id=None, folder=None)  # cùng PXK 327: đúng hồ sơ cũ, đúng thư mục cũ
     assert store.find_record(c) == len(store.records) - 1 and store.get_record_folder_path(c) == store.get_record_folder_path(a)
+
+
+def test_changing_pxk_after_saving_renames_folder_and_invoice_file(store, seed):
+    """Sửa số PXK sau khi đã lưu hồ sơ: tên thư mục và tên file invoice đổi theo, không còn ghi 334 bên ngoài mà 335 bên trong."""
+    rec = dict(seed["tesa"], id="HS-PXK", docDate="2026-11-11", poNumber="PO-PXK", pxkNo="00000334", folder=None)
+    rec["folder"] = store.new_record_folder(rec)
+    store.records.append(rec)
+    folder = store.rel_to_abs(rec["folder"])
+    os.makedirs(folder)
+    open(os.path.join(folder, "invoice_tesa_00000334_11.11.xlsx"), "w").write("x")
+    open(os.path.join(folder, "Hoa_Don_VAT_BKAV_tesa_11.11.xlsx"), "w").write("y")
+    assert store.sync_folder_with_pxk(dict(rec, pxkNo="00000335")) is True
+    new = os.path.join(os.path.dirname(folder), "2026-11-11_00000335")
+    assert os.path.isdir(new) and not os.path.isdir(folder)
+    assert sorted(os.listdir(new)) == ["Hoa_Don_VAT_BKAV_tesa_11.11.xlsx", "invoice_tesa_00000335_11.11.xlsx"]
+    assert store.rel_to_abs(rec["folder"]) == new
+    assert store.sync_folder_with_pxk(dict(rec, pxkNo="00000335")) is False  # đã khớp: không làm gì

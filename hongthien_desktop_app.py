@@ -2334,6 +2334,32 @@ class DedicatedDataStore:
                 return i
         return -1
 
+    def sync_folder_with_pxk(self, rec):
+        """Hồ sơ đã lưu mà số PXK vừa đổi: đổi tên thư mục '<ngày>_<PXK cũ>' thành '<ngày>_<PXK mới>', đổi số trong tên file invoice cũ, trỏ hồ sơ sang thư mục mới
+        (để số PXK ghi ngoài thư mục luôn bằng số PXK ghi trong chứng từ). Thư mục mới đã có (hồ sơ khác) hoặc đang bị khóa thì giữ nguyên. Trả True nếu đã đổi."""
+        pxk = re.sub(r'[\\/:*?"<>|\s]+', "", str(rec.get("pxkNo") or ""))
+        i = self.find_record(rec)
+        if not pxk or i < 0 or not self.records[i].get("folder"):
+            return False
+        old = self.rel_to_abs(self.records[i]["folder"])
+        m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})_([0-9A-Za-z-]+?)(?:_\d)?", os.path.basename(old))
+        if not m or m.group(2) == pxk or not os.path.isdir(old):
+            return False
+        new = os.path.join(os.path.dirname(old), f"{m.group(1)}_{pxk}")
+        if os.path.exists(new):
+            return False
+        try:
+            os.rename(old, new)
+            for fn in os.listdir(new):  # invoice_<khách>_<PXK cũ>_<ngày>.xlsx -> số mới
+                if f"_{m.group(2)}_" in fn and fn.lower().startswith("invoice_"):
+                    os.replace(os.path.join(new, fn), os.path.join(new, fn.replace(f"_{m.group(2)}_", f"_{pxk}_", 1)))
+        except OSError:
+            return False
+        self.records[i]["folder"] = os.path.join(CUSTOMS_ROOT, os.path.relpath(new, self.customs_root()))
+        with contextlib.suppress(Exception):
+            self.save_records()
+        return True
+
     def new_record_folder(self, rec):
         """Đường dẫn (tương đối) cho hồ sơ mới: <Khách>/<năm>_Thang_<mm>/<yyyy-mm-dd>_<Số PXK>. Cùng ngày: khác số PXK là thư mục mới, cùng số PXK thì lưu chung."""
         dt = str(rec.get("docDate") or "")
@@ -7026,6 +7052,7 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
         raise ValueError("Mẫu số 22 chỉ dùng cho khách Arizon.")
     if mode == "BKLS" and not any(is_pallet_item(x) for x in rec["items"]):
         raise ValueError("Bảng kê lâm sản chỉ dùng cho lô hàng pallet; lô hàng ống không có.")
+    store.sync_folder_with_pxk(rec)  # đổi số PXK sau khi đã lưu: tên thư mục và file theo số mới
     folder = store.get_record_folder_path(rec)
     work_dir = folder  # file do phần mềm tạo nằm thẳng trong thư mục ngày, cùng scan/PDF/file hải quan
     os.makedirs(work_dir, exist_ok=True)
@@ -7322,6 +7349,7 @@ def form_from_builtin(store, key, mode, tokenize=True):
 def lot_save_new(store, rec, exported_files):
     """Lưu hồ sơ vừa làm ở Bước 1: gắn các file đã xuất, ghi đè hồ sơ cùng khách + cùng số PO."""
     store.sync()  # máy khác có thể vừa lưu hồ sơ vào thư mục dùng chung
+    store.sync_folder_with_pxk(rec)
     for k, v in exported_files.items():
         rec["files"][k] = v
     if not rec.get("folder"):  # nhớ thư mục để mở lại đúng chỗ dù sau này đổi tên gọi khách
