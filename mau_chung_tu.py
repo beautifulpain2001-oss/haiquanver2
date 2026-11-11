@@ -95,11 +95,12 @@ def clone_sheet(wb, tws, title, regions, max_col=None):
     end_row = _print_end_row(tws)
     plan = Plan([(a, b, n) for a, b, n in regions if b <= end_row], end_row)
     ws = wb.create_sheet(title=title[:31])
+    limit = (max_col or tws.max_column) + 5  # nhóm cột kéo tới XFD (mẫu Excel hay có): chỉ sao đến vài cột sau vùng dùng, không dựng 16.000 cột
     for letter, dim in tws.column_dimensions.items():
         nd = ws.column_dimensions[letter]
         nd.width, nd.hidden = dim.width, dim.hidden
         if dim.min and dim.max and dim.max > dim.min:  # nhóm cột cùng độ rộng
-            for c in range(dim.min, dim.max + 1):
+            for c in range(dim.min, min(dim.max, limit) + 1):
                 ws.column_dimensions[get_column_letter(c)].width = dim.width
                 ws.column_dimensions[get_column_letter(c)].hidden = dim.hidden  # cột ẩn của mẫu ẩn cả nhóm, không chỉ cột đầu nhóm
     max_col = max_col or tws.max_column
@@ -281,19 +282,31 @@ def fill_pgh(core, wb, rec, prof, tws, title):
     return ws
 
 
+def _find_row(tws, col, prefix, start=1):
+    """Hàng đầu tiên (từ `start`) của mẫu có ô cột `col` bắt đầu bằng `prefix` (không phân biệt hoa thường, bỏ khoảng trắng đầu)."""
+    for r in range(start, tws.max_row + 1):
+        if str(tws[f"{col}{r}"].value or "").strip().upper().startswith(prefix.upper()):
+            return r
+    return None
+
+
 def fill_dccn_able(core, wb, rec, prof, tws, title):
-    """Bảng đối chiếu công nợ kiểu Able (sheet 'BẢNG ĐỐI CHIẾU CÔNG NỢ'): STT | Ngày giao | PO | Mã SP | Quy cách | Mã hàng | ĐVT | SL | Đơn giá | Thành tiền."""
+    """Bảng đối chiếu công nợ kiểu Able (sheet 'ĐCCN' của khách): STT | Ngày giao | Mã đơn mua bán (PO) | Mã SP | Quy cách | Mã hàng | ĐVT | SL | Đơn giá | Thành tiền.
+    Giữ nguyên mẫu: chỉ thay chữ ở đầu trang, nhân các dòng hàng (12 dòng mẫu) theo số dòng của lô, điền tổng bằng chữ và tên khách ở chỗ ký."""
     items = rec.get("items", [])
-    ws, pl = clone_sheet(wb, tws, title, [(12, 24, max(len(items), 1))], max_col=11)
+    first = 12
+    total_row = _find_row(tws, "B", "Tổng", first) or 24
+    ws, pl = clone_sheet(wb, tws, title, [(first, total_row - 1, max(len(items), 1))], max_col=11)
     d = core._iso_to_date(rec.get("docDate"))
-    ws["B2"] = f"Ngày日{d.day:02d} tháng月{d.month:02d}  năm年 {d.year}"
+    ws["B2"] = f"Ngày日{d.day:02d} tháng月{d.month:02d} năm年 {d.year}"
     ws["D4"] = core.HT_NAME
     ws["D5"] = core.ADDR_HT
+    ws["B6"] = f"Mã số thuế: {core.MST_HT}           Điện thoại: {core.HT_TEL}"
     ws["B7"] = f"Khách hàng客户:   {prof['name']}"
     ws["B8"] = f"Địa chỉ:   :{prof.get('addrKho') or prof['addr']}"
     ws["B9"] = f"Mã số thuế:\t  {prof.get('mst', '')}"
-    r0 = pl.first[12]
-    for i in range(1, len(items)):  # các dòng mẫu phía dưới cỡ chữ lệch nhau: lấy kiểu của dòng đầu cho đều
+    r0 = pl.first[first]
+    for i in range(1, len(items)):  # các dòng mẫu cỡ chữ/chiều cao lệch nhau: lấy kiểu của dòng đầu cho đều
         for col in "BCDEFGHIJK":
             ws[f"{col}{r0 + i}"]._style = copy.copy(ws[f"{col}{r0}"]._style)
         if ws.row_dimensions[r0].height:
@@ -308,12 +321,14 @@ def fill_dccn_able(core, wb, rec, prof, tws, title):
         for col, v in (("B", i + 1), ("D", it.get("po", "")), ("F", it.get("ten_sp", "")), ("H", u.lower()),
                        ("I", it.get("qty", 0)), ("J", it.get("price", 0)), ("K", f"=I{r}*J{r}")):
             ws[f"{col}{r}"] = v
+        ws[f"K{r}"].number_format = ws[f"K{r0}"].number_format
     total = round(core.lot_totals(rec)["amount"])
-    ws[f"B{pl.map(28)}"] = f"Tổng tiền bằng chữ 总金额大写（越南盾): {core.num_to_vn_words(total)}"
-    sig = pl.map(30)
-    ws.merge_cells(f"G{sig}:K{sig}")
-    ws[f"G{sig}"] = str(prof["name"]).upper()
-    ws[f"G{sig}"].alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    words = _find_row(tws, "B", "Tổng tiền bằng chữ", total_row)
+    if words:
+        ws[f"B{pl.map(words)}"] = f"Tổng tiền bằng chữ 总金额大写（越南盾): {core.num_to_vn_words(total)}"
+    sig = next((r for r in range(total_row, tws.max_row + 1) if str(tws[f"G{r}"].value or "").strip().upper().startswith("CÔNG TY")), None)
+    if sig:
+        ws[f"G{pl.map(sig)}"] = str(prof["name"]).upper()
     return ws
 
 

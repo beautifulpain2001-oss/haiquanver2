@@ -321,3 +321,19 @@ def test_deli_two_factories_share_one_item_catalog(store):
     assert "Z1" not in {x["code"] for x in store.items_for_customer("delihd")}
     store.save_learned_customer("riengy", dict(base, name="CÔNG TY KHÁC Y", label="Y", shareItems="riengx"), [{"name": "Ống W", "code": "W1", "price": 1}])
     assert {x["code"] for x in store.items_for_customer("riengx")} == {"Z1", "W1"} == {x["code"] for x in store.items_for_customer("riengy")}
+
+
+def test_able_bundle_has_dccn_in_the_customers_own_template(store):
+    """Able có Bảng đối chiếu công nợ đúng mẫu khách đưa: các dòng hàng nhân theo lô, tổng bằng SUM, tổng bằng chữ, ký tên khách; không sinh 16.000 cột."""
+    store.save_learned_customer("able2", {"name": "CÔNG TY TNHH BAO BÌ ĐÓNG GÓI ABLE", "label": "Able2", "mst": "0202226426", "addr": "Khu A1 Lô 1", "unit": "chiếc"},
+                                [{"name": "Thùng 38*5*460 250g", "code": "A1", "price": 10, "div": 5, "kg": 0.1}])
+    items = [{"stt": i + 1, "po": f"0000{3872 + i}", "ma_sp": "A1", "ten_sp": f"Ống giấy 38*5*{460 + i} 250g", "unit": "chiếc", "qty": 1000, "price": 1500, "amount": 1500000,
+              "div": 5, "kg": 0.1, "kien": 2, "net": 1, "gross": 2, "tare": 1, "read": "ok"} for i in range(15)]
+    rec = app.lot_build_record(store, {"customer": "able2", "po": "A", "pxk": "1", "doc_date": "2026-11-11"}, items)
+    assert "DCCN" in app.lot_bundle_modes(rec)
+    ws = openpyxl.load_workbook(app.lot_export(store, rec, "DCCN")["path"]).active
+    assert "ĐỐI CHIẾU CÔNG NỢ" in ws["B1"].value and ws["K1"].value is None and len(ws.column_dimensions) < 40
+    assert [ws[f"B{r}"].value for r in (12, 26)] == [1, 15] and ws["D26"].value == "000038 86".replace(" ", "") and ws["I26"].value == 1000
+    tot = next(r for r in range(27, 32) if str(ws[f"B{r}"].value).startswith("Tổng :"))
+    assert ws[f"K{tot}"].value == "=SUM(K12:K26)" and "Tổng tiền bằng chữ" in str(ws[f"B{tot + 3}"].value) and "hai mươi hai" in str(ws[f"B{tot + 3}"].value).lower()
+    assert any(str(c.value or "").upper() == "CÔNG TY TNHH BAO BÌ ĐÓNG GÓI ABLE" for row in ws.iter_rows(min_row=tot) for c in row)

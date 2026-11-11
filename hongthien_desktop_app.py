@@ -3798,6 +3798,8 @@ def customer_extra_docs(prof):
         codes = ["PLX"] + codes  # Arizon luôn có Phụ lục X, kể cả khi mục "chứng từ làm thêm" đã ghi chứng từ khác
         if "M22" not in codes:
             codes.append("M22")  # và Mẫu số 22 (thông báo hoàn thành thủ tục nhập khẩu tại chỗ)
+    if is_able(prof) and "DCCN" not in codes:
+        codes.append("DCCN")  # Able luôn có Bảng đối chiếu công nợ
     return codes
 
 
@@ -5177,6 +5179,9 @@ def build_pgh_best_sheet(wb, rec, sheet_name="PhieuGiaoHang"):
 def build_dccn_best_sheet(wb, rec, sheet_name="DCCN"):
     """对账单 Đối Chiếu Công Nợ: mỗi dòng hàng một dòng, hạn thanh toán = ngày hóa đơn + số ngày."""
     tpl = best_template(PROFILES[rec["customer"]], "dccn")
+    if not tpl and is_able(PROFILES[rec["customer"]]) and mau_chung_tu:
+        import mau_able_dccn
+        tpl = mau_able_dccn.template_path()  # Able: mẫu đối chiếu công nợ đúng nguyên bản khách đưa (khách nạp mẫu riêng thì mẫu đó thắng)
     if tpl:
         return mau_chung_tu.build_from_template(sys.modules[__name__], "dccn", wb, rec, PROFILES[rec["customer"]], tpl, sheet_name)
     ws = wb.create_sheet(title=sheet_name[:31])
