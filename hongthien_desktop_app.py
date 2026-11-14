@@ -115,6 +115,31 @@ def best_template(prof, doc):
 CUSTOMS_ROOT = "HAI_QUAN"
 DT_FILE = "DATA_TONG.json"
 GENERATED_DIR = "DO_PHAN_MEM_TAO"  # thư mục con của hồ sơ KIỂU CŨ; hồ sơ mới để mọi file thẳng trong thư mục ngày (chỉ còn đọc thư mục này cho hồ sơ cũ)
+LOT_CARD = "00_HO_SO.json"  # thẻ hồ sơ trong mỗi thư mục lô: thư mục tự nói nó là lô nào (chuyển chỗ / đổi tên bằng Explorer vẫn nhận ra)
+_SCAN_SETTLE = 2.0  # thư mục vừa đổi trong vòng 2 giây thì chưa nhớ kết quả quét (ổ FAT/LAN ghi giờ sửa thô theo 2 giây)
+
+
+def log_soft_error(msg):
+    """Ghi lỗi không chặn công việc (VD ổ LAN mất kết nối lúc ghi thẻ hồ sơ) vào LOI_PHAN_MEM.txt cạnh phần mềm."""
+    try:
+        with open(os.path.join(get_app_dir(), "LOI_PHAN_MEM.txt"), "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.datetime.now():%Y-%m-%d %H:%M:%S}] {msg}\n")
+    except Exception:
+        pass
+
+
+def _same_pxk(a, b):
+    """Hai số PXK là một: '318' = '000318'; số có chữ thì so không phân biệt hoa thường."""
+    a, b = str(a or "").strip(), str(b or "").strip()
+    if not a or not b:
+        return False
+    if a.isdigit() and b.isdigit():
+        return int(a) == int(b)
+    return a.casefold() == b.casefold()
+
+
+def _safe_name(text):
+    return re.sub(r'[\\/:*?"<>|]+', "_", str(text or "")).strip(" .")
 
 _OCR_OK = None
 
@@ -599,6 +624,9 @@ class DedicatedDataStore:
         self.profile_overrides = {}  # chỗ người dùng đã sửa trên 3 khách có sẵn (mục Khách hàng)
         self.records = []
         self._sigs, self._loaded_ids = {}, set()
+        # chỉ mục quét thư mục: chỉ đọc lại thư mục có giờ sửa đổi (xem _dir_listing, _activity, read_lot_card)
+        self._ls_cache, self._act_cache, self._card_cache, self._card_paths = {}, {}, {}, {}
+        self._scan_ls = None
         self.data_tong, self._dt_cache, self._dt_idx, self._dt_cust = [], {}, None, {}
         self.load_all()
 
@@ -1886,7 +1914,7 @@ class DedicatedDataStore:
         have = nhãn các chứng từ đã có; missing = còn thiếu theo bộ của khách (nếu biết `modes`); tk = số tờ khai 12 số trong tên file."""
         def names_in(d):
             try:
-                return sorted(n for n in os.listdir(d) if not n.startswith((".", "~$")) and os.path.isfile(os.path.join(d, n)))
+                return sorted(n for n in os.listdir(d) if not n.startswith((".", "~$")) and n != LOT_CARD and os.path.isfile(os.path.join(d, n)))
             except OSError:
                 return []
         prepared, other, have, tk = [], [], set(), ""
@@ -1944,80 +1972,266 @@ class DedicatedDataStore:
             key = next((k for k, p in PROFILES.items() if self._khach_match(p, cust_label)), None)
         return lot_bundle_modes({"customer": key}) if key in PROFILES else None
 
-    def folders_signature(self):
-        """Dấu hiệu rẻ của cây thư mục HAI_QUAN (chỉ tên thư mục, sâu 5 cấp, kèm số file trong mỗi thư mục lá): đổi khi có thư mục/file bị thêm hay xóa."""
+    # ---- chỉ mục quét nhanh: nhớ kết quả đọc từng thư mục theo giờ sửa của thư mục ----------------------------------
+    # Thêm / xóa / đổi tên file trong một thư mục làm đổi giờ sửa của chính thư mục đó, nên thư mục không đổi giờ sửa
+    # thì dùng lại kết quả lần trước, không phải liệt kê lại (vài năm dữ liệu trên LAN/OneDrive vẫn quét nhanh).
+    def _dir_listing(self, d):
+        """(tên file, tên thư mục con) của thư mục `d`, đã sắp xếp; None nếu không đọc được."""
+        memo = self._scan_ls  # trong một lần quét: mỗi thư mục chỉ hỏi ổ đĩa một lần
+        if memo is not None and d in memo:
+            return memo[d]
+        res = self._dir_listing_disk(d)
+        if memo is not None:
+            memo[d] = res
+        return res
+
+    def _dir_listing_disk(self, d):
+        try:
+            st = os.stat(d)
+        except OSError:
+            return None
+        key = os.path.normcase(os.path.abspath(d))
+        c = self._ls_cache.get(key)
+        if c and c[0] == st.st_mtime_ns:
+            return c[1]
+        files, dirs = [], []
+        try:
+            with os.scandir(d) as it:
+                for e in it:
+                    try:
+                        if e.is_dir():
+                            dirs.append(e.name)
+                        elif e.is_file():
+                            files.append(e.name)
+                    except OSError:
+                        pass
+        except OSError:
+            return None
+        res = (tuple(sorted(files)), tuple(sorted(dirs)))
+        if time.time() - st.st_mtime > _SCAN_SETTLE:
+            self._ls_cache[key] = (st.st_mtime_ns, res)
+        return res
+
+    def _activity(self, path, modes):
+        """folder_activity có nhớ: chỉ đọc lại khi thư mục lô (hoặc DO_PHAN_MEM_TAO bên trong) đổi giờ sửa."""
         sig = []
+        listing = self._dir_listing(path)
+        for d in (path, os.path.join(path, GENERATED_DIR)):
+            if d != path and listing is not None and GENERATED_DIR not in listing[1]:
+                sig.append(None)  # không có thư mục con kiểu cũ: khỏi hỏi ổ đĩa
+                continue
+            try:
+                sig.append(os.stat(d).st_mtime_ns)
+            except OSError:
+                sig.append(None)
+        key = (os.path.normcase(os.path.abspath(path)), tuple(modes) if modes else None)
+        c = self._act_cache.get(key)
+        if c and c[0] == tuple(sig) and sig[0] is not None:
+            return dict(c[1])
+        a = self.folder_activity(path, modes)
+        if sig[0] is not None and time.time() - max(x for x in sig if x is not None) / 1e9 > _SCAN_SETTLE:
+            self._act_cache[key] = (tuple(sig), {k: list(v) if isinstance(v, list) else v for k, v in a.items()})
+        return a
+
+    # ---- thẻ hồ sơ 00_HO_SO.json trong thư mục lô -------------------------------------------------------------------
+    def read_lot_card(self, folder):
+        """Thẻ hồ sơ của thư mục lô (dict) hoặc None. Không có 00_HO_SO.json thì đọc file 00_HO_SO_<id>.json kiểu cũ (Bước 2)."""
+        listing = self._dir_listing(folder)
+        if not listing:
+            return None
+        names = listing[0]
+        if LOT_CARD in names:
+            p = os.path.join(folder, LOT_CARD)
+        else:
+            old = [n for n in names if n.startswith("00_HO_SO_") and n.endswith(".json")]
+            if not old:
+                return None
+            p = os.path.join(folder, old[-1])
+        try:
+            st = os.stat(p)
+        except OSError:
+            return None
+        key = os.path.normcase(os.path.abspath(p))
+        sig = (st.st_mtime_ns, st.st_size)
+        c = self._card_cache.get(key)
+        if c and c[0] == sig:
+            return c[1]
+        try:
+            with open(p, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            data = None
+        if isinstance(data, dict) and os.path.basename(p) != LOT_CARD:  # file Bước 2 kiểu cũ: cả file là hồ sơ
+            data = {"id": data.get("id") or os.path.basename(p)[9:-5], "customer": data.get("customer", ""), "docDate": data.get("docDate", ""),
+                    "poNumber": data.get("poNumber", ""), "pxkNo": data.get("pxkNo", ""), "hdNo": data.get("hdNo", ""), "tkNo": data.get("tkNo", ""),
+                    "record": data, "kieuCu": True}
+        card = data if isinstance(data, dict) else None
+        self._card_cache[key] = (sig, card)
+        return card
+
+    def lot_card_data(self, rec, folder):
+        """Nội dung thẻ 00_HO_SO.json cho hồ sơ `rec` ở thư mục `folder` (giữ ngày tạo và các mã hồ sơ đã ghi trước đó)."""
+        old = self.read_lot_card(folder) or {}
+        if old.get("kieuCu"):
+            old = {}
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        rid = str(rec.get("id") or "")
+        ids = [x for x in [*(old.get("ids") or ([old["id"]] if old.get("id") else [])), rid] if x]
+        listing = self._dir_listing(folder) or ((), ())
+        made_pre = tuple(p.lower() for p, _l in self.MADE_PREFIXES)
+        files = [n for n in listing[0] if n.lower().startswith(made_pre)]
+        cust = rec.get("customer") or ""
+        return {
+            "loai": "HO_SO_LO_HANG", "phienBan": 1,
+            "id": rid or old.get("id", ""), "ids": list(dict.fromkeys(ids)),
+            "customer": cust, "customerLabel": (PROFILES.get(cust) or {}).get("label", cust),
+            "docDate": rec.get("docDate", ""), "poNumber": rec.get("poNumber", ""),
+            "poNumbers": [p.strip() for p in str(rec.get("poNumber") or "").split(" + ") if p.strip()],
+            "pxkNo": rec.get("pxkNo", ""), "hdNo": rec.get("hdNo", ""), "tkNo": rec.get("tkNo", ""),
+            "files": files, "createdAt": old.get("createdAt") or now, "updatedAt": now, "machine": self.user_name(),
+            "record": {k: v for k, v in rec.items() if not str(k).startswith("_")},
+        }
+
+    def write_lot_card(self, rec, folder):
+        """Ghi thẻ 00_HO_SO.json vào thư mục lô (ghi file tạm rồi thay, không để thẻ dở dang). Lỗi (VD mất ổ LAN) không chặn
+        việc xuất/lưu: chỉ ghi vào LOI_PHAN_MEM.txt. Trả True nếu đã ghi."""
+        try:
+            os.makedirs(folder, exist_ok=True)
+            data = self.lot_card_data(rec, folder)
+            tmp = os.path.join(folder, "." + LOT_CARD + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=1, default=str)
+            os.replace(tmp, os.path.join(folder, LOT_CARD))
+            if rec.get("id"):
+                self._card_paths[str(rec["id"])] = folder
+            return True
+        except Exception as e:
+            log_soft_error(f"Không ghi được thẻ hồ sơ {LOT_CARD} vào '{folder}': {e}")
+            return False
+
+    def folders_signature(self):
+        """Dấu hiệu rẻ của cây thư mục HAI_QUAN: giờ sửa của từng thư mục (đổi khi có file/thư mục con bị thêm, xóa, đổi tên).
+        Chỉ theo dõi các tháng của năm nay và năm trước; năm cũ hơn chỉ quét khi người dùng mở danh sách hoặc tìm."""
+        sig = []
+        first_year = datetime.date.today().year - 1
 
         def walk(d, depth):
             try:
-                with os.scandir(d) as it:
-                    entries = list(it)
+                st = os.stat(d)
             except OSError:
                 return
-            files = sum(1 for e in entries if e.is_file() and not e.name.startswith((".", "~$")))
-            sig.append((d, files))
-            if depth < 5:
-                for e in sorted((e for e in entries if e.is_dir() and not e.name.startswith((".", "_"))), key=lambda e: e.name):
-                    walk(e.path, depth + 1)
+            sig.append((d, st.st_mtime_ns))
+            if depth >= 5:
+                return
+            listing = self._dir_listing(d)
+            for name in (listing[1] if listing else ()):
+                if name.startswith((".", "_")):
+                    continue
+                m = re.fullmatch(r"(\d{4})_Thang_\d{2}", name)
+                if m and int(m.group(1)) < first_year:
+                    continue
+                walk(os.path.join(d, name), depth + 1)
         walk(self.customs_root(), 0)
         return tuple(sig)
 
     def declaration_folders(self):
+        """Như _declaration_folders_scan; trong một lần quét mỗi thư mục chỉ liệt kê một lần."""
+        outer = self._scan_ls is None
+        if outer:
+            self._scan_ls = {}
+        try:
+            return self._declaration_folders_scan()
+        finally:
+            if outer:
+                self._scan_ls = None
+
+    def _declaration_folders_scan(self):
         """Các thư mục tờ khai đang có trong HAI_QUAN (quét thật trên ổ đĩa/OneDrive) ghép với thông tin hồ sơ nếu có.
-        Mỗi mục: {customer, label, day, path, record (hoặc None), files}. Mới nhất trước. Thư mục bắt đầu bằng _ bị bỏ qua."""
+        Mỗi mục: {customer, label, day, path, record (hoặc None), files, card}. Mới nhất trước. Thư mục bắt đầu bằng _ bị bỏ qua.
+        Ghép hồ sơ theo thứ tự: thẻ 00_HO_SO.json trong thư mục (theo mã hồ sơ) -> thư mục đã lưu của hồ sơ -> đoán theo số
+        tờ khai/PO trong đường dẫn. Thư mục có thẻ mà không có hồ sơ trong danh sách thì dựng hồ sơ từ thẻ (máy khác lưu)."""
         root = self.customs_root()
-        by_path = {}
+        by_path, by_id = {}, {}
         for r in self.records:
+            if r.get("id"):
+                by_id.setdefault(str(r["id"]), r)
             try:
                 by_path[os.path.normcase(os.path.normpath(self.get_record_folder_path(r)))] = r
             except Exception:
                 pass
-        out, seen = [], set()
+        out, seen, used_ids, card_paths = [], set(), set(), {}
+        root_key = os.path.normcase(os.path.normpath(root))
         skip = {CUSTOMS_ROOT, "MAU_CHUNG_TU", GENERATED_DIR, "_KIEM_TRA"}
         roots = [root]
         nested = os.path.join(root, CUSTOMS_ROOT)  # thư mục HAI_QUAN lồng bên trong do bản cũ tạo ra
         if os.path.isdir(nested):
             roots.append(nested)
+        def listing(d):
+            return self._dir_listing(d) or ((), ())
         def has_files(d):
-            try:
-                return any(not n.startswith((".", "~$")) and os.path.isfile(os.path.join(d, n)) for n in os.listdir(d))
-            except OSError:
-                return False
+            return any(not n.startswith((".", "~$")) for n in listing(d)[0])
+        guess_keys = []
+        for r in self.records:
+            for key in (r.get("tkNo"), str(r.get("poNumber") or "").split()[0].split("..")[0] if str(r.get("poNumber") or "").split() else ""):
+                if key and len(str(key)) >= 5:
+                    guess_keys.append((str(key).lower(), r))
         def rec_for(path):
             norm = os.path.normcase(path)
-            for r in self.records:
-                for key in (r.get("tkNo"), str(r.get("poNumber") or "").split()[0].split("..")[0] if r.get("poNumber") else ""):
-                    if key and len(str(key)) >= 5 and str(key).lower() in norm:
-                        return r
-            return None
+            return next((r for key, r in guess_keys if key in norm), None)
         def add(cust, path, day):
             key = os.path.normcase(os.path.normpath(path))
-            if key in seen or any(key.startswith(k + os.sep) for k in seen if has_files(k)):
+            if key in seen:
                 return
+            up = os.path.dirname(key)
+            while len(up) > len(root_key):  # nằm trong một thư mục tờ khai đã có (có file) thì bỏ qua
+                if up in seen and has_files(up):
+                    return
+                up = os.path.dirname(up)
             seen.add(key)
-            rec = by_path.get(key) or rec_for(path)
-            files = [f for f in os.listdir(path) if not f.startswith(".")]
-            out.append({"customer": cust, "label": cust, "day": day, "path": path, "record": rec, "files": len(files), **self.folder_activity(path, self._modes_for_folder(cust, rec))})
+            card = self.read_lot_card(path)
+            rec = None
+            if card:
+                for cid in [card.get("id"), *(card.get("ids") or [])]:
+                    if cid:
+                        card_paths.setdefault(str(cid), path)
+                        rec = rec or by_id.get(str(cid))
+                if rec and rec.get("id"):
+                    used_ids.add(str(rec["id"]))  # hồ sơ đã nhận thư mục qua thẻ: thư mục cũ đã lưu (nếu còn, trống) không liệt kê lại
+            rec = rec or by_path.get(key) or rec_for(path)
+            if rec is None and card and isinstance(card.get("record"), dict) and card["record"]:
+                rec = dict(card["record"], _fromCard=True)  # hồ sơ chỉ còn trong thẻ (máy khác lưu, hoặc mất hongthien_records.json)
+            files, dirs = listing(path)
+            n = sum(1 for f in files + dirs if not f.startswith(".") and f != LOT_CARD)
+            out.append({"customer": cust, "label": cust, "day": day, "path": path, "record": rec, "files": n, "card": card,
+                        **self._activity(path, modes_for(cust, rec))})
+        modes_memo = {}
+        def modes_for(cust, rec):  # bộ chứng từ chỉ phụ thuộc mã khách: tính một lần cho mỗi thư mục khách
+            k = (cust, (rec or {}).get("customer"))
+            if k not in modes_memo:
+                modes_memo[k] = self._modes_for_folder(cust, rec)
+            return modes_memo[k]
+        def visit(cust, cdir, d, depth):
+            dirs = [x for x in listing(d)[1] if not x.startswith((".", "_")) and x != GENERATED_DIR]
+            if d != cdir and (has_files(d) or (not dirs and re.match(r"\d{4}-\d{2}-\d", os.path.basename(d)))):
+                add(cust, d, os.path.basename(d))
+                return  # thư mục có file là thư mục tờ khai, không đi sâu thêm
+            if d == cdir and has_files(cdir) and not dirs:
+                add(cust, cdir, os.path.basename(cdir))
+            if depth >= 4:
+                return
+            for x in dirs:
+                visit(cust, cdir, os.path.join(d, x), depth + 1)
         for rt in roots:
-            try:
-                custs = sorted(d for d in os.listdir(rt) if not d.startswith("_") and d.upper() not in skip and os.path.isdir(os.path.join(rt, d)))
-            except OSError:
-                custs = []
+            custs = [d for d in listing(rt)[1] if not d.startswith("_") and d.upper() not in skip]
             for cust in custs:
-                cdir = os.path.join(rt, cust)
-                for dirpath, dirs, _files in os.walk(cdir):
-                    dirs[:] = sorted(d for d in dirs if not d.startswith((".", "_")) and d != GENERATED_DIR)
-                    if dirpath != cdir and (has_files(dirpath) or (not dirs and re.match(r"\d{4}-\d{2}-\d", os.path.basename(dirpath)))):
-                        add(cust, dirpath, os.path.basename(dirpath))
-                        dirs[:] = []  # thư mục có file là thư mục tờ khai, không đi sâu thêm
-                    elif dirpath == cdir and has_files(cdir) and not dirs:
-                        add(cust, cdir, os.path.basename(cdir))
-                    if dirpath.count(os.sep) - cdir.count(os.sep) >= 4:
-                        dirs[:] = []
+                visit(cust, os.path.join(rt, cust), os.path.join(rt, cust), 0)
+        self._card_paths = card_paths
         for key, r in by_path.items():  # hồ sơ đã lưu có thư mục nhưng chưa có file nào
+            if r.get("id") and str(r["id"]) in used_ids:
+                continue
             if key not in seen and os.path.isdir(key):
                 out.append({"customer": r.get("customer", ""), "label": PROFILES.get(r.get("customer", ""), {}).get("label", r.get("customer", "")),
-                            "day": r.get("docDate", ""), "path": key, "record": r, "files": 0,
+                            "day": r.get("docDate", ""), "path": key, "record": r, "files": 0, "card": None,
                             "prepared": [], "other": [], "tk": "", "status": "Thư mục trống"})
         for o in out:
             r = o["record"]
@@ -2312,14 +2526,12 @@ class DedicatedDataStore:
             elif saved and os.path.isdir(self.legacy_folder_path(saved)):
                 return self.legacy_folder_path(saved)
             else:
-                rel = self.new_record_folder(rec)
-                if not os.path.isdir(self.rel_to_abs(rel)):  # hồ sơ cũ chưa ghi thư mục: thư mục kiểu cũ (chỉ ngày) đang có thì dùng lại
-                    dt = str(rec.get("docDate") or "")
-                    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", dt):
-                        old_rel = os.path.join(os.path.dirname(rel), dt)
-                        if os.path.isdir(self.rel_to_abs(old_rel)):
-                            rel = old_rel
-        return self.rel_to_abs(rel)
+                rel = self.new_record_folder(rec)  # đã gồm thư mục kiểu cũ chỉ theo ngày nếu đúng là của lô này (lot_folder_for)
+        path = self.rel_to_abs(rel)
+        moved = self._card_paths.get(str(rec.get("id") or ""))
+        if moved and not os.path.isdir(path) and os.path.isdir(moved):  # thư mục lô bị chuyển chỗ bằng Explorer: thẻ hồ sơ chỉ chỗ mới
+            return moved
+        return path
 
     def find_record(self, rec):
         """Vị trí hồ sơ đã lưu trùng với `rec`: cùng mã hồ sơ, hoặc cùng khách + cùng PO + cùng ngày khai.
@@ -2361,21 +2573,114 @@ class DedicatedDataStore:
         return True
 
     def new_record_folder(self, rec):
-        """Đường dẫn (tương đối) cho hồ sơ mới: <Khách>/<năm>_Thang_<mm>/<yyyy-mm-dd>_<Số PXK>. Cùng ngày: khác số PXK là thư mục mới, cùng số PXK thì lưu chung."""
-        dt = str(rec.get("docDate") or "")
+        """Đường dẫn (tương đối) cho hồ sơ mới: <Khách>/<năm>_Thang_<mm>/<yyyy-mm-dd>_<Số PXK>. Cùng ngày: khác số PXK là thư mục mới, cùng số PXK thì lưu chung.
+        Chỉ tính, không tạo hay đổi tên gì trên ổ đĩa (xem lot_folder_for)."""
+        path = self.lot_folder_for(rec.get("customer") or "KHACH", rec.get("docDate"), rec.get("pxkNo"), rec=rec)
+        return os.path.join(CUSTOMS_ROOT, os.path.relpath(path, self.customs_root()))
+
+    def lot_folder_for(self, customer, day, pxk="", rec=None, rename=False):
+        """Thư mục lô (đường dẫn tuyệt đối) theo quy tắc chung: HAI_QUAN/<Khách>/<yyyy>_Thang_<mm>/<yyyy-mm-dd>_<số PXK>.
+        Mọi đường vào (xuất file, lưu, thêm file, sắp xếp) dùng hàm này: cùng khách + cùng ngày + cùng PXK là cùng một thư mục.
+        - `customer`: mã khách (lấy tên gọi làm tên thư mục) hoặc tên thư mục khách.
+        - Đã có thư mục cùng ngày cùng PXK (kể cả viết khác số 0 đầu: 318 = 000318) thì dùng lại.
+        - Có thư mục <ngày> (chưa có PXK) mà đúng là của lô này (thẻ cùng PXK hoặc chưa có PXK, không thuộc hồ sơ khác) thì dùng lại;
+          rename=True thì đổi tên nó thành <ngày>_<PXK> (khi tên mới chưa có) và trỏ lại hồ sơ.
+        - Chưa có số PXK: <ngày>, hồ sơ khác đã giữ <ngày> thì <ngày>_2, _3…
+        Không tạo thư mục (trừ đổi tên khi rename=True)."""
+        dt = str(day or "")[:10]
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", dt):
             dt = datetime.date.today().strftime("%Y-%m-%d")
-        cust = rec.get("customer") or "KHACH"
-        name = re.sub(r'[\\/:*?"<>|]+', "_", str(PROFILES.get(cust, {}).get("label") or cust)).strip(" .") or "KHACH"
-        pxk = re.sub(r'[\\/:*?"<>|\s]+', "", str(rec.get("pxkNo") or ""))
-        leaf = f"{dt}_{pxk}" if pxk else dt  # thư mục lô = <ngày>_<số PXK> (chưa có số PXK thì tạm theo ngày)
-        base = os.path.join(CUSTOMS_ROOT, name, f"{dt[:4]}_Thang_{dt[5:7]}", leaf)
-        used = {r.get("folder") for r in self.records if r.get("customer") == cust and r.get("folder")}
-        rel, n = base, 2
-        while rel in used and not pxk:  # có số PXK: cùng số thì lưu chung một thư mục; chưa có số PXK thì tách _2, _3… theo hồ sơ
-            rel = f"{base}_{n}"
-            n += 1
-        return rel
+        key = customer or "KHACH"
+        name = _safe_name(PROFILES[key].get("label") or key) if key in PROFILES else _safe_name(key)
+        month = os.path.join(self.customs_root(), name or "KHACH", f"{dt[:4]}_Thang_{dt[5:7]}")
+        pxk = re.sub(r'[\\/:*?"<>|\s]+', "", str(pxk or ""))
+        rid = str((rec or {}).get("id") or "")
+        if not pxk:  # chưa có số PXK: tạm theo ngày, mỗi hồ sơ một thư mục
+            used = set()
+            for r in self.records:
+                if r.get("folder") and (not rid or str(r.get("id") or "") != rid):
+                    with contextlib.suppress(Exception):
+                        used.add(os.path.normcase(os.path.normpath(self.rel_to_abs(r["folder"]))))
+            base = os.path.join(month, dt)
+            path, n = base, 2
+            while os.path.normcase(os.path.normpath(path)) in used:
+                path = f"{base}_{n}"
+                n += 1
+            return path
+        exact = os.path.join(month, f"{dt}_{pxk}")
+        if os.path.isdir(exact):
+            return exact
+        listing = self._dir_listing(month) if os.path.isdir(month) else None
+        for d in (listing[1] if listing else ()):
+            m = re.fullmatch(re.escape(dt) + r"_(.+)", d)
+            if m and _same_pxk(m.group(1), pxk):
+                return os.path.join(month, d)
+        plain = os.path.join(month, dt)
+        if os.path.isdir(plain) and self._plain_folder_fits(plain, pxk, rec, key):
+            if not rename:
+                return plain
+            try:
+                os.rename(plain, exact)
+            except OSError:
+                return plain
+            self._repoint_records(plain, exact)
+            return exact
+        return exact
+
+    def _plain_folder_fits(self, plain, pxk, rec, customer):
+        """Thư mục <ngày> (chưa có số PXK) có phải của lô <ngày>_<pxk> không: thẻ cùng PXK, hoặc chưa có PXK mà cùng PO (hoặc thẻ chưa ghi PO);
+        không có thẻ thì số PXK đọc từ tên file PDF Bkav phải trùng hoặc chưa có. Thư mục đang là của hồ sơ khác (khác PO / khác PXK) thì không."""
+        rid = str((rec or {}).get("id") or "")
+        my_pos = {p.strip() for p in str((rec or {}).get("poNumber") or "").split(" + ") if p.strip()}
+        key = os.path.normcase(os.path.normpath(plain))
+        for r in self.records:
+            if not r.get("folder") or (rid and str(r.get("id") or "") == rid):
+                continue
+            try:
+                if os.path.normcase(os.path.normpath(self.rel_to_abs(r["folder"]))) != key:
+                    continue
+            except Exception:
+                continue
+            if r.get("pxkNo") and not _same_pxk(r["pxkNo"], pxk):
+                return False
+            their = {p.strip() for p in str(r.get("poNumber") or "").split(" + ") if p.strip()}
+            if my_pos and their and not (my_pos & their):
+                return False
+        card = self.read_lot_card(plain)
+        if card and not card.get("kieuCu"):
+            if card.get("pxkNo"):
+                return _same_pxk(card["pxkNo"], pxk)
+            pos = set(card.get("poNumbers") or [])
+            if my_pos and pos and not (my_pos & pos):
+                return False
+        file_pxk = self._activity(plain, None).get("pxk")
+        return not file_pxk or _same_pxk(file_pxk, pxk)
+
+    def _repoint_records(self, old, new):
+        """Hồ sơ đã lưu đang trỏ vào thư mục `old` thì trỏ sang `new` (sau khi đổi tên thư mục)."""
+        key, changed = os.path.normcase(os.path.normpath(old)), False
+        for r in self.records:
+            f = r.get("folder")
+            try:
+                if f and os.path.normcase(os.path.normpath(self.rel_to_abs(f))) == key:
+                    r["folder"] = os.path.join(CUSTOMS_ROOT, os.path.relpath(new, self.customs_root()))
+                    changed = True
+            except Exception:
+                pass
+        if changed:
+            with contextlib.suppress(Exception):
+                self.save_records()
+
+    def ensure_lot_folder(self, rec):
+        """Thư mục lô để GHI file của hồ sơ `rec` (dùng khi xuất / lưu): hồ sơ đã có thư mục thì dùng thư mục đó; chưa có thì
+        chọn theo lot_folder_for, kể cả đổi tên thư mục <ngày> của chính lô này thành <ngày>_<PXK>. Tạo thư mục nếu chưa có."""
+        i = self.find_record(rec)
+        if rec.get("folder") or (i >= 0 and (self.records[i].get("folder") or os.path.isdir(self.legacy_folder_path(self.records[i])))):
+            path = self.get_record_folder_path(rec)
+        else:
+            path = self.lot_folder_for(rec.get("customer") or "KHACH", rec.get("docDate"), rec.get("pxkNo"), rec=rec, rename=True)
+        os.makedirs(path, exist_ok=True)
+        return path
 
     def legacy_folder_path(self, rec):
         """Cách đặt thư mục của các bản trước (01_WORKING… / 02_ARCHIVE…), chỉ để tìm lại hồ sơ cũ."""
@@ -7030,12 +7335,19 @@ def lot_export_form_file(rec, path, out_base, work_dir):
 
 
 def lot_export(store, rec, mode="ALL", skip_h=False):
-    """Xuất Excel cho hồ sơ `rec` vào thư mục làm việc của hồ sơ.
+    """Xuất Excel cho hồ sơ `rec` vào thư mục làm việc của hồ sơ, rồi ghi thẻ 00_HO_SO.json của thư mục lô.
 
     Trả {"path", "fname", "problems", "dsh"}: `problems` là danh sách điểm lệch khi kiểm tra
     chéo (chỉ mode ALL), `dsh` là tên file danh sách hàng ECUS đi kèm (nếu có).
     Ném ValueError(thông báo tiếng Việt) khi không xuất được.
     """
+    res = _lot_export_one(store, rec, mode, skip_h)
+    store.write_lot_card(rec, os.path.dirname(res["path"]))
+    return res
+
+
+def _lot_export_one(store, rec, mode="ALL", skip_h=False):
+    """Phần xuất một chứng từ của lot_export (chưa ghi thẻ hồ sơ)."""
     if not rec.get("items"):
         raise ValueError("Chưa có dòng hàng nào để xuất file Excel.")
     try:
@@ -7053,7 +7365,7 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
     if mode == "BKLS" and not any(is_pallet_item(x) for x in rec["items"]):
         raise ValueError("Bảng kê lâm sản chỉ dùng cho lô hàng pallet; lô hàng ống không có.")
     store.sync_folder_with_pxk(rec)  # đổi số PXK sau khi đã lưu: tên thư mục và file theo số mới
-    folder = store.get_record_folder_path(rec)
+    folder = store.ensure_lot_folder(rec)  # cùng khách + cùng ngày + cùng PXK: luôn cùng một thư mục lô
     work_dir = folder  # file do phần mềm tạo nằm thẳng trong thư mục ngày, cùng scan/PDF/file hải quan
     os.makedirs(work_dir, exist_ok=True)
     for src in rec.get("poFiles") or []:  # PO gốc khách gửi: lưu cùng chứng từ đã tạo
@@ -7201,10 +7513,12 @@ def lot_export_each(store, rec, skip_h=False):
     Trả {"files": [{"mode", "label", "name", "path"}], "problems": [điểm lệch khi kiểm tra chéo]}."""
     files, extra = [], []
     for mode in lot_bundle_modes(rec):
-        res = lot_export(store, rec, mode, skip_h=skip_h)
+        res = _lot_export_one(store, rec, mode, skip_h=skip_h)
         files.append({"mode": mode, "label": lot_mode_label(mode), "name": res["fname"], "path": res["path"]})
         if mode.startswith("R:"):  # ô lạ trong mẫu riêng của khách: báo để người dùng sửa file mẫu
             extra += res["problems"]
+    if files:
+        store.write_lot_card(rec, os.path.dirname(files[-1]["path"]))
     return {"files": files, "problems": check_lot(rec) + extra}
 
 
@@ -7369,14 +7683,14 @@ def lot_save_new(store, rec, exported_files):
     else:
         store.records.insert(0, rec)
     store.save_records()
+    store.write_lot_card(rec, store.ensure_lot_folder(rec))  # thẻ hồ sơ: thư mục tự nói nó là lô nào
     return rec
 
 
 def lot_save_workbench(store, rec):
     """Lưu hồ sơ ở Bước 2: ghi file 00_HO_SO_<id>.json vào thư mục hồ sơ và cập nhật danh sách."""
     store.sync()
-    dest_dir = store.get_record_folder_path(rec)
-    os.makedirs(dest_dir, exist_ok=True)
+    dest_dir = store.ensure_lot_folder(rec)
     with open(os.path.join(dest_dir, f"00_HO_SO_{rec['id']}.json"), "w", encoding="utf-8") as f:
         json.dump(rec, f, ensure_ascii=False, indent=2)
     idx = next((i for i, r in enumerate(store.records) if r["id"] == rec["id"]), -1)
@@ -7385,6 +7699,7 @@ def lot_save_workbench(store, rec):
     else:
         store.records.insert(0, rec)
     store.save_records()
+    store.write_lot_card(rec, dest_dir)
     return dest_dir
 
 

@@ -395,7 +395,7 @@ def test_export_files_land_in_customs_customer_month_day_folder(win, tmp_path, s
     files = [f for f in win.lot.lot.files]
     gen = day  # mọi file nằm thẳng trong thư mục ngày (không còn thư mục con DO_PHAN_MEM_TAO)
     assert len(files) == 5 and all(os.path.dirname(f["path"]) == gen for f in files)
-    assert sorted(os.listdir(gen)) == sorted([os.path.basename(f["path"]) for f in files] + ["PO_goc_po.pdf"])  # kèm bản sao PO gốc
+    assert sorted(os.listdir(gen)) == sorted([os.path.basename(f["path"]) for f in files] + ["PO_goc_po.pdf", "00_HO_SO.json"])  # kèm bản sao PO gốc và thẻ hồ sơ của thư mục lô
     assert not os.path.exists(os.path.join(day, "DO_PHAN_MEM_TAO"))
     assert os.listdir(os.path.join(store.base_dir, "HAI_QUAN", "Kodi")) == ["2026_Thang_11"]
     win.lot.step5.do_save()
