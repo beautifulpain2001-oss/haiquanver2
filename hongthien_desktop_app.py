@@ -5950,8 +5950,11 @@ def _qty_price_from_numbers(nums, known_price):
         return 0, known_price or 0, 0
     amt = max(nums)
     best = None
+    # Số lớn nhất chính là đơn giá đã học (xuất hiện một lần): PO không in cột thành tiền, không coi nó là thành tiền
+    # (nếu không SL sẽ bị đọc thành số thứ tự dòng '1' và dòng được đánh dấu 'ok' sai)
+    price_is_max = bool(known_price) and abs(amt - known_price) <= known_price * 0.002 and nums.count(amt) == 1
     for i, q in enumerate(nums):
-        if q <= 0 or q >= amt:
+        if price_is_max or q <= 0 or q >= amt:
             continue
         p = amt / q
         others = [n for j, n in enumerate(nums) if j != i and n != amt]
@@ -6932,14 +6935,16 @@ def parse_generic_po_text(text, profile, catalog_items, data_store=None, tare_va
             "net": net,
             "gross": gross,
             "tare": tare_val,
-            **_conf_read(conf),
+            **_conf_read(conf, no_amount_col=bool(profile.get("noAmountCol"))),
         })
     return po_no, po_date, lines
 
 
-def _conf_read(conf):
+def _conf_read(conf, no_amount_col=False):
     """Trạng thái đọc của một dòng PO theo mức đối chiếu số: chỉ 'ok' khi SL x đơn giá khớp thành tiền in trên PO."""
     if conf is None or conf >= 2:
+        return {"read": "ok", "read_note": ""}
+    if conf == 1 and no_amount_col:  # PO của khách này không in cột thành tiền: thấy đúng giá đã học là đủ
         return {"read": "ok", "read_note": ""}
     if conf == 1:
         return {"read": "suy_ra", "read_note": "Thấy đơn giá đã học nhưng không khớp được SL x đơn giá = thành tiền: kiểm tra SL"}
@@ -6947,6 +6952,7 @@ def _conf_read(conf):
 
 
 _TOTAL_LABEL = re.compile(r"t[ổôo]ng\s*c[ộôo]ng|t[ổôo]ng\s*ti[ềêe]n|t[ổôo]ng\s*gi[áa]\s*tr[ịi]|grand\s*total|total\s*amount|^\s*total\b|合\s*计|总\s*计|总\s*金\s*额|总\s*价", re.I)
+_QTY_WORD = re.compile(r"[\s:：.\-]*(?:s[ốôo]\s*l[ưu][ợo]ng|qty|quantity|s\.?l\b|数量|件数)", re.I)
 _VAT_FACTORS = (1.0, 1.05, 1.08, 1.1)
 
 
@@ -6963,6 +6969,8 @@ def po_total_check(raw_text, lines):
         if not m:
             continue
         seg = ln[m.end():]
+        if _QTY_WORD.match(seg):
+            continue  # "Tổng cộng số lượng 1500", "Total Qty 1500": tổng số lượng, không phải tổng tiền
         vals = [parse_vn_number(x) for x in re.findall(r"\d[\d.,]*\d|\d", _normalize_ocr_numbers(seg))]
         vals = [v for v in vals if v and v > 0]
         if not vals and i + 1 < len(rows):  # OCR đẩy số tổng xuống dòng dưới

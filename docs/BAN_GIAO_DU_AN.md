@@ -244,6 +244,13 @@ Khi người dùng chọn khách có sẵn mà quét file, `scan_po_file_offline
 4. **Chế độ OCR lỏng** (`ocrLoose`, bật cho bộ mẫu Best): `_loose_po_line` nhận hàng theo **chiều dài** (ví dụ `1350MM`) rồi kiểm **SL × đơn giá = thành tiền** để chọn đúng bộ số; lấy Inquiry No (`QS…`), Customs No (`PackingF…`), mã vật liệu.
 5. Tính kiện = SL ÷ định mức (`div`), tịnh = SL × kg, cả bì = tịnh + bì (`tare`, Best: 1 kg/dòng).
 
+**Báo dòng đáng ngờ và kiểm tổng PO (PO chung và Kodi).**
+- Mỗi dòng có `read` = `ok` / `suy_ra` và `read_note`. `_conf_read(conf)` đổi mức đối chiếu số thành trạng thái: `ok` khi SL × đơn giá = thành tiền in trên PO (mức 2–3); `suy_ra` (dòng vàng) khi chỉ thấy đơn giá (mức 1) hoặc không thấy giá (mức 0). Khách có cờ hồ sơ `noAmountCol: true` (PO không có cột thành tiền) thì mức 1 cũng là `ok`; cờ chỉ thêm khi cần, không tự bật cho khách nào.
+- `_qty_price_from_numbers` không coi số lớn nhất là thành tiền khi nó chính là đơn giá đã học (tránh đọc số thứ tự dòng làm SL).
+- Kodi: dòng `suy_ra` khi SL lấy từ "số đầu tiên" (không có thành tiền chia hết cho giá) hoặc tên hàng không có trong danh mục Kodi.
+- `po_total_check(raw_text, lines)`: so tổng SL × giá các dòng với dòng "Tổng cộng / Total / 合计" trên PO (chấp nhận tổng gồm VAT 5/8/10% và tổng nhiều trang; bỏ qua dòng tổng số lượng). Kết quả `✅`/`⚠` nằm trong `res["po_check"]`, `res["msg"]` và dải báo ở Bước ③.
+- OCR lại: PDF có lớp chữ (do máy scan tự OCR) mà không ra dòng nào thì `read_document_text(path, force_ocr=True)` / `extract_text_from_pdf_or_image_offline(..., force_ocr=True)` bỏ lớp chữ và OCR ảnh trang (cần Tesseract). Chỉ chạy khi không ra dòng nào nên không đổi đầu ra Kodi/Tesa đang đọc tốt. Test: `tests/test_po_check.py`.
+
 ### 5.4 Đọc Invoice Excel và hóa đơn XML (khi học khách mới)
 - `learn_from_einvoice_xml`: XML hóa đơn VAT/PXK theo TT78 → tên công ty, MST, địa chỉ, email, mã/tên hàng, ĐVT, đơn giá; PXK thì lấy kho nhận, lái xe, biển xe, ký hiệu.
 - `learn_from_invoice_excel`: đọc **mọi sheet**, sheet có **ngày mới nhất thắng** (`_sheet_date`); tìm dòng tiêu đề (`INVOICE_HEADER_KEYS`); suy ra SL/kiện = SL ÷ số kiện, kg/chiếc = N.W ÷ SL, bì từng dòng = gross − net; đọc bảng "Số lượng ống / 1 túi" (`_learn_norm_table`); lấy số PO từ dòng `Số ĐĐH`; **bỏ qua dòng bị ẩn**; đọc tên/MST người mua (`_learn_party_from_sheet`).
