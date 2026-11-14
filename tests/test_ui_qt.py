@@ -118,9 +118,23 @@ def test_unreadable_po_shows_message_and_keeps_going(win, tmp_path, monkeypatch)
     f = tmp_path / "x.pdf"
     f.write_bytes(b"x")
     step.load_file(str(f))
-    wait(win, lambda: not step.busy.isVisible() and "Không" in step.status.text())
+    # Câu báo tùy máy có OCR hay không (xem test_unreadable_po_message_depends_on_ocr); cả hai đều có "thêm dòng trực tiếp"
+    wait(win, lambda: not step.busy.isVisible() and "thêm dòng trực tiếp" in step.status.text())
     win.lot.go(1)
     assert win.lot.lot.items == [] and win.lot.next.isEnabled()
+
+
+@pytest.mark.parametrize("ocr, expected", [(False, "máy chưa có bộ OCR"), (True, "Không tìm thấy dòng hàng")])
+def test_unreadable_po_message_depends_on_ocr(win, tmp_path, monkeypatch, ocr, expected):
+    monkeypatch.setattr(core, "extract_text_from_pdf_or_image_offline", lambda *a, **k: "trống")
+    monkeypatch.setattr(core, "ocr_available", lambda: ocr)
+    win.lot.step1.cards["kodi"].click()
+    step = win.lot.step2
+    f = tmp_path / "x.pdf"
+    f.write_bytes(b"x")
+    step.load_file(str(f))
+    wait(win, lambda: not step.busy.isVisible() and expected in step.status.text())
+    assert "thêm dòng trực tiếp" in step.status.text()
 
 
 def test_load_without_customer_warns(win, tmp_path):
