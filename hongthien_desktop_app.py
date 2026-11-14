@@ -2542,9 +2542,10 @@ def auto_rotate_scan(img):
         return img
 
 
-def extract_text_from_pdf_or_image_offline(file_path, is_tesa=False, table_mode=False):
+def extract_text_from_pdf_or_image_offline(file_path, is_tesa=False, table_mode=False, force_ocr=False):
     """table_mode: PO khách mới (bảng nhiều cột) - tự xoay trang nằm ngang, OCR nét hơn và đọc theo từng dòng
-    của bảng (--psm 4). Kodi/Tesa giữ nguyên cách đọc cũ."""
+    của bảng (--psm 4). Kodi/Tesa giữ nguyên cách đọc cũ.
+    force_ocr: bỏ qua lớp chữ có sẵn của PDF và OCR ảnh trang (lớp chữ do máy scan tự OCR thường sai, lệch cột)."""
     ext = os.path.splitext(file_path)[1].lower()
     ocr_cfg = "--psm 4" if table_mode else ""
     if ext in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"):
@@ -2577,7 +2578,8 @@ def extract_text_from_pdf_or_image_offline(file_path, is_tesa=False, table_mode=
                     except Exception:
                         embedded = ""
                 embedded = embedded or (reader.pages[idx].extract_text() or "").strip()
-                if len(re.sub(r"\s+", "", embedded)) > 80:
+                can_ocr = pdfium is not None and pytesseract is not None
+                if len(re.sub(r"\s+", "", embedded)) > 80 and not (force_ocr and can_ocr):
                     pages_out.append(embedded)
                 elif pdfium is not None and pytesseract is not None:
                     doc = pdfium.PdfDocument(file_path)
@@ -2638,10 +2640,14 @@ def parse_kodi_po_text(text, kodi_catalog, data_store=None, tare_val=1.0):
         known = next((x for x in kodi_catalog if x["name"].replace(" ", "").lower() == name.replace(" ", "").lower()), None)
         if known and not price:
             price = known["price"]
+        note = ""
         if price and amount and amount % price == 0:
             qty = amount // price
         elif plain:
             qty = plain[0]
+            note = "Không đối chiếu được SL x đơn giá = thành tiền trên dòng PO: SL là số đoán, hãy so với PO"
+        if qty > 0 and not known:
+            note = (note + "; " if note else "") + "Tên hàng không khớp danh mục Kodi: kg/chiếc và SL/kiện đang là số mặc định"
         if qty > 0:
             item_name = known["name"] if known else name
             mem = data_store.get_item_norm(item_name) if data_store else None
@@ -2667,6 +2673,8 @@ def parse_kodi_po_text(text, kodi_catalog, data_store=None, tare_val=1.0):
                 "net": net,
                 "gross": gross,
                 "tare": tare_val,
+                "read": "suy_ra" if note else "ok",
+                "read_note": note,
             })
     return po_no, po_date, lines
 
@@ -5732,14 +5740,14 @@ def excel_to_text(file_path):
     return "\n".join(out)
 
 
-def read_document_text(file_path):
+def read_document_text(file_path, force_ocr=False):
     ext = os.path.splitext(file_path)[1].lower()
     if ext in (".txt", ".csv"):
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             return f.read()
     if ext in (".xlsx", ".xlsm"):
         return excel_to_text(file_path)
-    return extract_text_from_pdf_or_image_offline(file_path, table_mode=True)
+    return extract_text_from_pdf_or_image_offline(file_path, table_mode=True, force_ocr=force_ocr)
 
 
 def guess_po_number(text):
@@ -5985,9 +5993,16 @@ def _loose_values(tok):
 
 
 def _loose_po_line(line, catalog_items, skip_spans=()):
+    """Như _loose_po_line_ex nhưng chỉ trả (mặt hàng, SL, đơn giá) hoặc None."""
+    r = _loose_po_line_ex(line, catalog_items, skip_spans)
+    return r[:3] if r else None
+
+
+def _loose_po_line_ex(line, catalog_items, skip_spans=()):
     """Dòng PO scan mờ (kiểu Best): nhận mặt hàng theo chiều dài 'xxxxMM' rồi chọn bộ SL / giá / thành tiền khớp nhất.
     OCR hay đọc sai đường kính ('ø40*4' -> '£10%4') và nuốt '.00', nên không dựa vào phần quy cách đầu.
-    Trả về (mặt hàng, SL, đơn giá) hoặc None."""
+    Trả về (mặt hàng, SL, đơn giá, mức đối chiếu) hoặc None. Mức: 3 = SL x giá đã học = thành tiền;
+    2 = thành tiền chia hết cho giá đã học; 1 = chỉ thấy giá đã học, SL là số đứng trước giá."""
     m = re.search(r"(\d{3,4})\s*MM", line, re.I)
     if not m or not re.search(r"[OÔoô0]ng\s*gi", line, re.I):
         return None
@@ -6033,7 +6048,7 @@ def _loose_po_line(line, catalog_items, skip_spans=()):
     if not best:
         return None
     qty = best[2]
-    return best[1], (int(qty) if float(qty).is_integer() else qty), best[3]
+    return best[1], (int(qty) if float(qty).is_integer() else qty), best[3], best[0]
 
 
 _ERP_PRICE = re.compile(r"(?<![\d.,])(\d[\d,]*\.\d{6})(?!\d)")
@@ -6854,10 +6869,10 @@ def parse_generic_po_text(text, profile, catalog_items, data_store=None, tare_va
                 if ref_key == "customsNo":
                     refs[ref_key] = re.sub(r"^P[a-z]+ing", "Packing", refs[ref_key])
                 ref_spans.append(m.span())
-        loose = _loose_po_line(raw, catalog_items, ref_spans) if profile.get("ocrLoose") else None
+        loose = _loose_po_line_ex(raw, catalog_items, ref_spans) if profile.get("ocrLoose") else None
         conf = None
         if loose:
-            known, qty, price = loose
+            known, qty, price, conf = loose
         else:
             known, spans = locate(raw)
             if not known:
@@ -6917,8 +6932,56 @@ def parse_generic_po_text(text, profile, catalog_items, data_store=None, tare_va
             "net": net,
             "gross": gross,
             "tare": tare_val,
+            **_conf_read(conf),
         })
     return po_no, po_date, lines
+
+
+def _conf_read(conf):
+    """Trạng thái đọc của một dòng PO theo mức đối chiếu số: chỉ 'ok' khi SL x đơn giá khớp thành tiền in trên PO."""
+    if conf is None or conf >= 2:
+        return {"read": "ok", "read_note": ""}
+    if conf == 1:
+        return {"read": "suy_ra", "read_note": "Thấy đơn giá đã học nhưng không khớp được SL x đơn giá = thành tiền: kiểm tra SL"}
+    return {"read": "suy_ra", "read_note": "Không thấy đơn giá trên dòng PO: dùng giá đã học, SL là số đoán"}
+
+
+_TOTAL_LABEL = re.compile(r"t[ổôo]ng\s*c[ộôo]ng|t[ổôo]ng\s*ti[ềêe]n|t[ổôo]ng\s*gi[áa]\s*tr[ịi]|grand\s*total|total\s*amount|^\s*total\b|合\s*计|总\s*计|总\s*金\s*额|总\s*价", re.I)
+_VAT_FACTORS = (1.0, 1.05, 1.08, 1.1)
+
+
+def po_total_check(raw_text, lines):
+    """Đối chiếu tổng thành tiền các dòng đọc được với dòng 'Tổng cộng' / 'Total' / '合计' in trên PO.
+    Chấp nhận tổng đã gồm VAT 5/8/10%. Trả câu báo (rỗng nếu PO không có dòng tổng để so hoặc không có dòng hàng)."""
+    s = sum(float(x.get("qty") or 0) * float(x.get("price") or 0) for x in lines)
+    if not lines or s <= 0:
+        return ""
+    rows = str(raw_text or "").splitlines()
+    per_line = []  # các giá trị có thể của mỗi dòng tổng
+    for i, ln in enumerate(rows):
+        m = _TOTAL_LABEL.search(ln)
+        if not m:
+            continue
+        seg = ln[m.end():]
+        vals = [parse_vn_number(x) for x in re.findall(r"\d[\d.,]*\d|\d", _normalize_ocr_numbers(seg))]
+        vals = [v for v in vals if v and v > 0]
+        if not vals and i + 1 < len(rows):  # OCR đẩy số tổng xuống dòng dưới
+            vals = [v for v in (parse_vn_number(x) for x in re.findall(r"\d[\d.,]*\d|\d", _normalize_ocr_numbers(rows[i + 1]))) if v and v > 0]
+        if vals:
+            per_line.append(vals)
+    if not per_line:
+        return ""
+
+    def near(a, b):
+        return abs(a - b) <= max(1.0, b * 0.0005)
+
+    if any(near(v, s * f) for vals in per_line for v in vals for f in _VAT_FACTORS):
+        return f"✅ Tổng thành tiền {s:,.0f} khớp dòng Tổng cộng trên PO."
+    if len(per_line) > 1 and any(near(sum(max(v) for v in per_line), s * f) for f in _VAT_FACTORS):
+        return f"✅ Tổng thành tiền {s:,.0f} khớp tổng các trang PO."
+    t = max(per_line[0])
+    return (f"⚠ Tổng thành tiền các dòng đọc được là {s:,.0f}, khác dòng Tổng cộng trên PO ({t:,.0f}, lệch {abs(t - s):,.0f}): "
+            "có dòng bị sót hoặc đọc sai số, hãy so lại với PO.")
 
 
 # ======================================================================
@@ -7659,6 +7722,15 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
                 lines = lines_from_able_scan(scan_rep["rows"], prof, store.items_for_customer(customer), store, tare_v)
                 po_no = lines[0].get("po") or po_no
                 res["read_report"] = read_report(lines, scan_rep.get("check", ""))
+        if not lines and ext == ".pdf" and not (scan_rep and scan_rep["rows"]) and _pdf_has_text(path) and ocr_available():
+            # PDF có lớp chữ (thường do máy scan tự OCR, chất lượng kém) nhưng không ra dòng nào: OCR lại ảnh trang
+            raw_text = read_document_text(path, force_ocr=True)
+            po_no2, po_date2, lines = parse_generic_po_text(raw_text, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
+            po_no, po_date = po_no or po_no2, po_date or po_date2
+            res["ocr_retry"] = bool(lines)
+        if lines and not (scan_rep and scan_rep["rows"]):
+            chk = po_total_check(raw_text, lines)
+            res["po_check"] = (f"PO {po_no}: {chk}" if po_no and append else chk) if chk else ""
         if lines:
             store.dt_fill_lines(customer, lines)  # thiếu kg/chiếc hoặc SL/kiện: lấy từ data tổng dùng chung
         if not lines:
@@ -7683,6 +7755,10 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
         res.update(ok=True, items=items, po_dates=po_dates, po=" + ".join(pos) if pos else po_no, raw_text=raw_text)
         res["msg"] = (f"Đã gộp PO {po_no} ({len(lines)} dòng) vào lô: {len(pos)} PO, {len(items)} dòng."
                       if append else f"Đã đọc PO {po_no or '(chưa rõ số)'} gồm {len(lines)} dòng hàng.")
+        if res.get("ocr_retry"):
+            res["msg"] += " (Lớp chữ có sẵn của PDF không có dòng hàng nên app đã OCR lại ảnh trang.)"
+        if res.get("po_check"):
+            res["msg"] += " " + res["po_check"]
         if res.get("read_report"):
             res["msg"] = res["read_report"]["text"]
         return res
@@ -7709,9 +7785,17 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
     except Exception:
         tare_v = 1.0
     po_no, po_date, lines = parse_kodi_po_text(raw_txt, store.kodi_items, data_store=store, tare_val=tare_v)
+    retried = False
+    if not lines and ext == ".pdf" and _pdf_has_text(path) and ocr_available():
+        raw_txt = extract_text_from_pdf_or_image_offline(path, force_ocr=True)  # lớp chữ có sẵn không ra dòng nào: OCR lại ảnh trang
+        po_no, po_date, lines = parse_kodi_po_text(raw_txt, store.kodi_items, data_store=store, tare_val=tare_v)
+        retried = bool(lines)
     if lines:
-        res.update(ok=True, customer="kodi", items=lines, po=po_no or "", po_date=po_date or "",
-                   msg=f"Đã bóc tách PO {po_no} ({len(lines)} dòng hàng) hoàn toàn offline.")
+        chk = po_total_check(raw_txt, lines)
+        res.update(ok=True, customer="kodi", items=lines, po=po_no or "", po_date=po_date or "", po_check=chk,
+                   msg=f"Đã bóc tách PO {po_no} ({len(lines)} dòng hàng) hoàn toàn offline."
+                       + (" (Lớp chữ có sẵn của PDF không có dòng hàng nên app đã OCR lại ảnh trang.)" if retried else "")
+                       + (" " + chk if chk else ""))
         return res
     res["msg"] = ("Không tìm thấy dòng hàng trong file (kể cả sau khi OCR ảnh scan). Bản scan có thể mờ/nghiêng; bạn có thể thêm dòng trực tiếp."
                   if ocr_available() else
