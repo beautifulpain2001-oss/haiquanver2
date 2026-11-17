@@ -592,6 +592,7 @@ class DedicatedDataStore:
         self.suppliers = []  # nhà cung ứng của Shirai: [{name, mst, addr}]
         self.supplier_pref = {}  # lựa chọn đã nhớ: 'nhom:carton' / 'ma:<mã>' -> tên nhà cung ứng
         self.ten_kh_tay = {}  # tên theo khách hàng do người dùng nhập khi ERP chưa có: {mã: tên}
+        self.tesa_dinh_muc_v = 0  # phiên bản bảng định mức Tesa (tesa_names.TESA_DINH_MUC) đã áp vào danh mục của máy này
         self.read_fixes = []  # nhật ký các lần người dùng sửa số liệu máy đọc sai từ PO (khách, trường, đọc sai, đúng, dòng PO)
         self.custom_profiles = {}
         self.custom_items = {}
@@ -691,8 +692,11 @@ class DedicatedDataStore:
                 self.suppliers = list(data.get("suppliers") or [])
                 self.supplier_pref = dict(data.get("supplier_pref") or {})
                 self.ten_kh_tay = dict(data.get("ten_kh_tay") or {})
+                self.tesa_dinh_muc_v = int(data.get("tesa_dinh_muc_v") or 0)
             except Exception:
                 pass
+        if self.apply_tesa_dinh_muc():
+            self.save_catalog()
         self.register_custom_profiles()
         self._link_shared_catalogs()
         apply_company(self.company)  # luôn áp lại: mỗi kho dữ liệu có thông tin công ty riêng
@@ -739,6 +743,27 @@ class DedicatedDataStore:
                     if it["name"] != name:  # tên trong danh mục khác tên trên PO: ghi cả bộ nhớ định mức theo tên danh mục
                         self.item_mem[it["name"]] = {"div": div if div > 0 else it.get("div", 0), "kg": kg if kg > 0 else it.get("kg", 0), "hs": hs or it.get("hs", "")}
         self.save_catalog()
+
+    def apply_tesa_dinh_muc(self):
+        """Áp kg/ống và số ống/kiện theo bảng tổng hợp của Tesa (tesa_names.TESA_DINH_MUC) vào danh mục Tesa và bộ nhớ định mức, MỘT lần cho
+        mỗi phiên bản bảng: số cũ trong danh mục (VD 39753-91390-00 ghi 0.858 kg, 250 ống/kiện) bị thay bằng số trong bảng; sau đó người dùng
+        sửa trong app thì số đã sửa thắng như cũ. Trả True nếu đã áp (cần lưu danh mục)."""
+        import tesa_names
+        if self.tesa_dinh_muc_v >= tesa_names.TESA_DINH_MUC_V:
+            return False
+        for code, (kg, div) in tesa_names.TESA_DINH_MUC.items():
+            names = {it["name"] for it in self.tesa_items if str(it.get("code") or "").strip() == code}
+            for it in self.tesa_items:
+                if str(it.get("code") or "").strip() == code:
+                    it["kg"], it["div"] = kg, div
+            hd_std = tesa_names_for(code)[1]
+            if hd_std:
+                names.add(hd_std)  # PO Tesa lấy tên theo bảng tên chuẩn rồi tra định mức theo tên đó
+            for name in names:
+                mem = self.item_mem.get(name) or {}
+                self.item_mem[name] = {"div": div, "kg": kg, "hs": mem.get("hs") or "48229090"}
+        self.tesa_dinh_muc_v = tesa_names.TESA_DINH_MUC_V
+        return True
 
     def add_tesa_item(self, name, code="", price=0, source="erp"):
         """Thêm mặt hàng mới vào danh mục Tesa (mã mới chưa có trong dữ liệu nhưng tra được ở ERP hoặc đọc từ PO).
@@ -1723,6 +1748,7 @@ class DedicatedDataStore:
                     "suppliers": self.suppliers,
                     "supplier_pref": self.supplier_pref,
                     "ten_kh_tay": self.ten_kh_tay,
+                    "tesa_dinh_muc_v": self.tesa_dinh_muc_v,
                 })
                 self._sigs[self.catalog_file] = self._sig(self.catalog_file)
         except Exception as e:
