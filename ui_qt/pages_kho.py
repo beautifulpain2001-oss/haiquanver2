@@ -1014,13 +1014,16 @@ class EditTemplateDialog(QDialog):
         self.accept()
 
 
-KIND_TEXT = {"form": "Form đã sửa", "rieng": "Mẫu riêng Word/Excel", "builtin": "Mẫu dựng sẵn", "bkav": "File nạp Bkav", "fixed": "Mẫu dựng sẵn"}
+KIND_TEXT = {"form": "Form đã sửa", "rieng": "Mẫu riêng Word/Excel", "builtin": "Mẫu dựng sẵn", "bkav": "File nạp Bkav", "fixed": "Mẫu dựng sẵn",
+             "latest": "Bản đã xuất"}
 KIND_HINT = {
     "form": "Chứng từ này đang xuất theo form đã sửa ở đây. Sửa xong bấm Lưu: các lần xuất sau dùng ngay nội dung mới.",
     "rieng": "Mẫu riêng Word/Excel của khách. Sửa xong bấm Lưu: các lần xuất sau dùng ngay nội dung mới.",
     "builtin": "Chứng từ đang do phần mềm dựng sẵn. Bấm “Chuyển thành form để sửa” để có file Excel/Word sửa được; từ đó xuất theo form, "
                "bỏ form thì quay lại mẫu dựng sẵn. Hình bên trái là form sẽ tạo ra (ô tô vàng là chỗ phần mềm điền).",
     "bkav": "Hóa đơn VAT / Phiếu xuất kho là file để nạp vào Bkav, phải giữ đúng định dạng Bkav nên không sửa form ở đây.",
+    "latest": "Bản sao file đã xuất gần nhất cho khách này (giữ lại để xem mẫu thật trông như nào). Xuất lô mới thì bộ này được thay bằng bộ mới. "
+              "Muốn sửa cách chứng từ xuất ra thì vào “Mẫu chứng từ”.",
     "fixed": "Chứng từ này giữ đúng nguyên bản (Word hoặc phần mềm tự dựng theo số liệu riêng), phần mềm chỉ điền số liệu nên không đổi thành form được. Hình là bản số liệu mẫu.",
 }
 
@@ -1036,6 +1039,8 @@ class MauPage(QWidget):
         self.setObjectName("page")
         self.core, self.store, self.items, self.docs = core, store, [], []
         self.cust = None  # None = Kho chung; khác = mã khách đang xem
+        self.latest_mode = False  # True: xem bộ chứng từ xuất gần nhất của khách thay cho mẫu chứng từ
+        self.latest = None
         lay = QVBoxLayout(self)
         lay.setContentsMargins(28, 24, 28, 24)
         lay.setSpacing(10)
@@ -1079,6 +1084,16 @@ class MauPage(QWidget):
         self.list_title = QLabel("Danh sách mẫu")
         self.list_title.setObjectName("h2")
         right.addWidget(self.list_title)
+        seg = QHBoxLayout()
+        self.seg_mau = QPushButton("Mẫu chứng từ")
+        self.seg_moi = QPushButton("Bộ xuất gần nhất")
+        for b, on in ((self.seg_mau, False), (self.seg_moi, True)):
+            b.setObjectName("chip")
+            b.setCheckable(True)
+            b.clicked.connect(lambda _c=False, on=on: self.set_latest_mode(on))
+            seg.addWidget(b)
+        self.seg_mau.setChecked(True)
+        right.addLayout(seg)
         self.listw = QListWidget()
         self.listw.setIconSize(QSize(96, 124))
         self.listw.setSpacing(4)
@@ -1108,7 +1123,10 @@ class MauPage(QWidget):
         self.del_btn = QPushButton("🗑  Xóa khỏi kho")
         self.del_btn.setObjectName("dng")
         self.del_btn.clicked.connect(self.remove)
-        for b in (self.conv_btn, self.edit_btn, self.add_btn, self.open_btn, self.restore_btn, self.drop_btn, self.del_btn):
+        self.lot_btn = QPushButton("🗂  Mở thư mục lô")
+        self.lot_btn.setObjectName("sec")
+        self.lot_btn.clicked.connect(self.open_lot)
+        for b in (self.conv_btn, self.edit_btn, self.add_btn, self.open_btn, self.lot_btn, self.restore_btn, self.drop_btn, self.del_btn):
             right.addWidget(b)
         self.msg = QLabel("")
         self.msg.setObjectName("hint")
@@ -1144,6 +1162,13 @@ class MauPage(QWidget):
                 return True
         return False
 
+    def set_latest_mode(self, on):
+        self.latest_mode = bool(on)
+        self.seg_mau.setChecked(not self.latest_mode)
+        self.seg_moi.setChecked(self.latest_mode)
+        self.msg.setText("")
+        self.refresh()
+
     def on_cust(self, i):
         self.cust = self.custs.item(i).data(Qt.UserRole) if 0 <= i < self.custs.count() else None
         self.msg.setText("")
@@ -1156,6 +1181,8 @@ class MauPage(QWidget):
         keep = self.listw.currentRow()
         self.listw.blockSignals(True)
         self.listw.clear()
+        for b in (self.seg_mau, self.seg_moi):
+            b.setVisible(self.cust is not None)
         if self.cust is None:
             self.list_title.setText("Danh sách mẫu")
             self.docs = []
@@ -1167,8 +1194,16 @@ class MauPage(QWidget):
                 self.listw.addItem(QListWidgetItem(icon, f"{os.path.splitext(it['file'])[0]}\n{loai_text(it['loai'])} · {ext_text(it['ext'])} · {len(it['tokens'])} ô"))
         else:
             label = self.core.PROFILES.get(self.cust, {}).get("label") or self.cust
-            self.list_title.setText(f"Chứng từ của {label}")
             self.items = []
+        if self.cust is not None and self.latest_mode:
+            self.list_title.setText(f"Bộ xuất gần nhất của {label}")
+            self.latest = self.store.latest_set(self.cust)
+            self.docs = [dict(f, kind="latest") for f in (self.latest or {}).get("files", [])]
+            names = [d["mode"] for d in self.docs]
+            for d in self.docs:
+                self.listw.addItem(QListWidgetItem(f"🗂  {d['label']}\n{d['name']}"))
+        elif self.cust is not None:
+            self.list_title.setText(f"Chứng từ của {label}")
             self.docs = self.store.customer_docs(self.cust)
             names = [d["mode"] for d in self.docs]
             for d in self.docs:
@@ -1188,7 +1223,7 @@ class MauPage(QWidget):
         return self.docs[i] if self.cust is not None and 0 <= i < len(self.docs) else None
 
     def _buttons(self, shown):
-        for name in ("conv_btn", "edit_btn", "add_btn", "open_btn", "restore_btn", "drop_btn", "del_btn"):
+        for name in ("conv_btn", "edit_btn", "add_btn", "open_btn", "lot_btn", "restore_btn", "drop_btn", "del_btn"):
             getattr(self, name).setVisible(name in shown)
 
     def on_row(self, _i):
@@ -1209,13 +1244,23 @@ class MauPage(QWidget):
         d = self.current_doc()
         if not d:
             self._buttons(())
-            self.kind_hint.setText("Khách này chưa có chứng từ nào.")
+            self.kind_hint.setText("Khách này chưa xuất bộ chứng từ nào từ khi có mục này. Xuất một lô thì bộ mới nhất được giữ ở đây để xem lại."
+                                   if self.latest_mode else "Khách này chưa có chứng từ nào.")
             self.title.setText("")
             self.view.clear()
             return
         kind = d["kind"]
         self.kind_hint.setText(KIND_HINT[kind])
-        if kind in ("form", "rieng"):
+        if kind == "latest":
+            self._buttons(("open_btn", "lot_btn"))
+            self.open_btn.setEnabled(True)
+            lt = self.latest or {}
+            self.lot_btn.setEnabled(os.path.isdir(lt.get("folder") or ""))
+            day = str(lt.get("docDate") or "")
+            day = "/".join(reversed(day.split("-"))) if re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) else day
+            info = ", ".join(x for x in (f"PXK {lt['pxkNo']}" if lt.get("pxkNo") else "", f"PO {lt['poNumber']}" if lt.get("poNumber") else "", f"ngày {day}" if day else "") if x)
+            self.kind_hint.setText(f"Lô {info or '(chưa ghi số)'}, xuất lúc {d.get('savedAt') or lt.get('savedAt') or '?'}. " + KIND_HINT[kind])
+        elif kind in ("form", "rieng"):
             self._buttons(("edit_btn", "open_btn", "restore_btn") + (("drop_btn",) if kind == "form" else ()))
             self.edit_btn.setText("✏  Sửa trong app…")
             self.edit_btn.setEnabled(True)
@@ -1285,8 +1330,17 @@ class MauPage(QWidget):
         it = self.current() if self.cust is None else self.current_doc()
         if it and it.get("path"):
             QDesktopServices.openUrl(QUrl.fromLocalFile(it["path"]))
-            if self.cust is not None:
+            if self.cust is not None and it.get("kind") == "latest":
+                self.msg.setText("Đã mở bản sao file đã xuất. Sửa ở đây không đổi file trong thư mục lô và không đổi cách xuất lần sau.")
+            elif self.cust is not None:
                 self.msg.setText("Đã mở file bằng Word/Excel. Sửa xong thì lưu file: lần xuất sau dùng luôn file đó (bản gốc chỉ được cất khi sửa trong app).")
+
+    def open_lot(self):
+        folder = (self.latest or {}).get("folder")
+        if folder and os.path.isdir(folder):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+        else:
+            self.msg.setText("Thư mục lô không còn ở chỗ cũ (có thể đã chuyển hoặc đổi tên). Bản sao trong Kho mẫu vẫn xem được.")
 
     def restore(self):
         d = self.current_doc()

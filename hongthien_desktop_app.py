@@ -1224,6 +1224,70 @@ class DedicatedDataStore:
             out.append(d)
         return out
 
+    # ---- BỘ CHỨNG TỪ MỚI NHẤT của khách (giữ ở Kho mẫu): MAU_CHUNG_TU/<khách>/bo_moi_nhat/ ---------------------------------------
+    # Mỗi lần xuất, bản sao các file vừa xuất được cất vào đây; xuất sang lô khác thì bộ cũ được thay bằng bộ của lô mới.
+    LATEST_META = "_bo.json"
+
+    def latest_set_dir(self, key):
+        return os.path.join(self.template_folder(key), "bo_moi_nhat")
+
+    def latest_set(self, key):
+        """Bộ chứng từ xuất gần nhất của khách: {"pxkNo", "docDate", "poNumber", "folder", "savedAt", "files": [{mode, label, name, path, ext, savedAt}]}
+        (chỉ các file còn trên đĩa), hoặc None nếu khách chưa xuất bộ nào."""
+        folder = self.latest_set_dir(key)
+        try:
+            with open(os.path.join(folder, self.LATEST_META), encoding="utf-8") as f:
+                meta = json.load(f)
+        except (OSError, ValueError):
+            return None
+        if not isinstance(meta, dict):
+            return None
+        files = []
+        for x in meta.get("files") or []:
+            p = os.path.join(folder, str(x.get("name") or ""))
+            if x.get("name") and os.path.isfile(p):
+                files.append(dict(x, path=p, ext=os.path.splitext(p)[1].lstrip(".").lower(), label="Trọn bộ (một file)" if x.get("mode") == "ALL" else lot_mode_label(x.get("mode", ""))))
+        return dict(meta, files=files) if files else None
+
+    def latest_set_save(self, rec, files):
+        """Cất bản sao các file vừa xuất ([(mode, đường dẫn)]) làm bộ mới nhất của khách. Cùng thư mục lô: thay từng chứng từ;
+        lô khác: bỏ bộ cũ, bắt đầu bộ mới. Lỗi chỉ ghi LOI_PHAN_MEM.txt, không chặn việc xuất."""
+        key = rec.get("customer") or ""
+        files = [(m, p) for m, p in files if m != "CHECK" and p and os.path.isfile(p)]
+        if not key or not files:
+            return False
+        try:
+            folder = self.latest_set_dir(key)
+            lot_dir = os.path.dirname(os.path.abspath(files[0][1]))
+            old = self.latest_set(key) or {}
+            same = os.path.normcase(old.get("folder") or "") == os.path.normcase(lot_dir)
+            keep = {x["mode"]: x for x in old.get("files") or []} if same else {}
+            if not same and os.path.isdir(folder):
+                for n in os.listdir(folder):
+                    if os.path.isfile(os.path.join(folder, n)):
+                        os.remove(os.path.join(folder, n))
+            os.makedirs(folder, exist_ok=True)
+            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            for mode, src in files:
+                name = os.path.basename(src)
+                prev = keep.get(mode)
+                if prev and prev["name"] != name and prev["name"] not in {os.path.basename(s) for _m, s in files} and os.path.isfile(prev["path"]):
+                    os.remove(prev["path"])
+                shutil.copy2(src, os.path.join(folder, name))
+                keep[mode] = {"mode": mode, "name": name, "savedAt": now}
+            order = {m: i for i, m in enumerate(lot_bundle_modes(rec))}
+            meta = {"customer": key, "pxkNo": rec.get("pxkNo", ""), "docDate": rec.get("docDate", ""), "poNumber": rec.get("poNumber", ""),
+                    "folder": lot_dir, "savedAt": now,
+                    "files": sorted(({k: v for k, v in x.items() if k in ("mode", "name", "savedAt")} for x in keep.values()), key=lambda x: order.get(x["mode"], 99))}
+            tmp = os.path.join(folder, "." + self.LATEST_META + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=1)
+            os.replace(tmp, os.path.join(folder, self.LATEST_META))
+            return True
+        except Exception as e:
+            log_soft_error(f"Không cất được bộ chứng từ mới nhất của khách '{key}' vào Kho mẫu: {e}")
+            return False
+
     def form_make(self, key, mode):
         """Đổi chứng từ dựng sẵn `mode` của khách thành form để sửa (từ nay xuất theo form). Trả (đường dẫn form, [chỗ nên xem lại])."""
         ext, data, warns = form_from_builtin(self, key, mode)
@@ -7597,6 +7661,7 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
     """
     res = _lot_export_one(store, rec, mode, skip_h)
     store.write_lot_card(rec, os.path.dirname(res["path"]))
+    store.latest_set_save(rec, [(mode, res["path"])])  # bản sao vào Kho mẫu: bộ chứng từ mới nhất của khách
     return res
 
 
@@ -7773,6 +7838,7 @@ def lot_export_each(store, rec, skip_h=False):
             extra += res["problems"]
     if files:
         store.write_lot_card(rec, os.path.dirname(files[-1]["path"]))
+        store.latest_set_save(rec, [(f["mode"], f["path"]) for f in files])
     return {"files": files, "problems": check_lot(rec) + extra}
 
 
