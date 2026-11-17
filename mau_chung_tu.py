@@ -292,13 +292,20 @@ def _find_row(tws, col, prefix, start=1):
 
 def fill_dccn_able(core, wb, rec, prof, tws, title):
     """Bảng đối chiếu công nợ kiểu Able (sheet 'ĐCCN' của khách): STT | Ngày giao | Mã đơn mua bán (PO) | Mã SP | Quy cách | Mã hàng | ĐVT | SL | Đơn giá | Thành tiền.
-    Giữ nguyên mẫu: chỉ thay chữ ở đầu trang, nhân các dòng hàng (12 dòng mẫu) theo số dòng của lô, điền tổng bằng chữ và tên khách ở chỗ ký."""
-    items = rec.get("items", [])
+    Là bảng của CẢ THÁNG (như file Huy đưa: lô 06/10 PO 00003872 + lô 20/10 PO 00004249, ngày bảng 31/10): dòng lấy từ rec['bdcRows']
+    (mọi lô Able đã lưu cùng tháng + lô đang làm, xem bdc_month_rows); không có thì chỉ lô đang làm. Ngày đầu trang = ngày cuối tháng.
+    Giữ nguyên mẫu: chỉ thay chữ ở đầu trang, nhân các dòng hàng (12 dòng mẫu) theo số dòng, điền tổng bằng chữ và tên khách ở chỗ ký."""
+    d = core._iso_to_date(rec.get("docDate"))
+    rows = rec.get("bdcRows")
+    if not rows:
+        rows = [{"po": it.get("po") or rec.get("poNumber", ""), "ten_sp": it.get("ten_sp", ""), "qty": it.get("qty", 0), "unit": it.get("unit", ""),
+                 "price": it.get("price", 0), "ship": core._iso_to_date(it["shipDate"]) if it.get("shipDate") else d} for it in rec.get("items", [])]
     first = 12
     total_row = _find_row(tws, "B", "Tổng", first) or 24
-    ws, pl = clone_sheet(wb, tws, title, [(first, total_row - 1, max(len(items), 1))], max_col=11)
-    d = core._iso_to_date(rec.get("docDate"))
-    ws["B2"] = f"Ngày日{d.day:02d} tháng月{d.month:02d} năm年 {d.year}"
+    ws, pl = clone_sheet(wb, tws, title, [(first, total_row - 1, max(len(rows), 1))], max_col=11)
+    nxt = (d.replace(day=28) + datetime.timedelta(days=4))
+    end = nxt - datetime.timedelta(days=nxt.day)  # ngày cuối tháng của lô
+    ws["B2"] = f"Ngày日{end.day:02d} tháng月{end.month:02d} năm年 {end.year}"
     ws["D4"] = core.HT_NAME
     ws["D5"] = core.ADDR_HT
     ws["B6"] = f"Mã số thuế: {core.MST_HT}           Điện thoại: {core.HT_TEL}"
@@ -306,23 +313,24 @@ def fill_dccn_able(core, wb, rec, prof, tws, title):
     ws["B8"] = f"Địa chỉ:   :{prof.get('addrKho') or prof['addr']}"
     ws["B9"] = f"Mã số thuế:\t  {prof.get('mst', '')}"
     r0 = pl.first[first]
-    for i in range(1, len(items)):  # các dòng mẫu cỡ chữ/chiều cao lệch nhau: lấy kiểu của dòng đầu cho đều
+    for i in range(1, len(rows)):  # các dòng mẫu cỡ chữ/chiều cao lệch nhau: lấy kiểu của dòng đầu cho đều
         for col in "BCDEFGHIJK":
             ws[f"{col}{r0 + i}"]._style = copy.copy(ws[f"{col}{r0}"]._style)
         if ws.row_dimensions[r0].height:
             ws.row_dimensions[r0 + i].height = ws.row_dimensions[r0].height
-    for i, it in enumerate(items):
+    total = 0
+    for i, it in enumerate(rows):
         r = r0 + i
         u = str(it.get("unit") or prof.get("unit") or "")
-        ship = it.get("shipDate")
         c = ws[f"C{r}"]
-        c.value = core._iso_to_date(ship) if ship else d
+        c.value = it.get("ship") or it.get("date") or d
         c.number_format = "dd/mm/yyyy"
         for col, v in (("B", i + 1), ("D", it.get("po", "")), ("F", it.get("ten_sp", "")), ("H", u.lower()),
                        ("I", it.get("qty", 0)), ("J", it.get("price", 0)), ("K", f"=I{r}*J{r}")):
             ws[f"{col}{r}"] = v
         ws[f"K{r}"].number_format = ws[f"K{r0}"].number_format
-    total = round(core.lot_totals(rec)["amount"])
+        total += float(it.get("qty") or 0) * float(it.get("price") or 0)
+    total = round(total)
     words = _find_row(tws, "B", "Tổng tiền bằng chữ", total_row)
     if words:
         ws[f"B{pl.map(words)}"] = f"Tổng tiền bằng chữ 总金额大写（越南盾): {core.num_to_vn_words(total)}"

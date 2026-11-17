@@ -1056,7 +1056,7 @@ class InfoStep(QWidget):
 
 # --------------------------------------------------------------------------- ④ xuất & lưu
 EXPORTS = [("VAT", "Hóa đơn VAT (Bkav)"), ("PKL", "Invoice / Packing List"), ("PXK", "Phiếu xuất kho (Bkav)"),
-           ("DNTT", "Đề nghị thanh toán"), ("PLX", "Phụ lục X"), ("BBGH", "Biên bản bàn giao"), ("PO", "Đơn đặt hàng (PO)"), ("BDC", "Bảng đối chiếu hàng hóa"),
+           ("DNTT", "Đề nghị thanh toán"), ("PLX", "Phụ lục X"), ("BBGH", "Biên bản bàn giao"), ("PO", "Đơn đặt hàng (PO)"), ("BDC", "Bảng đối chiếu hàng hóa"), ("DCCN", "Đối chiếu công nợ"),
            ("SC", "Sale Contract 销售合同"), ("M22", "Mẫu số 22 (nhập khẩu tại chỗ)"), ("BKLS", "Bảng kê lâm sản (pallet)"), ("BEST", "Mẫu riêng của Best")]
 
 
@@ -1159,6 +1159,7 @@ class ExportStep(QWidget):
         modes_now = set(self.lot.core.lot_bundle_modes({"customer": self.lot.customer, "items": self.lot.items})) if self.lot.customer else set()
         self.btns["M22"].setVisible("M22" in modes_now)
         self.btns["BKLS"].setVisible("BKLS" in modes_now)
+        self.btns["DCCN"].setVisible("DCCN" in modes_now)  # Able (và khách ghi DCCN ở chứng từ làm thêm): bảng đối chiếu công nợ cả tháng
         if self.lot.fixed_order and self.lot.core.is_sunlu(self.lot.profile):  # Sunlu: chỉ đúng bộ của khách (không ĐNTT)
             modes = set(self.lot.core.lot_bundle_modes({"customer": self.lot.customer}))
             for m, b in self.btns.items():
