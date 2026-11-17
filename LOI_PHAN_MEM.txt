@@ -1,0 +1,2 @@
+[2026-11-17 08:46:51] Không cất được bộ chứng từ mới nhất của khách 'bomoi' vào Kho mẫu: đĩa đầy
+[2026-11-17 08:47:16] Không cất được bộ chứng từ mới nhất của khách 'bomoi' vào Kho mẫu: đĩa đầy
