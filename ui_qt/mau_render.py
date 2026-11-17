@@ -45,6 +45,188 @@ def _argb(color, default=None):
     return default
 
 
+# Công thức trong file đã xuất (VD =ROUNDUP(E13*F13,2), =SUM(E13:E20)): file do openpyxl ghi không có giá trị tính sẵn, nên tự tính
+# các công thức đơn giản để hình xem trước hiện SỐ như khi mở Excel. Công thức lạ (sheet khác, IF, chữ...) thì để nguyên như cũ.
+_F_TOK = re.compile(r"\s+|(?P<rng>\$?[A-Z]{1,3}\$?\d+:\$?[A-Z]{1,3}\$?\d+)|(?P<fn>[A-Z][A-Z0-9]*)\(|(?P<ref>\$?[A-Z]{1,3}\$?\d+)"
+                    r"|(?P<num>\d+(?:\.\d+)?(?:E[+-]?\d+)?%?)|(?P<op>[-+*/^(),])")
+
+
+def _xl_round(x, n, mode):
+    import math
+    k = 10 ** int(n)
+    v = abs(x) * k
+    v = math.ceil(v - 1e-9) if mode == "up" else (math.floor(v + 1e-9) if mode == "down" else math.floor(v + 0.5 + 1e-9))
+    return math.copysign(v / k, x) if v else 0.0
+
+
+def _flat(args):
+    for a in args:
+        if isinstance(a, list):
+            yield from _flat(a)
+        else:
+            yield a
+
+
+def _nums(args):
+    return [float(a) for a in _flat(args) if isinstance(a, (int, float)) and not isinstance(a, bool)]
+
+
+_XL_FN = {
+    "SUM": lambda *a: sum(_nums(a)),
+    "SUBTOTAL": lambda n, *a: sum(_nums(a)) if int(n) in (9, 109) else (_ for _ in ()).throw(ValueError()),
+    "ROUND": lambda x, n=0: _xl_round(float(x), n, "half"),
+    "ROUNDUP": lambda x, n=0: _xl_round(float(x), n, "up"),
+    "ROUNDDOWN": lambda x, n=0: _xl_round(float(x), n, "down"),
+    "INT": lambda x: float(__import__("math").floor(float(x))),
+    "ABS": lambda x: abs(float(x)),
+    "MAX": lambda *a: max(_nums(a) or [0.0]),
+    "MIN": lambda *a: min(_nums(a) or [0.0]),
+}
+
+
+class _Formulas:
+    """Tính giá trị công thức đơn giản của một sheet (có nhớ, chặn vòng lặp)."""
+
+    def __init__(self, ws):
+        self.ws, self.memo, self.busy = ws, {}, set()
+
+    def value(self, r, c):
+        v = self.ws.cell(row=r, column=c).value
+        if not (isinstance(v, str) and v.startswith("=")):
+            return v
+        if (r, c) not in self.memo:
+            if (r, c) in self.busy:
+                raise ValueError("vòng lặp")
+            self.busy.add((r, c))
+            try:
+                self.memo[(r, c)] = self._eval(v[1:], r)
+            except Exception:  # noqa: BLE001 - công thức không tự tính được: giữ chữ công thức
+                self.memo[(r, c)] = None
+            finally:
+                self.busy.discard((r, c))
+        if self.memo[(r, c)] is None:
+            raise ValueError("không tính được")
+        return self.memo[(r, c)]
+
+    def _cell(self, ref):
+        from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
+        col, row = coordinate_from_string(ref.replace("$", ""))
+        return row, column_index_from_string(col)
+
+    def _eval(self, text, row):
+        text = re.sub(r"\bROW\(\s*\)", str(row), text.upper())
+        toks, pos = [], 0
+        while pos < len(text):
+            m = _F_TOK.match(text, pos)
+            if not m or m.end() == pos:
+                raise ValueError("ký hiệu lạ")
+            pos = m.end()
+            if m.lastgroup:
+                toks.append((m.lastgroup, m.group(m.lastgroup)))
+        saved = getattr(self, "toks", None), getattr(self, "i", 0)  # ô tham chiếu tới ô có công thức: tính lồng, giữ chỗ đang đọc
+        self.toks, self.i = toks, 0
+        try:
+            v = self._expr()
+            if self.i != len(toks):
+                raise ValueError("thừa ký hiệu")
+            return v
+        finally:
+            self.toks, self.i = saved
+
+    def _peek(self):
+        return self.toks[self.i] if self.i < len(self.toks) else (None, None)
+
+    def _take(self):
+        t = self._peek()
+        self.i += 1
+        return t
+
+    def _expr(self):
+        v = self._term()
+        while self._peek() in (("op", "+"), ("op", "-")):
+            op = self._take()[1]
+            w = self._term()
+            v = _num(v) + _num(w) if op == "+" else _num(v) - _num(w)
+        return v
+
+    def _term(self):
+        v = self._power()
+        while self._peek() in (("op", "*"), ("op", "/")):
+            op = self._take()[1]
+            w = self._power()
+            v = _num(v) * _num(w) if op == "*" else _num(v) / _num(w)
+        return v
+
+    def _power(self):
+        v = self._unary()
+        while self._peek() == ("op", "^"):
+            self._take()
+            v = _num(v) ** _num(self._unary())
+        return v
+
+    def _unary(self):
+        if self._peek() in (("op", "-"), ("op", "+")):
+            neg = self._take()[1] == "-"
+            v = _num(self._unary())
+            return -v if neg else v
+        return self._atom()
+
+    def _atom(self):
+        kind, t = self._take()
+        if kind == "num":
+            return float(t[:-1]) / 100 if t.endswith("%") else float(t)
+        if kind == "ref":
+            return self.value(*self._cell(t))
+        if kind == "rng":
+            (r0, c0), (r1, c1) = (self._cell(x) for x in t.split(":"))
+            if (r1 - r0 + 1) * (c1 - c0 + 1) > 5000:
+                raise ValueError("vùng quá lớn")
+            return [self.value(r, c) for r in range(min(r0, r1), max(r0, r1) + 1) for c in range(min(c0, c1), max(c0, c1) + 1)]
+        if kind == "fn":
+            fn = _XL_FN.get(t)
+            if fn is None:
+                raise ValueError("hàm lạ")
+            args = []
+            if self._peek() != ("op", ")"):
+                while True:
+                    args.append(self._expr())
+                    if self._peek() == ("op", ","):
+                        self._take()
+                        continue
+                    break
+            if self._take() != ("op", ")"):
+                raise ValueError("thiếu )")
+            return fn(*args)
+        if (kind, t) == ("op", "("):
+            v = self._expr()
+            if self._take() != ("op", ")"):
+                raise ValueError("thiếu )")
+            return v
+        raise ValueError("ký hiệu lạ")
+
+
+def _num(v):
+    if v is None or v == "":
+        return 0.0
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        raise ValueError("không phải số")
+    return float(v)
+
+
+def _fmt_number(v, fmt):
+    """Số theo định dạng ô (gần đúng): có '#,##0' thì tách nghìn, số chữ số sau dấu chấm theo định dạng."""
+    fmt = str(fmt or "General").split(";")[0]
+    if "0" in fmt and fmt != "General":
+        dec = len(re.match(r"[0#]*", fmt.split(".")[1]).group(0)) if "." in fmt else 0
+        if fmt.endswith("%"):
+            v *= 100
+        out = f"{v:,.{dec}f}" if "," in fmt else f"{v:.{dec}f}"
+        return out + ("%" if fmt.endswith("%") else "")
+    if v == int(v) and abs(v) < 1e15:
+        return str(int(v))
+    return f"{round(v, 6):g}" if abs(v) >= 1e-4 else str(v)
+
+
 def render_xlsx(data, width=900):
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(data))
@@ -71,6 +253,7 @@ def render_xlsx(data, width=900):
     p = QPainter(img)
     p.setRenderHint(QPainter.Antialiasing, True)
     p.setRenderHint(QPainter.TextAntialiasing, True)
+    calc = _Formulas(ws)
     inside = set()
     for (r0, c0), (r1, c1) in merged.items():
         for r in range(r0, r1 + 1):
@@ -89,7 +272,15 @@ def render_xlsx(data, width=900):
             cell = ws.cell(row=r, column=c)
             rc = rect(r, c)
             val = cell.value
-            text = "" if val is None else (str(val) if not isinstance(val, float) or val != int(val) else str(int(val)))
+            if isinstance(val, str) and val.startswith("=") and not _TOKEN.search(val):
+                try:
+                    val = calc.value(r, c)
+                except Exception:  # noqa: BLE001 - để nguyên chữ công thức
+                    pass
+            if isinstance(val, (int, float)) and not isinstance(val, bool) and (cell.number_format or "General") != "General":
+                text = _fmt_number(float(val), cell.number_format)
+            else:
+                text = "" if val is None else (str(val) if not isinstance(val, float) or val != int(val) else str(int(val)))
             token = bool(_TOKEN.search(text))
             fill = _argb(cell.fill.fgColor) if cell.fill is not None and cell.fill.fill_type == "solid" else None
             if token:
