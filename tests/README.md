@@ -20,6 +20,8 @@ Mọi test chạy trên thư mục dữ liệu tạm, không đụng `DATA_LUU_T
 | `test_learn_customer.py` | Học khách mới: XML hóa đơn/PXK TT78, Invoice Excel nhiều sheet (sheet mới nhất thắng, bảng SL/túi, số PO, bì, tên/MST khách), mẫu số PO, đọc PO khách mới (khớp theo mã, tên, quy cách 38*5*467 + định lượng, số OCR bị tách), lưu/nạp lại, xuất trọn bộ |
 | `test_ocr.py` | OCR PDF scan: PO Kodi/Tesa dựng thành ảnh rồi đọc lại (Tesa trang chẵn + dải tiêu đề), file ảnh, `--ocr-self-test`, PO khách mới scan bị xoay ngang. Tự bỏ qua nếu máy chưa có Tesseract (`apt install tesseract-ocr tesseract-ocr-vie`) |
 | `test_self_test.py` | `run_self_test()` và lõi không phụ thuộc Tkinter (đã gỡ giao diện cũ) |
+| `test_ui_layout.py` | Bố cục giao diện ở 1366×768: chữ nút/nhãn bị cắt, ô nhập đè nhau, menu trái phải thấy hết (đánh dấu `gui`). Dùng chung `ui_shots.py` |
+| `ui_shots.py` | Không phải test: `python tests/ui_shots.py --out <thư mục> [--size 1366x768]` chụp 4 bước Làm chứng từ và từng trang ở 1366×768 và 1920×1080 |
 | `test_gui_smoke.py` | Mở app, xuất trọn bộ, chuyển sang Bước 2 (đánh dấu `gui`) |
 
 ## xfail có chủ đích
@@ -28,6 +30,7 @@ Các test `xfail(strict=True)` ghi lại chỗ mã nguồn lệch tài liệu b�
 Khi sửa xong, test báo XPASS: gỡ dấu xfail.
 
 - PLX: dòng "Tổng cộng" ghi đè dòng hàng cuối và SUM bỏ sót nó.
+- Bố cục (`test_ui_layout.py`): G2 menu bị cắt (T2), G3 ô bước ④ đè nhau (T3), G4 nút bước ③ bị cắt chữ (T4). PR sửa xong thì gỡ xfail.
 - `num_to_vn_words` từ 1.000 tỷ trở lên.
 - Tài liệu nhắc `sort_shirai_pnn_order`, `fmt_vat_name`, `save_step2_archive`, 19 mặt hàng Kodi / 21 mã Tesa; mã hiện có khác.
 
