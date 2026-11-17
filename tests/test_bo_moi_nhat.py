@@ -69,9 +69,11 @@ def test_set_survives_lot_folder_removed(store, cust):
 
 
 def test_export_not_blocked_when_copy_fails(store, cust, monkeypatch):
+    logged = []
+    monkeypatch.setattr(app, "log_soft_error", logged.append)  # không ghi LOI_PHAN_MEM.txt vào thư mục mã nguồn
     monkeypatch.setattr(app.shutil, "copy2", lambda *a, **k: (_ for _ in ()).throw(OSError("đĩa đầy")))
     res = app.lot_export(store, _rec(store, "00000321"), "DNTT")
-    assert os.path.isfile(res["path"])
+    assert os.path.isfile(res["path"]) and any("đĩa đầy" in m for m in logged)
 
 
 def test_kho_page_shows_latest_set(qapp, store, cust):
