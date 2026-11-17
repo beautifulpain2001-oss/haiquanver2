@@ -2765,9 +2765,26 @@ def parse_tesa_po_page(t0):
 
 _TESA_ROW2 = re.compile(
     r"^\s*(?P<item>\d{1,3})\s+(?P<qty>\d[\d,.]*)\s+(?P<unit>EA|PCS?|ST)\s+(?P<mat>.+?)\s+"
-    r"(?P<date>[A-Z][a-z]{2}\s+\d{1,2},\s*20\d{2})\s+(?P<price>\d[\d,]*\.\d{2})\s+(?P<per>\d{1,4})\s+(?:EA|PCS?|ST)\s+(?P<net>\d[\d,]*\.\d{2})",
-    re.M,
+    r"(?P<date>[A-Z][a-z]{2}\s+\d{1,2},\s*20\d{2})\s+(?P<price>\d[\d,.]*[.,]\d{2})\s+(?P<per>\d{1,4})\s+(?:EA|PCS?|ST)\s+(?P<net>\d[\d,.]*(?:[.,]|\s)\d{2})(?!\d)",
+    re.M | re.I,  # OCR hay đọc PC thành Pc, dấu thập phân thành dấu phẩy hoặc khoảng trắng (36,040,000 00)
 )
+# Đầu dòng hàng (Item, SL, ĐV): OCR đôi khi cắt phần đơn giá/thành tiền xuống dòng dưới -> ghép dòng sau rồi đọc lại
+_TESA_ROW2_HEAD = re.compile(r"^\s*\d{1,3}\s+\d[\d,.]*\s+(?:EA|PCS?|ST)\s+\S", re.I)
+_TESA_TOTAL = re.compile(r"(?:Net\s*Value|Amount)\s*:?\s*VND\s*(\d[\d,.]*(?:[.,]|\s)\d{2})(?!\d)", re.I)
+
+
+def _tesa_money(x):
+    """Số tiền có 2 số lẻ trên PO Tesa (26,500.00 / 36,040,000 00): bỏ hết dấu, 2 chữ số cuối là phần lẻ."""
+    d = re.sub(r"\D", "", str(x))
+    return int(d) / 100.0 if len(d) > 2 else 0.0
+
+
+def _tesa_qty(x):
+    """Số lượng trên PO Tesa: dấu phẩy/chấm theo sau đúng 3 chữ số là dấu nghìn (OCR hay đọc 136,000 thành 136.000)."""
+    x = str(x).strip().rstrip(".,")
+    if re.fullmatch(r"\d{1,3}(?:[.,]\d{3})+", x):
+        return float(re.sub(r"\D", "", x))
+    return float(x.replace(",", ""))
 
 
 def parse_tesa_po_page_v2(t0):
@@ -2782,17 +2799,43 @@ def parse_tesa_po_page_v2(t0):
         return []
     po = m.group(1)
     lines = t.splitlines()
-    out = []
+    totals = [_tesa_money(x) for x in _TESA_TOTAL.findall(t)]  # 'Net Value: VND …' / 'Amount: VND …' cuối trang
+    rows = []
     for i, line in enumerate(lines):
         r = _TESA_ROW2.match(line)
-        if not r:
-            continue
+        if not r and _TESA_ROW2_HEAD.match(line):
+            for j in (1, 2):  # dòng hàng bị OCR cắt làm 2-3 dòng
+                r = _TESA_ROW2.match(" ".join(x.strip() for x in lines[i:i + j + 1]))
+                if r:
+                    break
+        if r:
+            rows.append((i, r))
+    out = []
+    for i, r in rows:
         try:
-            qty = float(r.group("qty").replace(",", ""))
-            price = float(r.group("price").replace(",", "")) / (int(r.group("per")) or 1)
-            net = float(r.group("net").replace(",", ""))
+            qty = _tesa_qty(r.group("qty"))
+            per = int(r.group("per")) or 1
+            price = _tesa_money(r.group("price")) / per
+            net = _tesa_money(r.group("net"))
         except ValueError:
             continue
+        fix = ""
+        ok = lambda q, p, n: n > 0 and abs(q * p - n) <= max(1.0, n * 1e-6)
+        if len(rows) == 1 and totals:  # PO một dòng: thành tiền của dòng = tổng PO; lấy số được đọc giống nhau nhiều lần nhất
+            votes = [net] + totals
+            best_net = max(votes, key=votes.count)
+            if best_net != net and votes.count(best_net) > 1 and not ok(qty, price, net):
+                fix, net = f"Thành tiền dòng đọc {net:,.0f}, lấy theo tổng PO {best_net:,.0f}", best_net
+        if not ok(qty, price, net) and price > 0 and net > 0:
+            q2 = net / price
+            if abs(q2 - round(q2)) < 1e-6 and round(q2) > 0:  # SL đọc sai (VD 136,000 -> 186,000): SL = thành tiền / đơn giá
+                fix = (fix + "; " if fix else "") + f"SL đọc {qty:,.0f} không khớp thành tiền: lấy {round(q2):,} = thành tiền / đơn giá"
+                qty = float(round(q2))
+        if not ok(qty, price, net) and qty > 0 and net > 0:
+            p2 = net / qty * per
+            if abs(round(p2, 2) - p2) < 1e-6:  # đơn giá hoặc 'Per' đọc sai: đơn giá = thành tiền / SL
+                fix = (fix + "; " if fix else "") + f"Đơn giá đọc {price:,.2f} không khớp thành tiền: lấy {p2 / per:,.2f} = thành tiền / SL"
+                price = p2 / per
         mat_no = ""
         for nxt in lines[i + 1:i + 5]:
             mm = re.search(r"Your\s*Material\s*No\.?:?\s*(.+)", nxt, re.I)
@@ -2804,7 +2847,7 @@ def parse_tesa_po_page_v2(t0):
         code_m = re.search(r"\b\d{5}-\d{5}-\d{2}\b", r.group("mat")) or re.search(r"\b\d{5}-\d{5}-\d{2}\b", mat_no)  # mã Tesa nằm ngay ở cột Material của dòng hàng (trang 2); dòng 'Your Material No.' chỉ là dự phòng cho PO dạng mới
         out.append({"po": po, "code": code_m.group(0) if code_m else "", "desc": mat_no or r.group("mat").strip(),
                     "qty": int(qty) if qty == int(qty) else qty, "price": price, "net": net,
-                    "check": abs(qty * price - net) <= max(1.0, net * 1e-6)})
+                    "check": ok(qty, price, net), "fix": fix})
     return out
 
 
@@ -2839,7 +2882,13 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
         pages = [text]
     found_lines = []
     for p in pages:
-        for r2 in parse_tesa_po_page_v2(p):
+        rows2 = parse_tesa_po_page_v2(p)
+        if not rows2 and re.search(r"Purchase\s*Order", p, re.I):
+            # trang này không đọc được theo cột (OCR cắt/nhòe dòng hàng): đọc lại theo cách cũ (bầu thành tiền với tổng PO, suy SL/giá)
+            old = parse_tesa_po_page(p)
+            if old and old.get("qty"):
+                rows2 = [dict(old, fix="Dòng hàng OCR không rõ cột: đọc lại theo mã hàng và tổng PO, kiểm lại SL, đơn giá")]
+        for r2 in rows2:
             item, name, code, src = resolve_tesa_item(r2, tesa_catalog, getattr(data_store, "erp_catalog", None))
             dt = tesa_erp_entry(data_store, r2["code"], r2["desc"])
             if dt and (dt.get("ten") or dt.get("ten_kh")):  # tên theo danh mục sản phẩm của khách trong ERP (Data tổng) là tên chuẩn
@@ -2876,6 +2925,11 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
                     "Mã/tên lấy từ ERP theo quy cách; mã mới đã thêm vào danh mục Tesa" if src == "erp" else
                     "Quy cách trên PO chưa có trong danh mục Tesa lẫn ERP: đã thêm mới, cần nhập kg/SL kiện" if not src else ""),
             })
+            if r2.get("fix"):  # số máy phải sửa lại cho khớp SL x đơn giá = thành tiền: không coi là đọc đủ, để người dùng soát
+                ln = found_lines[-1]
+                if ln["read"] == "ok":
+                    ln["read"] = "suy_ra"
+                ln["read_note"] = r2["fix"] + (f"; {ln['read_note']}" if ln["read_note"] else "")
     if found_lines:
         return found_lines[0]["po"], found_lines
     for p in pages:

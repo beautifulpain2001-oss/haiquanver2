@@ -386,3 +386,17 @@ def test_tesa_standard_names_hq_for_invoice_and_invoice_name_for_bkav(tmp_path):
     assert ls[0]["ten_sp"] == hd and ls[0]["ten_hq"] == hq
     old = {"ma_sp": "39764-90019-00", "ten_sp": "Ống lõi giấy phi 33.2 x 2.65 x 19mm_Blue (39764-90019-00)", "ten_hq": ""}
     assert app.lot_fix_code_names(store, "tesa", [old]) == 1 and (old["ten_sp"], old["ten_hq"]) == (hd, hq)
+
+
+def test_tesa_blurry_ocr_row_still_read_and_flags_fixes(tmp_path):
+    """OCR nhòe (PC->Pc, '36,040,000 00', dòng bị cắt, SL/đơn giá sai chữ số): dòng hàng không được rơi, số sai được sửa theo SL x giá = thành tiền và báo để soát."""
+    hdr = "tesa Purchase Order: 8600229094\n"
+    for body in ("10 136,000 Pc 39817-90019-00 Dec 16, 2026 26,500.00 100 Pc 36,040,000 00.\n",
+                 "10 136,000 PC 39817-90019-00 Dec 16, 2026\n26,500.00 100 PC 36,040,000.00\n"):
+        r = app.parse_tesa_po_page_v2(hdr + body + "Net Value: VND 36,040,000.00\n@@HDR@@\n")
+        assert len(r) == 1 and (r[0]["qty"], r[0]["price"], r[0]["net"], r[0]["check"]) == (136000, 265.0, 36040000.0, True)
+    bad = app.parse_tesa_po_page_v2(hdr + "10 186,000 PC 39817-90019-00 Dec 16, 2026 26,500.00 100 PC 39,040,000.00\nNet Value: VND 36,040,000.00\nAmount: VND 36,040,000.00\n@@HDR@@\n")
+    assert (bad[0]["qty"], bad[0]["net"], bad[0]["check"]) == (136000, 36040000.0, True) and bad[0]["fix"]
+    store = app.DedicatedDataStore(base_dir=str(tmp_path / "d"))
+    _po, ls = app.parse_tesa_po_text(hdr + "10 186,000 PC 39817-90019-00 Dec 16, 2026 26,500.00 100 PC 39,040,000.00\nNet Value: VND 36,040,000.00\nAmount: VND 36,040,000.00\n@@HDR@@\n", store.tesa_items, store)
+    assert ls[0]["qty"] == 136000 and ls[0]["amount"] == 36040000 and ls[0]["read"] != "ok" and "136,000" in ls[0]["read_note"]
