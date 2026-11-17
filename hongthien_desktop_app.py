@@ -748,7 +748,10 @@ class DedicatedDataStore:
         """Áp kg/ống và số ống/kiện theo bảng tổng hợp của Tesa (tesa_names.TESA_DINH_MUC) vào danh mục Tesa và bộ nhớ định mức, MỘT lần cho
         mỗi phiên bản bảng: số cũ trong danh mục (VD 39753-91390-00 ghi 0.858 kg, 250 ống/kiện) bị thay bằng số trong bảng; sau đó người dùng
         sửa trong app thì số đã sửa thắng như cũ. Trả True nếu đã áp (cần lưu danh mục)."""
-        import tesa_names
+        try:
+            import tesa_names
+        except ImportError:  # chạy riêng file app (self-test trong thư mục tạm): không có bảng thì giữ danh mục như cũ
+            return False
         if self.tesa_dinh_muc_v >= tesa_names.TESA_DINH_MUC_V:
             return False
         for code, (kg, div) in tesa_names.TESA_DINH_MUC.items():
