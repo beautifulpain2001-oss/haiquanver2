@@ -353,3 +353,31 @@ def test_able_invoice_name_does_not_repeat_spec_code(store):
     assert cells and not [v for v in cells if "38*5*315*150g" in v]
     # khách có mã hàng riêng thật (không phải quy cách) vẫn ghi mã trước tên
     assert app.invoice_item_name({"custom": True}, {"ma_sp": "3609100670001", "ten_sp": "Ống 38x5x315"}) == "3609100670001\nỐng 38x5x315"
+
+
+def test_able_dccn_is_a_monthly_statement_of_all_lots(store):
+    """Able: Bảng đối chiếu công nợ là bảng của cả tháng (như file khách: lô 06/10 PO 00003872 + lô 20/10 PO 00004249, ngày bảng 31/10):
+    gộp mọi lô Able đã lưu cùng tháng với lô đang làm, mỗi dòng ghi ngày giao và PO của lô đó, tổng bằng chữ là tổng cả tháng."""
+    store.save_learned_customer("able4", {"name": "CÔNG TY TNHH BAO BÌ ĐÓNG GÓI ABLE", "label": "Able4", "mst": "0202226426", "addr": "Khu A1 Lô 1", "unit": "chiếc"},
+                                [{"name": "Ống giấy phi 38 x 5 x 315mm x150g in", "code": "38*5*315*150g", "price": 2807, "div": 84, "kg": 0.15}])
+
+    def lot(po, day, rows):
+        items = [{"stt": i + 1, "po": po, "ma_sp": "", "ten_sp": n, "unit": "chiếc", "qty": q, "price": p, "amount": q * p,
+                  "div": 1, "kg": 0.1, "kien": 1, "net": 1, "gross": 2, "tare": 1, "read": "ok"} for i, (n, q, p) in enumerate(rows)]
+        return app.lot_build_record(store, {"customer": "able4", "po": po, "pxk": "1", "doc_date": f"2026-10-{day:02d}"}, items)
+
+    first = lot("00003872", 6, [("Ống giấy phi 38 x 5 x 315mm x150g in", 4320, 2807), ("Ống giấy phi 38 x 5 x 315mm x170g in", 4320, 3181)])
+    store.records.append(first)
+    store.records.append(dict(lot("00001111", 2, [("Ống khác", 1, 1)]), customer="khac"))  # khách khác: không lấy
+    store.records.append(lot("00000999", 3, [("Ống tháng trước", 1, 1)]) | {"docDate": "2026-09-30"})  # tháng khác: không lấy
+    second = lot("00004249", 20, [("Ống giấy phi 38 x 5 x 467mm x280g in", 3120, 5239)])
+    ws = openpyxl.load_workbook(app.lot_export(store, second, "DCCN")["path"]).active
+    assert ws["B2"].value == "Ngày日31 tháng月10 năm年 2026"
+    got = [(ws[f"C{r}"].value.date().isoformat(), ws[f"D{r}"].value, ws[f"F{r}"].value, ws[f"I{r}"].value, ws[f"J{r}"].value) for r in (12, 13, 14)]
+    assert got == [("2026-10-06", "00003872", "Ống giấy phi 38 x 5 x 315mm x150g in", 4320, 2807),
+                   ("2026-10-06", "00003872", "Ống giấy phi 38 x 5 x 315mm x170g in", 4320, 3181),
+                   ("2026-10-20", "00004249", "Ống giấy phi 38 x 5 x 467mm x280g in", 3120, 5239)]
+    tot = next(r for r in range(14, 30) if str(ws[f"B{r}"].value).startswith("Tổng :"))
+    assert tot == 15 and ws[f"K{tot}"].value == "=SUM(K12:K14)"
+    total = 4320 * 2807 + 4320 * 3181 + 3120 * 5239
+    assert app.num_to_vn_words(total) in str(ws[f"B{tot + 3}"].value)

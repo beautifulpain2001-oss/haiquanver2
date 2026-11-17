@@ -5085,7 +5085,8 @@ def build_bbgh_sunlu_sheet(wb, rec, sheet_name="BBGH"):
 
 def bdc_month_rows(store, rec):
     """Các dòng của BẢNG ĐỐI CHIẾU HÀNG HÓA tháng của lô `rec`: mọi hồ sơ đã lưu của khách trong cùng tháng
-    (ngày chứng từ) cộng lô đang làm (thay bản đã lưu cùng mã hồ sơ / cùng số PO). Mỗi dòng: {po, code (mã liệu hiện hành), date, ten_sp, qty, unit, price}."""
+    (ngày chứng từ) cộng lô đang làm (thay bản đã lưu cùng mã hồ sơ / cùng số PO). Mỗi dòng: {po, code (mã liệu hiện hành), date, ship (ngày giao), ten_sp, qty, unit, price}.
+    Dùng chung cho Bảng đối chiếu công nợ tháng của Able."""
     month = str(rec.get("docDate") or "")[:7]
     same = lambda r: (r.get("id") and r.get("id") == rec.get("id")) or (r.get("poNumber") and r.get("poNumber") == rec.get("poNumber"))
     lots = [r for r in (store.records if store else []) if r.get("customer") == rec.get("customer") and str(r.get("docDate") or "")[:7] == month and not same(r)]
@@ -5094,7 +5095,8 @@ def bdc_month_rows(store, rec):
     for r in sorted(lots, key=lambda x: str(x.get("docDate") or "")):
         for it in r.get("items") or []:
             rows.append({"po": it.get("po") or r.get("poNumber", ""), "code": str(it.get("ma_sp") or "").strip(), "date": _iso_to_date(r.get("docDate")), "ten_sp": it.get("ten_sp", ""),
-                         "qty": it.get("qty", 0), "unit": it.get("unit", ""), "price": it.get("price", 0)})
+                         "qty": it.get("qty", 0), "unit": it.get("unit", ""), "price": it.get("price", 0),
+                         "ship": _iso_to_date(it["shipDate"]) if it.get("shipDate") else _iso_to_date(r.get("docDate"))})
     return rows
 
 
@@ -7839,7 +7841,7 @@ def lot_mode_workbook(store, rec, mode, skip_h=False):
         build_pgh_best_sheet(wb, rec, f"PGH_{s_key}")
         fname = f"PhieuGiaoHang_{rec['customer']}_{s_key}.xlsx"
     elif mode == "DCCN":
-        build_dccn_best_sheet(wb, rec, f"DCCN_{s_key}")
+        build_dccn_best_sheet(wb, dict(rec, bdcRows=bdc_month_rows(store, rec)) if is_able(PROFILES[rec["customer"]]) else rec, f"DCCN_{s_key}")
         fname = f"DoiChieuCongNo_{rec['customer']}_{s_key}.xlsx"
     elif mode == "CHECK":
         problems = check_lot(rec)
