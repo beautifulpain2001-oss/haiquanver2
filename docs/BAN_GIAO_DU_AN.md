@@ -377,7 +377,7 @@ PO của Best (PDF scan hoặc PDF xuất từ ERP; có Item Code, Spec, SL, gi�
 | #9 | 31/10 | Merge đồng bộ `main` |
 | #10 | 01/11 | Đọc PO PDF có lớp chữ (xuất từ ERP) theo bố cục trang; PO Best từ 0 dòng lên 11/11 dòng |
 | (Kho mẫu) | 08/11 | Kho mẫu thành nơi sửa form chứng từ theo từng khách: chứng từ dựng sẵn đổi thành form Excel/Word có ô `{{...}}` (`form_from_builtin`, lưu ở `MAU_CHUNG_TU/<khách>/thay/<MÃ>.xlsx`), sửa từng ô/đoạn ngay trong app, lần xuất sau dùng form; bản gốc ở `_goc/` để khôi phục |
-| (Kho mẫu) | 17/11 | Kho mẫu giữ bộ chứng từ xuất gần nhất của từng khách: mỗi lần xuất, bản sao file vào `MAU_CHUNG_TU/<khách>/bo_moi_nhat/` (`latest_set_save`, thẻ `_bo.json`); cùng thư mục lô thì thay từng chứng từ, lô khác thì thay cả bộ. Nút "Bộ xuất gần nhất" ở Kho mẫu xem trước từng file (hình xem trước tự tính công thức đơn giản SUM/ROUNDUP/SUBTOTAL…) |
+| (Kho mẫu) | 17/11 | Kho mẫu giữ bộ chứng từ xuất gần nhất của từng khách: mỗi lần xuất, bản sao file vào `MAU_CHUNG_TU/<khách>/bo_moi_nhat/` (`latest_set_save`, thẻ `_bo.json`); cùng thư mục lô thì thay từng chứng từ, lô khác thì thay cả bộ. Nút "Bộ xuất gần nhất" ở Kho mẫu xem trước từng file (hình xem trước tự tính công thức đơn giản SUM/ROUNDUP/SUBTOTAL…). PDF phiếu xuất kho / hóa đơn Bkav trong thư mục lô cũng được chép vào bộ và xem trước bằng QtPdf (bản .exe không còn bỏ QtPdf/QtNetwork) |
 
 Xem chi tiết từng PR trên GitHub (tab Pull requests, trạng thái Closed).
 

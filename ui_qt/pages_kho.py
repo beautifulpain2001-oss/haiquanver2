@@ -21,7 +21,7 @@ def loai_text(code):
 
 
 def ext_text(ext):
-    return "Word" if ext == "docx" else "Excel"
+    return {"docx": "Word", "pdf": "PDF"}.get(ext, "Excel")
 
 
 # màu viền thẻ theo loại chứng từ (giống bảng băng chuyền mẫu)
@@ -672,6 +672,12 @@ class PagedView(QScrollArea):
             out.append(pg)
         return out
 
+    def show_pages(self, imgs):
+        """Hiện sẵn từng trang (VD trang PDF) đúng như trang, không cắt lại theo khổ A4."""
+        self.pages = [x.scaled(self.PW, self.PH, Qt.KeepAspectRatio, Qt.SmoothTransformation) for x in imgs if not x.isNull()]
+        self._build()
+        QTimer.singleShot(0, lambda: self.verticalScrollBar().setValue(0))
+
     def show_image(self, img, title=""):
         self.pages = [] if img is None or img.isNull() else self.paginate(img, title)
         self._build()
@@ -1201,7 +1207,7 @@ class MauPage(QWidget):
             self.docs = [dict(f, kind="latest") for f in (self.latest or {}).get("files", [])]
             names = [d["mode"] for d in self.docs]
             for d in self.docs:
-                self.listw.addItem(QListWidgetItem(f"🗂  {d['label']}\n{d['name']}"))
+                self.listw.addItem(QListWidgetItem(f"{'📄' if d['ext'] == 'pdf' else '🗂'}  {d['label']}\n{d['name']}"))
         elif self.cust is not None:
             self.list_title.setText(f"Chứng từ của {label}")
             self.docs = self.store.customer_docs(self.cust)
@@ -1251,8 +1257,10 @@ class MauPage(QWidget):
             return
         kind = d["kind"]
         self.kind_hint.setText(KIND_HINT[kind])
+        self.open_btn.setText("📂  Mở bằng Word/Excel")
         if kind == "latest":
             self._buttons(("open_btn", "lot_btn"))
+            self.open_btn.setText("📂  Mở file")
             self.open_btn.setEnabled(True)
             lt = self.latest or {}
             self.lot_btn.setEnabled(os.path.isdir(lt.get("folder") or ""))
@@ -1274,6 +1282,14 @@ class MauPage(QWidget):
             self._buttons(())
         label = self.core.PROFILES.get(self.cust, {}).get("label") or self.cust
         self.title.setText(f"{label}  —  {d['label']}  ({KIND_TEXT[kind]}, {ext_text(d['ext'])})")
+        if d["ext"] == "pdf":
+            from . import mau_render
+            try:
+                with open(d["path"], "rb") as f:
+                    self.view.show_pages(mau_render.render_pdf_pages(f.read(), 1100))
+            except OSError:
+                self.view.clear()
+            return
         self.view.show_image(self._doc_image(d), f"{label} / {d['label']}")
 
     def _doc_image(self, d, width=1000):

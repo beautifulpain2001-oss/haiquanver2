@@ -111,3 +111,42 @@ def test_preview_computes_simple_formulas():
         with pytest.raises(ValueError):
             calc.value(r, c)
     assert _fmt_number(1234567.5, "#,##0") == "1,234,568" and _fmt_number(37.1, "#,##0.00") == "37.10" and _fmt_number(0.5, "0%") == "50%"
+
+
+def _pdf(path):
+    from pypdf import PdfWriter
+    w = PdfWriter()
+    w.add_blank_page(595, 842)
+    with open(path, "wb") as f:
+        w.write(f)
+
+
+def test_pdf_pxk_and_invoice_from_lot_folder_join_set(store, cust):
+    """PDF phiếu xuất kho / hóa đơn Bkav thả vào thư mục lô (sau khi xuất) cũng vào bộ mới nhất, đứng sau file Excel cùng loại."""
+    res = app.lot_export_each(store, _rec(store, "00000321"))
+    lot = os.path.dirname(res["files"][0]["path"])
+    for n in ("PXK 321.pdf", "HĐ 321.pdf", "PO_scan.pdf"):
+        _pdf(os.path.join(lot, n))
+    s = store.latest_set(cust)
+    modes = [f["mode"] for f in s["files"]]
+    assert "PDF:PO_scan.pdf" not in modes
+    assert modes.index("PDF:HĐ 321.pdf") == modes.index("VAT") + 1 and modes.index("PDF:PXK 321.pdf") == modes.index("PXK") + 1
+    pdfs = {f["name"]: f for f in s["files"] if f["ext"] == "pdf"}
+    assert pdfs["PXK 321.pdf"]["label"] == "Phiếu xuất kho (PDF Bkav)" and pdfs["HĐ 321.pdf"]["label"] == "Hóa đơn VAT (PDF Bkav)"
+    assert all(os.path.dirname(f["path"]) == store.latest_set_dir(cust) for f in pdfs.values())
+    app.lot_export(store, _rec(store, "00000321"), "DNTT")  # xuất lại cùng lô: PDF vẫn giữ
+    assert "PDF:PXK 321.pdf" in [f["mode"] for f in store.latest_set(cust)["files"]]
+
+
+def test_kho_page_previews_pdf(qapp, store, cust):
+    from ui_qt import pages_kho
+    res = app.lot_export_each(store, _rec(store, "00000321"))
+    _pdf(os.path.join(os.path.dirname(res["files"][0]["path"]), "PXK 321.pdf"))
+    page = pages_kho.MauPage(app, store)
+    page.show()
+    page.select_customer(cust)
+    page.set_latest_mode(True)
+    i = [d["mode"] for d in page.docs].index("PDF:PXK 321.pdf")
+    page.listw.setCurrentRow(i)
+    assert len(page.view.pages) == 1 and "PDF" in page.title.text()
+    page.close()

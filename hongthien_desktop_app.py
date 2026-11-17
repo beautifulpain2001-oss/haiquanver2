@@ -1242,12 +1242,71 @@ class DedicatedDataStore:
             return None
         if not isinstance(meta, dict):
             return None
+        if self._latest_pick_pdfs(meta):
+            self._latest_write_meta(key, meta)
         files = []
         for x in meta.get("files") or []:
             p = os.path.join(folder, str(x.get("name") or ""))
             if x.get("name") and os.path.isfile(p):
-                files.append(dict(x, path=p, ext=os.path.splitext(p)[1].lstrip(".").lower(), label="Trọn bộ (một file)" if x.get("mode") == "ALL" else lot_mode_label(x.get("mode", ""))))
+                files.append(dict(x, path=p, ext=os.path.splitext(p)[1].lstrip(".").lower(), label=self._latest_label(x.get("mode", ""))))
         return dict(meta, files=files) if files else None
+
+    LATEST_PDF = {"PXK Bkav (PDF)": ("PXK", "Phiếu xuất kho (PDF Bkav)"), "Hóa đơn Bkav (PDF)": ("VAT", "Hóa đơn VAT (PDF Bkav)")}
+
+    def _latest_label(self, mode):
+        if mode == "ALL":
+            return "Trọn bộ (một file)"
+        if mode.startswith("PDF:"):
+            return next((lbl for k, (_m, lbl) in self.LATEST_PDF.items() if k == self._classify_outside(mode[4:])), "PDF")
+        return lot_mode_label(mode)
+
+    def _latest_pick_pdfs(self, meta):
+        """Chép PDF phiếu xuất kho / hóa đơn Bkav đang có trong thư mục lô vào bộ mới nhất (file mới hoặc vừa thay). Trả True nếu có đổi."""
+        src_dir, changed = meta.get("folder") or "", False
+        folder = self.latest_set_dir(meta.get("customer") or "")
+        try:
+            names = sorted(os.listdir(src_dir)) if src_dir and os.path.isdir(src_dir) else []
+        except OSError:
+            return False
+        have = {x.get("name"): x for x in meta.get("files") or []}
+        for n in names:
+            if not n.lower().endswith(".pdf") or self._classify_outside(n) not in self.LATEST_PDF:
+                continue
+            src, dst = os.path.join(src_dir, n), os.path.join(folder, n)
+            try:
+                if os.path.isfile(dst) and os.path.getmtime(dst) >= os.path.getmtime(src) and n in have:
+                    continue
+                os.makedirs(folder, exist_ok=True)
+                shutil.copy2(src, dst)
+            except OSError as e:
+                log_soft_error(f"Không chép được PDF '{src}' vào bộ mới nhất: {e}")
+                continue
+            if n not in have:
+                x = {"mode": "PDF:" + n, "name": n, "savedAt": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                meta.setdefault("files", []).append(x)
+                have[n] = x
+            changed = True
+        if meta.get("files"):  # luôn xếp lại theo thứ tự bộ chứng từ của khách
+            order = {m: i for i, m in enumerate(lot_bundle_modes({"customer": meta.get("customer") or ""}))}
+
+            def rank(x):
+                m = x.get("mode", "")
+                if m.startswith("PDF:"):  # PDF đứng ngay sau file Excel Bkav cùng loại
+                    m = self.LATEST_PDF.get(self._classify_outside(m[4:]), ("",))[0]
+                    return order.get(m, 99) + 0.5
+                return order.get(m, 99)
+            meta["files"] = sorted(meta.get("files") or [], key=rank)
+        return changed
+
+    def _latest_write_meta(self, key, meta):
+        folder = self.latest_set_dir(key)
+        try:
+            tmp = os.path.join(folder, "." + self.LATEST_META + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(meta, f, ensure_ascii=False, indent=1)
+            os.replace(tmp, os.path.join(folder, self.LATEST_META))
+        except OSError as e:
+            log_soft_error(f"Không ghi được {self.LATEST_META} của khách '{key}': {e}")
 
     def latest_set_save(self, rec, files):
         """Cất bản sao các file vừa xuất ([(mode, đường dẫn)]) làm bộ mới nhất của khách. Cùng thư mục lô: thay từng chứng từ;
@@ -1279,6 +1338,7 @@ class DedicatedDataStore:
             meta = {"customer": key, "pxkNo": rec.get("pxkNo", ""), "docDate": rec.get("docDate", ""), "poNumber": rec.get("poNumber", ""),
                     "folder": lot_dir, "savedAt": now,
                     "files": sorted(({k: v for k, v in x.items() if k in ("mode", "name", "savedAt")} for x in keep.values()), key=lambda x: order.get(x["mode"], 99))}
+            self._latest_pick_pdfs(meta)  # PDF phiếu xuất kho / hóa đơn Bkav đã có trong thư mục lô
             tmp = os.path.join(folder, "." + self.LATEST_META + ".tmp")
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(meta, f, ensure_ascii=False, indent=1)

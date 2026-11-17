@@ -29,11 +29,12 @@ ZIP = os.path.join(DIST, NAME + "_Windows.zip")
 UPDATE_ZIP = os.path.join(DIST, NAME + "_CapNhat.zip")  # chỉ .exe, nhẹ hơn nhiều so với bản đầy đủ
 GUIDE = os.path.join(ROOT, "HUONG_DAN_BAN_EXE.md")
 OCR_DIR = os.path.join(DIST, "Tesseract-OCR")
+# Giữ QtPdf (và QtNetwork nó cần): Kho mẫu xem trước PDF phiếu xuất kho / hóa đơn Bkav
 QT_EXCLUDES = (
     "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.QtWebEngineQuick", "PySide6.QtWebChannel",
-    "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtQuickWidgets", "PySide6.Qt3DCore", "PySide6.QtPdf",
+    "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtQuickWidgets", "PySide6.Qt3DCore",
     "PySide6.QtPdfWidgets", "PySide6.QtMultimedia", "PySide6.QtCharts", "PySide6.QtDataVisualization",
-    "PySide6.QtSql", "PySide6.QtNetwork", "PySide6.QtOpenGL", "PySide6.QtSvg", "PySide6.QtDesigner",
+    "PySide6.QtSql", "PySide6.QtOpenGL", "PySide6.QtSvg", "PySide6.QtDesigner",
 )
 OCR_LANGS = ("eng", "vie", "osd")  # osd: tự xoay trang PO scan bị nằm ngang
 
