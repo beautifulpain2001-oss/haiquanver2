@@ -337,3 +337,19 @@ def test_able_bundle_has_dccn_in_the_customers_own_template(store):
     tot = next(r for r in range(27, 32) if str(ws[f"B{r}"].value).startswith("Tổng :"))
     assert ws[f"K{tot}"].value == "=SUM(K12:K26)" and "Tổng tiền bằng chữ" in str(ws[f"B{tot + 3}"].value) and "hai mươi hai" in str(ws[f"B{tot + 3}"].value).lower()
     assert any(str(c.value or "").upper() == "CÔNG TY TNHH BAO BÌ ĐÓNG GÓI ABLE" for row in ws.iter_rows(min_row=tot) for c in row)
+
+
+def test_able_invoice_name_does_not_repeat_spec_code(store):
+    """Able: mã hàng (38*5*315*150g) chỉ là quy cách của tên; Invoice chỉ ghi tên 'Ống giấy phi 38 x 5 x 315mm x150g in', không ghi mã lần nữa."""
+    name = "Ống giấy phi 38 x 5 x 315mm x150g in"
+    store.save_learned_customer("able3", {"name": "CÔNG TY TNHH BAO BÌ ĐÓNG GÓI ABLE", "label": "Able3", "mst": "0202226426", "addr": "Khu A1 Lô 1", "unit": "Chiếc"},
+                                [{"name": name, "code": "38*5*315*150g", "price": 2807, "div": 84, "kg": 0.15}])
+    items = [{"stt": 1, "po": "00003038", "ma_sp": "38*5*315*150g", "ten_sp": name, "unit": "Chiếc", "qty": 2592, "price": 2807, "amount": 7275744,
+              "div": 84, "kg": 0.15, "kien": 31, "net": 388.8, "gross": 389.8, "tare": 1, "read": "ok"}]
+    rec = app.lot_build_record(store, {"customer": "able3", "po": "A", "pxk": "1", "doc_date": "2026-11-17"}, items)
+    assert app.invoice_item_name(app.PROFILES["able3"], items[0]) == name
+    wb = openpyxl.load_workbook(app.lot_export(store, rec, "ALL")["path"])
+    cells = [str(c.value) for ws in wb.worksheets for row in ws.iter_rows() for c in row if isinstance(c.value, str) and "315" in c.value]
+    assert cells and not [v for v in cells if "38*5*315*150g" in v]
+    # khách có mã hàng riêng thật (không phải quy cách) vẫn ghi mã trước tên
+    assert app.invoice_item_name({"custom": True}, {"ma_sp": "3609100670001", "ten_sp": "Ống 38x5x315"}) == "3609100670001\nỐng 38x5x315"
