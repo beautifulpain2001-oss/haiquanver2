@@ -20,9 +20,9 @@ class TestProfiles:
     @pytest.mark.parametrize(
         "key, mst, driver, xe, seq, unit",
         [
-            ("shirai", "3600816236", "Sẩm Ngọc Huy", "60H238.07", "01", "cái"),
-            ("kodi", "2400903592", "Hồ Quang Hoàng", "99C-158.08", "03", "chiếc"),
-            ("tesa", "0202090415", "Tô Anh Tiến", "99C-052.64", "01", "cái"),
+            ("shirai", "3600816236", "", "", "01", "cái"),  # lái xe/biển số: trống = ngẫu nhiên mỗi lô
+            ("kodi", "2400903592", "", "", "03", "chiếc"),
+            ("tesa", "0202090415", "", "", "01", "cái"),
         ],
     )
     def test_defaults(self, key, mst, driver, xe, seq, unit):

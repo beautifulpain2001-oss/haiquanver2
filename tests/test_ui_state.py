@@ -31,7 +31,7 @@ def test_new_lot_needs_customer(lot):
 
 def test_select_customer_sets_defaults(lot):
     lot.select_customer("tesa")
-    assert lot.form["tare"] == "0.0" and lot.form["xe"] == app.PROFILES["tesa"]["xe"]
+    assert lot.form["tare"] == "0.0" and app.vehicle_pair_of(lot.form["driver"], "") == {"driver": lot.form["driver"], "xe": lot.form["xe"]}
     lot.select_customer("kodi")
     assert lot.form["tare"] == "1.0" and lot.items == []
 
