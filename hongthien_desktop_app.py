@@ -618,6 +618,7 @@ class DedicatedDataStore:
         self.supplier_pref = {}  # lựa chọn đã nhớ: 'nhom:carton' / 'ma:<mã>' -> tên nhà cung ứng
         self.ten_kh_tay = {}  # tên theo khách hàng do người dùng nhập khi ERP chưa có: {mã: tên}
         self.tesa_dinh_muc_v = 0  # phiên bản bảng định mức Tesa (tesa_names.TESA_DINH_MUC) đã áp vào danh mục của máy này
+        self.tesa_dinh_muc_dt_v = 0  # phiên bản bảng định mức Tesa đã áp vào Data tổng (kho dữ liệu dùng chung) từ máy này
         self.read_fixes = []  # nhật ký các lần người dùng sửa số liệu máy đọc sai từ PO (khách, trường, đọc sai, đúng, dòng PO)
         self.custom_profiles = {}
         self.custom_items = {}
@@ -721,6 +722,7 @@ class DedicatedDataStore:
                 self.supplier_pref = dict(data.get("supplier_pref") or {})
                 self.ten_kh_tay = dict(data.get("ten_kh_tay") or {})
                 self.tesa_dinh_muc_v = int(data.get("tesa_dinh_muc_v") or 0)
+                self.tesa_dinh_muc_dt_v = int(data.get("tesa_dinh_muc_dt_v") or 0)
             except Exception:
                 pass
         if self.apply_tesa_dinh_muc():
@@ -739,6 +741,9 @@ class DedicatedDataStore:
                 self.records = []
         self._loaded_ids = {r.get("id") for r in self.records}
         self.dt_load()
+        if self.apply_tesa_dinh_muc_dt():
+            self.dt_save()
+            self.save_catalog()
         self._note_sigs()
         if not self.records:
             self.records = self.default_seed_records()
@@ -794,6 +799,21 @@ class DedicatedDataStore:
                 mem = self.item_mem.get(name) or {}
                 self.item_mem[name] = {"div": div, "kg": kg, "hs": mem.get("hs") or "48229090"}
         self.tesa_dinh_muc_v = tesa_names.TESA_DINH_MUC_V
+        return True
+
+    def apply_tesa_dinh_muc_dt(self):
+        """Như apply_tesa_dinh_muc nhưng cho Data tổng (kho dữ liệu): mục Tesa của các mã trong bảng (theo mã, hoặc mã trong ngoặc ở tên,
+        cùng quy cách) nhận kg/ống và số ống/kiện của bảng, MỘT lần cho mỗi phiên bản bảng. Trả True nếu đã áp (cần lưu)."""
+        try:
+            import tesa_names
+        except ImportError:
+            return False
+        if self.tesa_dinh_muc_dt_v >= tesa_names.TESA_DINH_MUC_V:
+            return False
+        for code, (kg, div) in tesa_names.TESA_DINH_MUC.items():
+            std = tesa_names.TESA_NAMES.get(code, ("", ""))
+            self._dt_set_norm(self._dt_same_product("tesa", code, std[0] or std[1]), kg, div)
+        self.tesa_dinh_muc_dt_v = tesa_names.TESA_DINH_MUC_V
         return True
 
     def add_tesa_item(self, name, code="", price=0, source="erp"):
@@ -1594,6 +1614,63 @@ class DedicatedDataStore:
             self.dt_save()
         return n
 
+    @staticmethod
+    def _dt_codes(x):
+        """Mọi mã của một mục Data tổng: mã hàng, mã ERP, mã khách và mã nằm trong ngoặc ở tên (tên Tesa ghi sẵn mã: '... (39753-91390-00), có logo tesa')."""
+        codes = {str(x.get(f) or "").strip() for f in DedicatedDataStore._CODE_FIELDS}
+        codes |= {code_in_name(x.get("ten")), code_in_name(x.get("ten_kh"))}
+        return codes - {""}
+
+    def _dt_same_product(self, cust_key, code, name=""):
+        """Các mục Data tổng của khách là CÙNG sản phẩm với mã `code`: có mã đó (kể cả mã trong ngoặc ở tên) và không khác quy cách với `name`
+        (mục cùng mã mà khác quy cách là liên kết sai, VD lõi 33.2 x 2.65 x 19mm gắn mã 39753-91390-00: không đụng tới)."""
+        code = str(code or "").strip()
+        if not code:
+            return []
+        dk = self._dims_key(name) if name else None
+        out = []
+        for x in self.dt_items_for(cust_key):
+            if code in self._dt_codes(x):
+                xk = self._dims_key(x.get("ten")) or self._dims_key(x.get("ten_kh"))
+                if dk is None or xk is None or xk == dk:
+                    out.append(x)
+        return out
+
+    def _dt_set_norm(self, items, kg, div, hs=""):
+        """Ghi kg/chiếc và SL/kiện người dùng xác nhận (nguồn 'tay') vào các mục Data tổng `items`. Trả số mục đã đổi."""
+        now, user, n = datetime.datetime.now(), self.user_name(), 0
+        for x in items:
+            changed = False
+            if kg > 0 and (abs(float(x.get("kg") or 0) - float(kg)) > 1e-9 or x.get("kg_nguon") != "tay"):
+                x["kg"], x["kg_nguon"], changed = round(float(kg), 6), "tay", True
+            if div > 0 and (float(x.get("kien") or 0) != float(div) or x.get("kien_nguon") != "tay"):
+                x["kien"], x["kien_nguon"], changed = int(round(div)), "tay", True
+            if hs and not x.get("hs"):
+                x["hs"], changed = hs, True
+            if changed:
+                x["ts"], x["cap_nhat"], x["may"] = now.strftime("%Y-%m-%d %H:%M:%S"), now.strftime("%d/%m/%Y %H:%M"), user
+                n += 1
+        return n
+
+    def dt_confirm_item(self, cust_key, name, code, kg, div, hs=""):
+        """Người dùng vừa sửa một dòng hàng (Sửa dòng hàng → Lưu): ghi kg/chiếc, SL/kiện vào Data tổng cho mục CÙNG TÊN và mọi mục cùng sản phẩm
+        (cùng mã, kể cả mã trong ngoặc ở tên, cùng quy cách), để kho dữ liệu không còn giữ số cũ ở mục trùng. Chưa có mục nào thì thêm mới.
+        Dùng cho mọi khách, kể cả Shirai/Kodi/Tesa. Trả số mục đã thêm/đổi."""
+        prof = PROFILES.get(cust_key)
+        if not prof or not name or (kg <= 0 and div <= 0):
+            return 0
+        khach = prof.get("label") or cust_key
+        code = str(code or "").strip() or code_in_name(name)
+        hits = [x for x in self.dt_items_for(cust_key) if clean_str(x.get("ten")) == clean_str(name)]
+        hits += [x for x in self._dt_same_product(cust_key, code, name) if x not in hits]
+        n = self._dt_set_norm(hits, kg, div, hs)
+        if not hits and self._dt_upsert(khach, name, ma_hang=code, kg=kg, kg_nguon="tay", kien=int(round(div)) if div else 0, kien_nguon="tay", hs=hs, exact=True):
+            n += 1
+        if n:
+            self._dt_cache = {}
+            self.dt_save()
+        return n
+
     def dt_fill_lines(self, cust_key, lines):
         """Liên thông mã khách ↔ ERP: dòng có mã nằm trong Data tổng thì lấy mã/tên ERP, kg/chiếc theo ERP (hoặc số đã xác nhận) và SL/kiện; dòng không có mã thì chỉ điền chỗ còn thiếu theo tên.
         Số kg khác với danh mục khách sẽ được ghi chú ở dòng. Trả số dòng được điền/đổi."""
@@ -1780,6 +1857,7 @@ class DedicatedDataStore:
                     "supplier_pref": self.supplier_pref,
                     "ten_kh_tay": self.ten_kh_tay,
                     "tesa_dinh_muc_v": self.tesa_dinh_muc_v,
+                    "tesa_dinh_muc_dt_v": self.tesa_dinh_muc_dt_v,
                 })
                 self._sigs[self.catalog_file] = self._sig(self.catalog_file)
         except Exception as e:
@@ -7086,12 +7164,15 @@ def lot_search_items(store, customer, query, limit=60):
             if key not in seen:
                 seen.add(key)
                 out.append(out_item)
+    n_cat = len(out)
     try:
         for x in store.dt_items_for(customer):
             name = x.get("ten") or ""
             hay = norm(str(x.get("ma_hang") or "") + " " + name + " " + str(x.get("ma_kh") or ""))
             key = (str(x.get("ma_kh") or x.get("ma_hang") or ""), name)
-            if name and all(t in hay for t in toks) and key not in seen and not any(o["ten_sp"] == name for o in out):
+            dk = store._dims_key(name)
+            dup = any(o["ma_sp"] and o["ma_sp"] in store._dt_codes(x) and store._dims_key(o["ten_sp"]) in (None, dk) for o in out[:n_cat])  # cùng sản phẩm với mục danh mục khách (VD tên HQ của Tesa)
+            if name and all(t in hay for t in toks) and key not in seen and not dup and not any(o["ten_sp"] == name for o in out):
                 seen.add(key)
                 out.append({"ma_sp": key[0], "ten_sp": name, "price": 0, "unit": (PROFILES.get(customer) or {}).get("unit", ""), "div": x.get("kien") or 0,
                             "kg": x.get("kg") or 0, "hs": x.get("hs") or ""})
@@ -8012,6 +8093,15 @@ def best_scan_lines(path, prof, store, po_no, po_date, tare_v):
     return lines if len(lines) == len(rows) else []
 
 
+_CODE_IN_NAME = re.compile(r"\(\s*(\d{5}-\d{5}-\d{2})\s*\)")
+
+
+def code_in_name(name):
+    """Mã hàng ghi trong ngoặc ở tên (tên Tesa: 'Ống lõi giấy phi 76.5 x 3 x 1390mm_Blue (39753-91390-00), có logo tesa...'); '' nếu không có."""
+    m = _CODE_IN_NAME.search(str(name or ""))
+    return m.group(1) if m else ""
+
+
 def tesa_names_for(code):
     """(tên HQ, tên xuất hóa đơn) chuẩn của mã Tesa theo bảng 'tên hải quan tesa'; ('', '') nếu mã không có trong bảng."""
     import tesa_names
@@ -8258,10 +8348,11 @@ def lot_item_from_values(store, customer, vals, tare_text="1.0", base=None):
     kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
     net = round_up(qty * kg) if kg > 0 else 0.0
     gross = lot_gross(net, tare_spec)
-    store.remember_item_norm(name, div, kg, hs, code=code, customer=customer if customer not in BUILTIN_CUSTOMERS else "")
-    if customer not in BUILTIN_CUSTOMERS and (kg > 0 or div > 0):
+    # ô mã trống nhưng tên ghi sẵn mã trong ngoặc (tên HQ của Tesa): vẫn nhớ theo mã đó để mục danh mục của mã nhận số vừa sửa
+    store.remember_item_norm(name, div, kg, hs, code=code or code_in_name(name), customer=customer if customer not in BUILTIN_CUSTOMERS else "")
+    if kg > 0 or div > 0:
         try:
-            store.dt_learn_items(customer, [{"ten_sp": name, "ma_sp": code, "kg": kg, "div": div, "hs": hs}])  # số vừa xác nhận thắng số ERP/invoice cũ ở các lần sau
+            store.dt_confirm_item(customer, name, code, kg, div, hs)  # kho dữ liệu (Data tổng): số vừa xác nhận thắng số ERP/invoice cũ, ở mọi mục cùng sản phẩm
         except Exception:  # noqa: BLE001 - Data tổng lỗi không được chặn việc sửa dòng
             pass
     if customer not in BUILTIN_CUSTOMERS:
