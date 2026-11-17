@@ -759,3 +759,9 @@ def test_invoice_pxk_and_declaration_numbers_are_read_from_file_names(win, store
     assert (mine[3], mine[4], mine[5]) == ("00000320", "00004591", "309138556000")
     ent = next(e for e in store.declaration_entries() if e.get("_path") == folder)
     assert (ent["hdNo"], ent["pxkNo"], ent["tkNo"]) == ("00004591", "00000320", "309138556000")
+
+
+def test_kodi_total_mismatch_shows_warning_in_read_text(win, tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "extract_text_from_pdf_or_image_offline", lambda *a, **k: KODI_PO_TEXT.replace("76.350.000", "70.000.000"))
+    load_kodi_po(win, tmp_path)
+    assert "⚠" in win.lot.lot.read_text
