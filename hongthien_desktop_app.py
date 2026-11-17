@@ -4323,16 +4323,35 @@ def strip_leading_code(name, code):
     return out or n
 
 
+def code_is_spec_of_name(code, name):
+    """Mã hàng chỉ là quy cách viết gọn của chính tên hàng (Able: mã '38*5*315*150g' / '38*5*315*150g-ko-in' cho tên
+    'Ống giấy phi 38 x 5 x 315mm x150g in'): mã chỉ gồm số, dấu ngăn và đơn vị (g, mm, in, ko-in), có ít nhất 3 số
+    và các số đó có đủ, đúng thứ tự trong tên. Ghi mã kèm tên lúc này là ghi quy cách hai lần."""
+    code = str(code or "").strip()
+    if not code or re.sub(r"\d+(?:[.,]\d+)?|mm|ko|in|g|[\s*xX×.,_/\-]", "", code, flags=re.I):
+        return False
+    c_nums = [x.replace(",", ".") for x in re.findall(r"\d+(?:[.,]\d+)?", code)]
+    if len(c_nums) < 3:
+        return False
+    n_nums = iter(x.replace(",", ".") for x in re.findall(r"\d+(?:[.,]\d+)?", str(name or "")))
+    return all(any(float(x) == float(y) for y in n_nums) for x in c_nums)
+
+
 def with_code(prof, it, name):
     """Tên hàng kèm mã hàng đứng trước nếu khách dùng kiểu 'mã + tên': luôn dạng '<mã> <tên>' đúng một lần (tên đã có mã ở đầu thì không ghi lặp)."""
     code = str(it.get("ma_sp") or "").strip()
+    if code_is_spec_of_name(code, name):
+        code = ""
     return f"{code} {strip_leading_code(name, code)}" if code_name_style(prof) and code else name
 
 
 def invoice_item_name(prof, it):
-    """Ô Tên hàng của Invoice chuẩn: khách 'mã + tên' ghi '<mã> <tên>' một dòng; khách riêng khác ghi mã rồi xuống dòng tên. Không bao giờ lặp mã."""
+    """Ô Tên hàng của Invoice chuẩn: khách 'mã + tên' ghi '<mã> <tên>' một dòng; khách riêng khác ghi mã rồi xuống dòng tên. Không bao giờ lặp mã,
+    và không ghi mã khi mã chỉ là quy cách đã có trong tên (Able)."""
     name = it.get("ten_hq") or it["ten_sp"]
     code = str(it.get("ma_sp") or "").strip()
+    if code_is_spec_of_name(code, name):
+        return name
     if code_name_style(prof) and code:
         return f"{code} {strip_leading_code(name, code)}"
     if prof.get("custom") and code:
