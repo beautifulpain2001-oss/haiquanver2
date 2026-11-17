@@ -1,7 +1,10 @@
 """Trang Cài đặt: thư mục dữ liệu, OCR, công ty, học dữ liệu khách."""
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QAbstractItemView, QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QScrollArea,
+    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+)
 
 from .. import widgets
 from ._base import _Page, _head
@@ -53,6 +56,41 @@ class SettingsPage(_Page):
         self.company_msg.setObjectName("hint")
         self.company_msg.setWordWrap(True)
         lay.addWidget(self.company_msg)
+
+        vbox = QGroupBox("Lái xe và biển số xe")
+        vl = QVBoxLayout(vbox)
+        vh = QLabel("Mỗi lô hàng phần mềm chọn ngẫu nhiên 1 cặp trong danh sách này; mọi chứng từ của lô dùng cùng cặp đó "
+                    "(lái xe nào thì đúng biển số xe đó). Khách nào cần cố định thì ghi lái xe và biển số ở mục Khách hàng. "
+                    "Ở bước làm hồ sơ vẫn sửa tay được; gõ tên lái xe có trong danh sách thì biển số tự đổi theo.")
+        vh.setObjectName("hint")
+        vh.setWordWrap(True)
+        vl.addWidget(vh)
+        self.vtable = QTableWidget(0, 2)
+        self.vtable.setHorizontalHeaderLabels(["Họ tên lái xe", "Biển số xe"])
+        self.vtable.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.vtable.verticalHeader().setVisible(False)
+        self.vtable.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.vtable.setMinimumHeight(170)
+        vl.addWidget(self.vtable)
+        vrow = QHBoxLayout()
+        add_b = QPushButton("➕  Thêm cặp")
+        add_b.setObjectName("sec")
+        add_b.clicked.connect(lambda: self.add_vehicle_row())
+        del_b = QPushButton("🗑  Xóa dòng đang chọn")
+        del_b.setObjectName("sec")
+        del_b.clicked.connect(self.del_vehicle_rows)
+        self.vsave_btn = QPushButton("💾  Lưu danh sách xe")
+        self.vsave_btn.clicked.connect(self.save_vehicles)
+        vrow.addWidget(self.vsave_btn)
+        vrow.addWidget(add_b)
+        vrow.addWidget(del_b)
+        vrow.addStretch(1)
+        vl.addLayout(vrow)
+        self.vehicle_msg = QLabel("")
+        self.vehicle_msg.setObjectName("hint")
+        self.vehicle_msg.setWordWrap(True)
+        vl.addWidget(self.vehicle_msg)
+        lay.addWidget(vbox)
 
         ubox = QGroupBox("Người dùng máy này")
         ul = QVBoxLayout(ubox)
@@ -130,6 +168,7 @@ class SettingsPage(_Page):
         lay.addWidget(obox)
         lay.addStretch(1)
         self.load_company()
+        self.load_vehicles()
         self.refresh()
 
     # --- thông tin công ty
@@ -151,6 +190,38 @@ class SettingsPage(_Page):
             return
         self.company_msg.setText("✅  Đã lưu thông tin công ty. Các chứng từ xuất từ giờ sẽ dùng thông tin này.")
         self.company_changed.emit()
+
+    # --- cặp lái xe + biển số
+    def add_vehicle_row(self, driver="", xe=""):
+        r = self.vtable.rowCount()
+        self.vtable.insertRow(r)
+        self.vtable.setItem(r, 0, QTableWidgetItem(driver))
+        self.vtable.setItem(r, 1, QTableWidgetItem(xe))
+        if not driver and not xe:
+            self.vtable.setCurrentCell(r, 0)
+            self.vtable.editItem(self.vtable.item(r, 0))
+
+    def load_vehicles(self):
+        self.vtable.setRowCount(0)
+        for p in self.store.vehicle_list():
+            self.add_vehicle_row(p.get("driver", ""), p.get("xe", ""))
+
+    def del_vehicle_rows(self):
+        for r in sorted({i.row() for i in self.vtable.selectedIndexes()}, reverse=True):
+            self.vtable.removeRow(r)
+
+    def vehicle_rows(self):
+        cell = lambda r, c: (self.vtable.item(r, c).text() if self.vtable.item(r, c) else "")
+        return [{"driver": cell(r, 0), "xe": cell(r, 1)} for r in range(self.vtable.rowCount())]
+
+    def save_vehicles(self):
+        try:
+            self.store.set_vehicles(self.vehicle_rows())
+        except ValueError as e:
+            widgets.warn(self, "Chưa lưu được", str(e))
+            return
+        self.load_vehicles()
+        self.vehicle_msg.setText(f"✅  Đã lưu {self.vtable.rowCount()} cặp lái xe + biển số. Lô mới sẽ chọn ngẫu nhiên 1 cặp trong danh sách này.")
 
     # --- dữ liệu / OCR
     def refresh(self):
@@ -196,6 +267,7 @@ class SettingsPage(_Page):
             return
         self.store.change_base_dir(d)
         self.load_company()
+        self.load_vehicles()
         self.refresh()
         self.data_changed.emit()
         widgets.info(self, "Đã đổi thư mục dữ liệu", f"Phần mềm sẽ lưu và đọc dữ liệu tại:\n{self.store.base_dir}")

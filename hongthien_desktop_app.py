@@ -31,6 +31,7 @@ BẢN ĐẦY ĐỦ 100% TÍNH NĂNG (FULL PARITY VỚI BẢN GỐC + LƯU TRỮ 
 import datetime
 import json
 import math
+import random
 import contextlib
 import os
 import re
@@ -190,9 +191,9 @@ PROFILES = {
         "vatPoSuffix": False,
         "lenhSeq": "01",
         "veViec": "Xuất kho làm thủ tục hải quan cho",
-        "driver": "Sẩm Ngọc Huy",
+        "driver": "",  # trống = mỗi lô chọn ngẫu nhiên 1 cặp lái xe + biển số (VEHICLE_PAIRS)
         "carrier": "Hồng Thiên",
-        "xe": "60H238.07",
+        "xe": "",
         "emails": "",
         "file": "shirai",
         "symbol": "6C26NAA",
@@ -210,9 +211,9 @@ PROFILES = {
         "vatPoSuffix": False,
         "lenhSeq": "03",
         "veViec": "xuất kho bán hàng cho",
-        "driver": "Hồ Quang Hoàng",
+        "driver": "",  # trống = mỗi lô chọn ngẫu nhiên 1 cặp lái xe + biển số (VEHICLE_PAIRS)
         "carrier": "Hồng Thiên",
-        "xe": "99C-158.08",
+        "xe": "",
         "emails": "nguyenthang160117@gmail.com;kodivietnam.ltd@gmail.com",
         "file": "kodi",
         "symbol": "6C26NAA",
@@ -230,9 +231,9 @@ PROFILES = {
         "vatPoSuffix": True,
         "lenhSeq": "01",
         "veViec": "",
-        "driver": "Tô Anh Tiến",
+        "driver": "",  # trống = mỗi lô chọn ngẫu nhiên 1 cặp lái xe + biển số (VEHICLE_PAIRS)
         "carrier": "Hồng Thiên",
-        "xe": "99C-052.64",
+        "xe": "",
         "file": "tesa",
         "symbol": "6C26NAA",
         "emails": "Invoice0342@tesa.com;Hoa.pham@tesa.com;sale01@hongthien.company;Minh.Nguyen@tesa.com;thanh.vu@tesa.com;Ha.Nguyen.external@tesa.com;invoice0342@tesa.com",
@@ -256,6 +257,61 @@ PROFILES = {
         },
     },
 }
+
+# Cặp lái xe + biển số xe dùng chung cho mọi khách: mỗi lô chọn ngẫu nhiên 1 cặp (lái xe nào thì đúng biển số xe đó).
+# Sửa được ở mục Cài đặt, lưu trong master_catalog.json (khóa "vehicle_pairs"). Khách nào có ghi lái xe/biển số
+# cố định riêng (mục Khách hàng) thì luôn dùng cặp của khách đó, không chọn ngẫu nhiên.
+VEHICLE_DEFAULTS = [
+    {"driver": "Sẩm Ngọc Huy", "xe": "60H238.07"},
+    {"driver": "Hồ Quang Hoàng", "xe": "99C-158.08"},
+    {"driver": "Tô Anh Tiến", "xe": "99C-052.64"},
+]
+VEHICLE_PAIRS = copy.deepcopy(VEHICLE_DEFAULTS)
+# Lái xe/biển số mặc định cũ của 3 khách có sẵn: bản lưu cũ còn ghi đúng cặp này thì coi như chưa đặt cố định
+_OLD_BUILTIN_VEHICLE = {"shirai": ("Sẩm Ngọc Huy", "60H238.07"), "kodi": ("Hồ Quang Hoàng", "99C-158.08"), "tesa": ("Tô Anh Tiến", "99C-052.64")}
+
+
+def clean_plate(xe):
+    """Chỉ giữ biển số; chữ "Ô tô tải:" do chứng từ tự thêm."""
+    return re.sub(r"^\s*[ÔôOo]\s*tô\s*tải\s*:?\s*", "", str(xe or ""), flags=re.I).strip()
+
+
+def _vkey(s):
+    return re.sub(r"[\s.\-]", "", str(s or "")).upper()
+
+
+def vehicle_pair_of(driver="", xe=""):
+    """Tìm trong danh sách cặp xe: cặp có đúng tên lái xe (hoặc đúng biển số). Không có thì None."""
+    for p in VEHICLE_PAIRS:
+        if (driver and _vkey(p.get("driver")) == _vkey(driver)) or (xe and _vkey(p.get("xe")) == _vkey(xe)):
+            return dict(p)
+    return None
+
+
+def fixed_vehicle(customer):
+    """Cặp lái xe + biển số cố định riêng của khách (đặt ở mục Khách hàng); không đặt thì None."""
+    prof = PROFILES.get(customer) or {}
+    drv, xe = str(prof.get("driver") or "").strip(), clean_plate(prof.get("xe"))
+    if not drv and not xe:
+        return None
+    if drv and xe:
+        return {"driver": drv, "xe": xe}
+    return vehicle_pair_of(drv, xe) or {"driver": drv, "xe": xe}
+
+
+def pick_vehicle(customer=None, rng=random):
+    """Lái xe + biển số cho một lô: khách đặt cố định thì dùng cặp đó, không thì chọn ngẫu nhiên 1 cặp trong danh sách."""
+    fixed = fixed_vehicle(customer)
+    if fixed:
+        return fixed
+    pairs = [p for p in VEHICLE_PAIRS if p.get("driver") or p.get("xe")]
+    return dict(rng.choice(pairs)) if pairs else {"driver": "", "xe": ""}
+
+
+def apply_vehicle_pairs(pairs=None):
+    """Đặt danh sách cặp xe đang dùng (None = danh sách mặc định)."""
+    VEHICLE_PAIRS[:] = copy.deepcopy(VEHICLE_DEFAULTS if pairs is None else pairs)
+
 
 # Hồ sơ gốc của 3 khách có sẵn, để áp lại khi nạp dữ liệu (rồi mới áp phần người dùng đã sửa)
 _PROFILE_DEFAULTS = copy.deepcopy(PROFILES)
@@ -286,7 +342,8 @@ COMPANY_FIELDS = [
 CUSTOMER_FIELDS = [
     ("label", "Tên gọi ngắn"), ("name", "Tên công ty"), ("mst", "Mã số thuế"), ("addr", "Địa chỉ"),
     ("addrKho", "Địa chỉ kho nhận hàng"), ("emails", "Email nhận hóa đơn (ngăn cách bằng dấu ;)"),
-    ("driver", "Lái xe thường dùng"), ("xe", "Biển số xe thường dùng"),
+    ("driver", "Lái xe cố định riêng cho khách này (để trống = mỗi lô chọn ngẫu nhiên 1 cặp lái xe + biển số ở mục Cài đặt)"),
+    ("xe", "Biển số xe cố định riêng (đi cùng lái xe ở ô trên; để trống = chọn ngẫu nhiên)"),
     ("owner", "Nhân viên phụ trách khách này (để trống = ai cũng làm được)"),
     ("extraDocs", "Chứng từ làm thêm khi xuất trọn bộ (mã PLX, DNTT, BBGH, DCCN, PO, BDC, SC = Sale Contract; cách nhau dấu phẩy)"),
     ("deliveryTerm", "Điều kiện giao hàng ghi trên Sale Contract (vd DAP BAC NINH)"),
@@ -326,7 +383,10 @@ def apply_profile_overrides(overrides):
     for key, base in _PROFILE_DEFAULTS.items():
         PROFILES[key].clear()
         PROFILES[key].update(copy.deepcopy(base))
-        PROFILES[key].update({k: v for k, v in (overrides.get(key) or {}).items() if k in dict(CUSTOMER_FIELDS)})
+        ov = {k: v for k, v in (overrides.get(key) or {}).items() if k in dict(CUSTOMER_FIELDS)}
+        if (str(ov.get("driver") or "").strip(), clean_plate(ov.get("xe"))) == _OLD_BUILTIN_VEHICLE.get(key):
+            ov.pop("driver", None), ov.pop("xe", None)  # bản lưu cũ chỉ chép lại mặc định cũ: coi như chưa đặt cố định
+        PROFILES[key].update(ov)
     apply_company_exporter()
 
 
@@ -622,6 +682,7 @@ class DedicatedDataStore:
         self.read_fixes = []  # nhật ký các lần người dùng sửa số liệu máy đọc sai từ PO (khách, trường, đọc sai, đúng, dòng PO)
         self.custom_profiles = {}
         self.custom_items = {}
+        self.vehicles = None  # danh sách cặp lái xe + biển số người dùng đã sửa (Cài đặt); None = dùng mặc định
         self.company = {}  # thông tin công ty người dùng đã sửa (Cài đặt); trống = dùng mặc định
         self.profile_overrides = {}  # chỗ người dùng đã sửa trên 3 khách có sẵn (mục Khách hàng)
         self.records = []
@@ -717,6 +778,8 @@ class DedicatedDataStore:
                 self.custom_profiles = data.get("custom_profiles") or {}
                 self.custom_items = data.get("custom_items") or {}
                 self.company = data.get("company_info") or {}
+                vp = data.get("vehicle_pairs")
+                self.vehicles = vp if isinstance(vp, list) else None
                 self.profile_overrides = data.get("profile_overrides") or {}
                 self.suppliers = list(data.get("suppliers") or [])
                 self.supplier_pref = dict(data.get("supplier_pref") or {})
@@ -729,6 +792,7 @@ class DedicatedDataStore:
             self.save_catalog()
         self.register_custom_profiles()
         self._link_shared_catalogs()
+        apply_vehicle_pairs(self.vehicles)
         apply_company(self.company)  # luôn áp lại: mỗi kho dữ liệu có thông tin công ty riêng
         apply_profile_overrides(self.profile_overrides)
         self.rebuild_erp_map()
@@ -940,6 +1004,30 @@ class DedicatedDataStore:
         apply_profile_overrides(self.profile_overrides)
         self.save_catalog()
         return self.company_info()
+
+    def vehicle_list(self):
+        """Danh sách cặp lái xe + biển số đang dùng để chọn ngẫu nhiên cho mỗi lô."""
+        return [dict(p) for p in VEHICLE_PAIRS]
+
+    def set_vehicles(self, pairs):
+        """Lưu danh sách cặp lái xe + biển số (bỏ dòng trống, bỏ cặp trùng). Ném ValueError (tiếng Việt) nếu nhập thiếu."""
+        clean, seen = [], set()
+        for i, p in enumerate(pairs or [], 1):
+            drv, xe = str(p.get("driver") or "").strip(), clean_plate(p.get("xe"))
+            if not drv and not xe:
+                continue
+            if not drv or not xe:
+                raise ValueError(f"Dòng {i}: cần nhập đủ cả tên lái xe và biển số xe (hai thứ đi cùng nhau).")
+            k = (_vkey(drv), _vkey(xe))
+            if k not in seen:
+                seen.add(k)
+                clean.append({"driver": drv, "xe": xe})
+        if not clean:
+            raise ValueError("Cần ít nhất một cặp lái xe + biển số xe.")
+        self.vehicles = clean
+        apply_vehicle_pairs(clean)
+        self.save_catalog()
+        return self.vehicle_list()
 
     def import_learned(self, data, overwrite=False):
         """Nạp file dữ liệu học (định mức từng mặt hàng: SL/kiện, kg/cái, HS) vào bộ nhớ định mức.
@@ -1838,7 +1926,7 @@ class DedicatedDataStore:
         names = dict(CUSTOMER_FIELDS)
         clean = {k: str(v).strip() for k, v in fields.items() if k in names}
         if clean.get("xe"):  # chỉ lưu biển số; chữ "Ô tô tải:" do chứng từ tự thêm
-            clean["xe"] = re.sub(r"^\s*[ÔôOo]\s*tô\s*tải\s*:?\s*", "", clean["xe"], flags=re.I).strip()
+            clean["xe"] = clean_plate(clean["xe"])
         if "name" in clean and not clean["name"]:
             raise ValueError("Tên công ty của khách không được để trống.")
         if clean.get("mst") and not re.fullmatch(r"[0-9\-]{10,14}", clean["mst"]):
@@ -1969,6 +2057,7 @@ class DedicatedDataStore:
                     "address": ADDR_HT,
                     "tax_code": MST_HT,
                     "company_info": self.company,
+                    "vehicle_pairs": self.vehicles,
                     "profile_overrides": self.profile_overrides,
                     "weights_db": self.weights_db,
                     "erp_catalog": self.erp_catalog,
@@ -3827,8 +3916,8 @@ def build_pxk_bkav_sheet(wb, rec, sheet_name="PXK_BKAV"):
         c.fill = make_fill(color)
 
     ldd_code = f"LĐĐ{ddmmyyyy}-{rec.get('lddSeq') or prof['lenhSeq']}"
-    xe = rec.get("xeNo") or prof["xe"]
-    drv = rec.get("driver") or prof["driver"]
+    xe = rec.get("xeNo") or prof.get("xe", "")
+    drv = rec.get("driver") or prof.get("driver", "")
     acc_fmt = '_(* #,##0_);_(* \\(#,##0\\);_(* "-"??_);_(@_)'
 
     for idx, it in enumerate(merge_same_lines(rec.get("items", []), prof), 1):
@@ -8101,8 +8190,9 @@ def lot_defaults(customer):
         tare = "0.0" if customer == "tesa" else ("0.02" if customer == "shirai" else "1.0")
     else:
         tare = str(prof.get("tare", 0.0))
+    veh = pick_vehicle(customer)  # cả lô dùng chung 1 cặp: lái xe nào thì đúng biển số đó
     return {
-        "xe": prof["xe"], "driver": prof["driver"], "ldd": prof["lenhSeq"], "tare": tare,
+        "xe": veh["xe"], "driver": veh["driver"], "ldd": prof["lenhSeq"], "tare": tare,
         "pay_days": str(prof.get("payDays", 30)), "delivery": "", "luong": "Xanh",
     }
 

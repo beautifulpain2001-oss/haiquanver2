@@ -268,7 +268,7 @@ class LearnCustomerDialog(QDialog):
 
     FIELDS = [("key", "Mã khách (không dấu)"), ("label", "Tên ngắn hiển thị"), ("name", "Tên công ty khách"), ("mst", "Mã số thuế"),
               ("addr", "Địa chỉ"), ("addrKho", "Địa chỉ kho nhận"), ("emails", "Email nhận hóa đơn"), ("unit", "Đơn vị tính mặc định"),
-              ("driver", "Lái xe"), ("xe", "Biển xe"), ("symbol", "Ký hiệu PXK"), ("veViec", "Về việc (PXK)"), ("tare", "Bì / dòng hàng (kg)"),
+              ("driver", "Lái xe cố định (trống = ngẫu nhiên)"), ("xe", "Biển xe cố định (trống = ngẫu nhiên)"), ("symbol", "Ký hiệu PXK"), ("veViec", "Về việc (PXK)"), ("tare", "Bì / dòng hàng (kg)"),
               ("sample_po", "Số PO trong file mẫu"), ("po_pattern", "Mẫu nhận dạng số PO"), ("docSet", "Bộ mẫu (chuan / best)"),
               ("payDays", "Hạn thanh toán (ngày)"), ("nameCn", "Tên khách tiếng Trung"), ("deliveryPlace", "Điểm giao hàng"),
               ("buyerContact", "Người liên hệ bên mua"), ("sellerContact", "Người liên hệ bên bán")]
@@ -311,8 +311,8 @@ class LearnCustomerDialog(QDialog):
         lay.addWidget(self.target_msg)
         doc_set = "best" if "BEST PACIFIC" in core.strip_accents_upper(prof.get("name", "")) else "chuan"
         init = {"key": key, "label": key.capitalize(), "name": prof.get("name", ""), "mst": prof.get("mst", ""), "addr": prof.get("addr", ""),
-                "addrKho": prof.get("addrKho", ""), "emails": prof.get("emails", ""), "unit": prof.get("unit", "cái"), "driver": prof.get("driver", ""),
-                "xe": prof.get("xe", ""), "symbol": prof.get("symbol", "6C26NAA"), "veViec": "xuất kho bán hàng cho",
+                "addrKho": prof.get("addrKho", ""), "emails": prof.get("emails", ""), "unit": prof.get("unit", "cái"), "driver": "",
+                "xe": "", "symbol": prof.get("symbol", "6C26NAA"), "veViec": "xuất kho bán hàng cho",
                 "tare": str(self.draft.get("tare") or "0.0"), "sample_po": self.draft.get("sample_po", ""),
                 "po_pattern": core.infer_po_pattern(self.draft.get("sample_po", "")), "docSet": doc_set, "payDays": "60" if doc_set == "best" else "30",
                 "nameCn": "", "deliveryPlace": core.short_place(prof.get("addr", "")), "buyerContact": "", "sellerContact": ""}

@@ -60,11 +60,28 @@ class Lot:
             self.form["pxk"], self.pxk_auto = nxt, True
 
     def fill_vehicle_defaults(self):
-        """Biển số, lái xe còn trống thì lấy từ thông tin khách (người dùng vừa lưu ở mục Khách hàng)."""
-        prof = self.core.PROFILES.get(self.customer) or {}
-        for k, pk in (("xe", "xe"), ("driver", "driver")):
-            if not str(self.form.get(k, "")).strip() and prof.get(pk):
-                self.form[k] = prof[pk]
+        """Biển số, lái xe còn trống: lấy cặp cố định của khách (nếu có), không thì 1 cặp ngẫu nhiên trong danh sách.
+        Chỉ trống một ô thì lấy ô kia theo đúng cặp (lái xe nào thì biển số đó)."""
+        if not self.customer:
+            return
+        drv, xe = str(self.form.get("driver", "")).strip(), str(self.form.get("xe", "")).strip()
+        if drv and xe:
+            return
+        pair = (self.core.vehicle_pair_of(drv, xe) if (drv or xe) else None) or self.core.pick_vehicle(self.customer)
+        if not drv:
+            self.form["driver"] = pair.get("driver", "")
+        if not xe:
+            self.form["xe"] = pair.get("xe", "")
+
+    def match_vehicle(self, key):
+        """Người dùng vừa sửa tay lái xe (hoặc biển số): nếu có trong danh sách cặp xe thì ô kia đổi theo đúng cặp. Trả True nếu có đổi."""
+        other = "xe" if key == "driver" else "driver"
+        val = str(self.form.get(key, "")).strip()
+        pair = self.core.vehicle_pair_of(val, "") if key == "driver" else self.core.vehicle_pair_of("", val)
+        if not pair or self.core._vkey(pair[other]) == self.core._vkey(self.form.get(other, "")):
+            return False
+        self.form[other] = pair[other]
+        return True
 
     def select_customer(self, customer):
         if customer != self.customer:

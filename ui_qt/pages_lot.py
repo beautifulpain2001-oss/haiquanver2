@@ -120,7 +120,9 @@ class CustomerStep(QWidget):
             p = profiles[c]
             rows = [("Tên công ty", p.get("name")), ("Mã số thuế", p.get("mst")), ("Địa chỉ", p.get("addr")),
                     ("Kho nhận hàng", p.get("addrKho")), ("Lái xe", p.get("driver")), ("Biển số xe", p.get("xe"))]
-            self.info_text.setText("".join(f'<p style="margin:2px 0"><b>{html.escape(k)}:</b> {html.escape(str(v or "(chưa nhập)"))}</p>' for k, v in rows))
+            rnd = "ngẫu nhiên 1 cặp mỗi lô (danh sách ở Cài đặt)"
+            self.info_text.setText("".join(f'<p style="margin:2px 0"><b>{html.escape(k)}:</b> '
+                                           f'{html.escape(str(v or (rnd if k in ("Lái xe", "Biển số xe") else "(chưa nhập)")))}</p>' for k, v in rows))
 
     def pick(self, key):
         if key != self.lot.customer and self.lot.items and not widgets.ask(
@@ -1008,10 +1010,17 @@ class InfoStep(QWidget):
             self.groups[gkey] = box
             lay.addWidget(box)
         self.edits["tare"].editingFinished.connect(self.lot.recalc)
+        for k in ("driver", "xe"):  # lái xe và biển số đi thành cặp: sửa một ô thì ô kia đổi theo (nếu có trong danh sách)
+            self.edits[k].editingFinished.connect(lambda k=k: self.on_vehicle_edit(k))
         self.skip_h = QCheckBox("Invoice Kodi: không lấy cột Thành Tiền")
         self.skip_h.toggled.connect(lambda v: setattr(self.lot, "skip_h", v))
         lay.addWidget(self.skip_h)
         lay.addStretch(1)
+
+    def on_vehicle_edit(self, key):
+        if self.lot.match_vehicle(key):
+            other = "xe" if key == "driver" else "driver"
+            self.edits[other].setText(str(self.lot.form.get(other, "")))
 
     def on_edit(self, key, text):
         if key == "pxk":
