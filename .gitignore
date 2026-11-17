@@ -8,3 +8,6 @@ dist/
 # Dữ liệu chạy thật của app (tự sinh khi mở app / chạy --self-test), không đưa lên git
 DATA_LUU_TRU_HONG_THIEN/
 config_desktop.json
+
+# Nhật ký lỗi app tự ghi cạnh phần mềm
+LOI_PHAN_MEM.txt

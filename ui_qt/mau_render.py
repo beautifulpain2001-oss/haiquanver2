@@ -397,6 +397,35 @@ def render_docx(data, width=900):
     return img.scaledToWidth(width, Qt.SmoothTransformation) if page_w > width else img
 
 
+def render_pdf_pages(data, width=900, max_pages=10):
+    """Các trang của file PDF (VD PDF PXK / hóa đơn Bkav) thành hình, mỗi trang một QImage rộng `width`. Lỗi thì trả []."""
+    from PySide6.QtCore import QBuffer, QByteArray, QSize
+    try:
+        from PySide6.QtPdf import QPdfDocument
+    except ImportError:  # bản Qt không có QtPdf
+        return []
+    buf = QBuffer()
+    buf.setData(QByteArray(data))
+    buf.open(QBuffer.ReadOnly)
+    doc = QPdfDocument()
+    doc.load(buf)
+    out = []
+    for i in range(min(doc.pageCount(), max_pages)):
+        pt = doc.pagePointSize(i)
+        if pt.width() <= 0:
+            continue
+        img = doc.render(i, QSize(width, int(width * pt.height() / pt.width())))
+        if not img.isNull():
+            bg = QImage(img.size(), QImage.Format_ARGB32)  # trang PDF nền trong suốt: lót nền trắng
+            bg.fill(QColor("#FFFFFF"))
+            p = QPainter(bg)
+            p.drawImage(0, 0, img)
+            p.end()
+            out.append(bg)
+    doc.close()
+    return out
+
+
 def render_template(ext, data, width=900):
     """Hình ảnh của mẫu (QImage). Ném ValueError nếu không phải .docx/.xlsx."""
     ext = ext.lower().lstrip(".")
@@ -404,4 +433,17 @@ def render_template(ext, data, width=900):
         return render_docx(data, width)
     if ext in ("xlsx", "xlsm"):
         return render_xlsx(data, width)
+    if ext == "pdf":  # các trang xếp chồng thành một hình (khung xem dùng render_pdf_pages để giữ đúng từng trang)
+        pages = render_pdf_pages(data, width)
+        if not pages:
+            raise ValueError("Không đọc được file PDF.")
+        img = QImage(width, sum(x.height() for x in pages), QImage.Format_ARGB32)
+        img.fill(QColor("#FFFFFF"))
+        p = QPainter(img)
+        y = 0
+        for x in pages:
+            p.drawImage(0, y, x)
+            y += x.height()
+        p.end()
+        return img
     raise ValueError("Chỉ vẽ được file Word (.docx) hoặc Excel (.xlsx).")
