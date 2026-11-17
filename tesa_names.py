@@ -45,7 +45,7 @@ TESA_NAMES = {
 
 # Định mức Tesa theo "bảng tổng hợp tesa" (sheet Sheet1, Huy gửi 17/11/2026): mã Tesa -> (kg/ống, số ống/kiện).
 # Một kiện của Tesa là một palet, nên số ống/kiện = cột "Số lượng ống /1 palet".
-# Chưa đưa các mã lõi 153mm (39805-...) vào vì hai sheet của bảng ghi số khác nhau, chờ Huy xác nhận.
+# Lõi 153mm (39805-...): hai sheet của bảng ghi khác nhau; Huy chọn lấy theo Sheet1 (17/11/2026).
 # Đổi số trong bảng này thì tăng TESA_DINH_MUC_V để máy đã cài áp lại một lần (sau đó số người dùng tự sửa trong app vẫn thắng).
 TESA_DINH_MUC_V = 1
 TESA_DINH_MUC = {
@@ -75,4 +75,7 @@ TESA_DINH_MUC = {
     '39820-90019-00': (0.005, 34000),
     '39820-90025-00': (0.006, 25600),
     '39820-91750-00': (0.427, 600),
+    '39805-90000-00': (0.85, 270),
+    '39805-91640-00': (1.069, 270),
+    '39805-91400-00': (9.304, 270),
 }

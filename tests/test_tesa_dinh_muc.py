@@ -40,4 +40,4 @@ def test_old_catalog_on_disk_is_corrected_once_then_user_edit_wins(tmp_path):
 
 
 def test_summary_table_codes_have_standard_names():
-    assert set(tesa_names.TESA_DINH_MUC) <= set(tesa_names.TESA_NAMES) | {"39809-90000-00", "39811-90000-00", "39770-91750-00", "39780-91750-00"}
+    assert set(tesa_names.TESA_DINH_MUC) <= set(tesa_names.TESA_NAMES) | {"39809-90000-00", "39811-90000-00", "39770-91750-00", "39780-91750-00", "39805-90000-00", "39805-91640-00"}
