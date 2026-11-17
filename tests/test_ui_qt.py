@@ -739,6 +739,20 @@ def test_contract_customer_enters_sale_contract_instead_of_po(win, store):
     assert exp.btns["SC"].isVisibleTo(exp)
 
 
+def test_able_has_dccn_export_button(win, store):
+    """Able: mục 'Hoặc chỉ xuất một file' có nút Đối chiếu công nợ; khách không có DCCN thì không hiện."""
+    able = store.save_learned_customer("ablebtn", {"name": "CÔNG TY TNHH BAO BÌ ĐÓNG GÓI ABLE", "mst": "0202226426", "unit": "chiếc", "extraDocs": "DNTT,BBGH"},
+                                       [{"code": "38*5*315*150g", "name": "Ống giấy phi 38 x 5 x 315mm x150g in", "price": 2807, "div": 84, "kg": 0.15}])
+    other = store.save_learned_customer("khongdccn", {"name": "CTY KHÔNG ĐỐI CHIẾU", "mst": "0100000098", "unit": "chiếc", "extraDocs": "DNTT"},
+                                        [{"code": "X1", "name": "Ống X", "price": 1, "div": 1, "kg": 0.1}])
+    page = win.lot
+    page.step1.build_cards()
+    for key, want in ((able, True), (other, False)):
+        page.step1.pick(key)
+        page.step5.refresh()
+        assert page.step5.btns["DCCN"].isHidden() is not want
+
+
 def test_catalog_follows_deleted_folder_without_switching_pages(win, store):
     """Xóa thư mục hồ sơ trên ổ đĩa thì dòng đó trong Danh mục tự biến mất (không cần đổi trang hay mở lại app)."""
     import shutil
