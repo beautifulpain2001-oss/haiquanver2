@@ -5565,6 +5565,14 @@ def rec_po_list(rec):
     return [(p, dates.get(p) or (rec.get("poDate", "") if p == rec.get("poNumber") or len(pos) == 1 else "")) for p in pos]
 
 
+def po_header(rec):
+    """Một dòng 'Số ĐĐH' ở đầu Invoice / Chi tiết đóng gói kiểu Best (Huy duyệt 18/11): lô nhiều PO thì nối 'PO1 + PO2',
+    ngày PO nối theo đúng thứ tự đó. Trả (chữ số PO, chữ ngày PO)."""
+    pos = rec_po_list(rec) or [("", "")]
+    dates = [d for _, d in pos]
+    return " + ".join(p for p, _ in pos), (" + ".join(dates) if any(dates) else "")
+
+
 def lot_totals(rec):
     items = rec.get("items", [])
     qty = sum(float(x.get("qty") or 0) for x in items)
@@ -5734,7 +5742,6 @@ def build_pkl_best_sheet(wb, rec, sheet_name="Invoice"):
     prof = PROFILES[rec["customer"]]
     put = _sheet_put(ws)
     dt = _dmy(_iso_to_date(rec.get("docDate")))
-    pos = rec_po_list(rec) or [("", "")]
     for i, w in enumerate([5.5, 9, 9, 9, 9, 9, 9, 8, 11, 13, 13, 12, 16], 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -5744,10 +5751,10 @@ def build_pkl_best_sheet(wb, rec, sheet_name="Invoice"):
     put("L2", "L2:M2", f"Ngày :{dt}", 12)
     r = 3
     put(f"A{r}", f"A{r}:H{r}", HT_NAME, 12, True)
-    for po, po_d in pos:
-        put(f"I{r}", f"I{r}:K{r}", f"Số ĐĐH: {po}", 12, True)
-        put(f"L{r}", f"L{r}:M{r}", f"Ngày:{po_d}", 12)
-        r += 1
+    po_txt, po_d = po_header(rec)
+    put(f"I{r}", f"I{r}:K{r}", f"Số ĐĐH: {po_txt}", 12, True, wrap=True)
+    put(f"L{r}", f"L{r}:M{r}", f"Ngày:{po_d}", 12, wrap=True)
+    r += 1
     put(f"A{r}", f"A{r}:H{r + 1}", ADDR_HT.rstrip("."), 12, wrap=True, valign="top")
     put(f"I{r}", f"I{r}:M{r}", "Phương thức thanh toán: ", 12)
     put(f"I{r + 1}", f"I{r + 1}:M{r + 1}", "Chuyển khoản", 12)
@@ -5819,7 +5826,6 @@ def build_packing_best_sheet(wb, rec, sheet_name="DongGoi"):
     prof = PROFILES[rec["customer"]]
     put = _sheet_put(ws)
     dt = _dmy(_iso_to_date(rec.get("docDate")))
-    pos = rec_po_list(rec) or [("", "")]
     city = short_place(prof.get("addr", "")).split(" - ")[-1]
     incoterm = (prof.get("customs") or {}).get("incoterm", "DAP")
     for i, w in enumerate([10, 40, 24, 16, 16, 18], 1):
@@ -5831,10 +5837,10 @@ def build_packing_best_sheet(wb, rec, sheet_name="DongGoi"):
     put("F2", None, f"Ngày: {dt}", 12)
     r = 3
     put(f"A{r}", f"A{r}:C{r}", HT_NAME, 12, True)
-    for po, po_d in pos:
-        put(f"D{r}", f"D{r}:E{r}", f"Số ĐĐH: {po}", 12)
-        put(f"F{r}", None, f"Ngày: {po_d}", 12)
-        r += 1
+    po_txt, po_d = po_header(rec)
+    put(f"D{r}", f"D{r}:E{r}", f"Số ĐĐH: {po_txt}", 12, wrap=True)
+    put(f"F{r}", None, f"Ngày: {po_d}", 12, wrap=True)
+    r += 1
     put(f"A{r}", f"A{r}:C{r}", ADDR_HT.rstrip("."), 12, wrap=True, valign="top")
     put(f"D{r}", f"D{r}:F{r}", "Phương thức thanh toán", 12)
     put(f"A{r + 1}", f"A{r + 1}:C{r + 1}", f"Tel : {HT_TEL}", 12)
