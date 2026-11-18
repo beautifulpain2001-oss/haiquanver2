@@ -111,3 +111,18 @@ def test_best_pack_template_writes_one_po_row_without_old_po():
         assert ws["D3"].value == po_txt and ws["F3"].value.strip() == dates
         assert sum(v.startswith("Số ĐĐH") for v in vals) == 1 and not any("POSCU" in v for v in vals)
         assert ws["A5"].value == app.ADDR_HT.rstrip(".")  # hàng PO thứ 2 (trống bên trái) đã bỏ: địa chỉ lên ngay dưới
+
+
+def test_best_dccn_template_invoice_number_follows_first_row():
+    """ĐCCN theo file mẫu khách: ô số hóa đơn dòng đầu ghi số (chữ), các dòng dưới là công thức theo ô đầu."""
+    tws = openpyxl.Workbook().active
+    for r in range(1, 32):
+        tws[f"A{r}"] = None
+    tws["A1"] = "对 账 单"
+    tws["A31"] = "hết"
+    prof = {"name": "KHÁCH THỬ"}
+    items = [{"ten_sp": f"Ống {i}", "qty": 10, "price": 1000, "po": "POS1"} for i in range(3)]
+    rec = {"items": items, "docDate": "2026-11-18", "hdNo": "00004938", "payDays": 60}
+    ws = mct.fill_dccn(app, openpyxl.Workbook(), rec, prof, tws, "DCCN")
+    assert (ws["B9"].value, ws["B9"].number_format) == ("00004938", "@")
+    assert [ws[f"B{r}"].value for r in (10, 11)] == ['=IF($B$9="","",$B$9)'] * 2
