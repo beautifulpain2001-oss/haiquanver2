@@ -3833,7 +3833,7 @@ def build_vat_bkav_sheet(wb, rec, sheet_name="VAT_BKAV"):
         ten_hang = with_code(prof, it, f"{it['ten_sp']}, PO:{it.get('po', '')}" if prof.get("vatPoSuffix") and it.get("po") else it["ten_sp"])
         po_cell = it.get("po", "") if prof.get("linePo") else (f"Po No {rec.get('poNumber', '')}" if prof.get("poInDocs") else "")
         if prof.get("vatPoField") == "pr" and str(it.get("pr") or "").strip():
-            po_cell = str(it["pr"]).strip()  # Inoac: hóa đơn VAT ghi Số PR của PO (VD 260916-SF-02), không ghi số PO
+            po_cell = str(it["pr"]).strip()  # Inoac: hóa đơn VAT ghi Số PR của PO (VD 260916-XX-01), không ghi số PO
         vals = {
             1: 1 if per_item else idx,
             2: bkav_item_id(vat_id, it) if per_item else vat_id,

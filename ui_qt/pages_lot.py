@@ -311,7 +311,7 @@ class PoStep(QWidget):
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignLeft)
         self.p_po, self.p_po_date, self.p_pr = QLineEdit(), QLineEdit(), QLineEdit()
-        self.p_pr.setPlaceholderText("VD 260916-SF-02 (ghi ở cột UDD_PO của hóa đơn VAT)")
+        self.p_pr.setPlaceholderText("VD 260916-XX-01 (ghi ở cột UDD_PO của hóa đơn VAT)")
         form.addRow("Số PO", self.p_po)
         form.addRow("Ngày PO (dd/mm/yyyy)", self.p_po_date)
         form.addRow("Số PR", self.p_pr)
