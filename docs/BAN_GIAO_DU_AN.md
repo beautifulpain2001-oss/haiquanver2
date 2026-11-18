@@ -300,6 +300,15 @@ File `master_catalog.json` trong thư mục chung của project là bản danh m
 - Bộ chứng từ: Invoice, Hóa đơn VAT, Phiếu xuất kho (Bkav, không ghi PO), Đơn đặt hàng, Biên bản giao nhận, Bảng đối chiếu hàng hóa theo tháng (mã `BDC`, gộp mọi hồ sơ cùng tháng), Phụ lục X dạng văn bản. Không có ĐNTT.
 - Dữ liệu khách (tên, MST, mã hàng, giá) nằm trong file dữ liệu học `khach_sunlu_hoc.json` ở thư mục file chung, không nằm trong repo. Test dùng dữ liệu giả (`tests/test_fixed_order.py`).
 
+### 6.5 Khách ít mã hàng, PO scan không ghi mã (kiểu Inoac)
+- Cờ hồ sơ `pickItems: true` (`is_pick_items`): PO đọc bằng `parse_few_items_po`: dòng có chữ Pcs/VND, nhận mặt hàng theo **đơn giá đã học** (cho lệch 1 chữ số do OCR) và **chiều dài** trong quy cách (số cuối của mã `76.5x5x595`), lấy SL sao cho SL x giá = thành tiền (số lớn nhất của dòng). Giá trên PO khác giá đã học thì chỉ nhận khi thấy đúng chiều dài và SL x giá = thành tiền (dòng vàng). Số PR (`\d{6}-[A-Z]{2}-\d{2}`) lưu vào trường dòng `pr`.
+- Dòng phải lấy giá đã học (OCR hỏng đơn giá) được chuyển thành `ok` khi tổng thành tiền khớp dòng Tổng cộng trên PO.
+- Bước ② luôn có ô **“Không đọc được PO? Chọn mã hàng”**: tích mã, nhập SL, giá (điền sẵn giá gần nhất), số PO, ngày PO, Số PR → `Lot.confirm_pick` / `lot_pick_items` (dòng `read = tay`). PO không đọc được thì số PO / ngày / PR đọc được vẫn điền sẵn.
+- `bkavPerItem: true`: Hóa đơn VAT và PXK Bkav mỗi mã hàng một chứng từ: IDChungTu = mã chung + chiều dài (`hd inoac 25,9 595`), STT = 1, PXK mỗi phiếu một số lệnh điều động kế tiếp (LĐĐ…-02, -03).
+- `vatPoField: "pr"`: cột UDD_PO của hóa đơn VAT ghi Số PR; PXK và Invoice vẫn ghi số PO. `veViec: ""` được giữ trống (PXK ghi “Về việc” chỉ tên khách).
+- `find_po_date` đọc thêm ngày dạng `16-Sep-2026`.
+- Dữ liệu khách thật nằm trong `inoac/khach_inoac_hoc.json` ở thư mục file chung (nạp bằng Cài đặt → Nạp dữ liệu học). Test dùng dữ liệu giả (`tests/test_khach_it_ma.py`).
+
 ## 7. Quy trình bộ hồ sơ khách Best (docSet `best`)
 
 Tài liệu nghiệp vụ đầy đủ (có số liệu thật, **không đưa vào repo**): `best/QUY_TRINH_BO_HO_SO_BEST.md` trong thư mục file chung của project. Tóm tắt quy tắc:
