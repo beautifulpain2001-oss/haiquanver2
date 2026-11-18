@@ -8048,7 +8048,11 @@ def lot_export_form_file(rec, path, out_base, work_dir):
     consts = {"name": HT_NAME, "addr": ADDR_HT, "mst": MST_HT, "date": _iso_to_date, "words": num_to_vn_words,
               "kien": lot_totals(rec)["kien"], "kien_gop": is_best_docset(prof)}
     ext = os.path.splitext(path)[1]
-    out, unknown = mau_rieng.fill(ext, data, mau_rieng.batch_values(rec, prof, consts), mau_rieng.item_values(rec))
+    batch, rows = mau_rieng.batch_values(rec, prof, consts), mau_rieng.item_values(rec, prof.get("qcItems"))
+    if os.path.basename(path) in (prof.get("riengMoiMa") or []) and ext.lower() in (".xlsx", ".xlsm"):
+        out, unknown = mau_rieng.fill_xlsx_per_item(data, batch, rows)  # mỗi mã hàng một phiếu (một sheet), VD phiếu kiểm tra chất lượng TSCO
+    else:
+        out, unknown = mau_rieng.fill(ext, data, batch, rows)
     if ext.lower() in (".xlsx", ".xlsm"):
         out = _xlsx_print_ready_bytes(out)
     out_name = out_base + ext
