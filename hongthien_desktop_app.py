@@ -3753,6 +3753,13 @@ def get_vat_and_pxk_ids(rec):
     return f"shirai ngày {short_d}", f"Shirai ngày {short_d}"
 
 
+def bkav_item_id(base, it):
+    """IDChungTu riêng cho từng mã hàng (khách cờ `bkavPerItem`, VD Inoac: mỗi mã một hóa đơn VAT, một phiếu xuất kho):
+    mã chung của lô + chiều dài trong quy cách, VD 'hd inoac 25,9' + ống 76.5x5x595 -> 'hd inoac 25,9 595'."""
+    tag = _item_length({"code": it.get("ma_sp"), "name": it.get("ten_sp")}) or str(it.get("ma_sp") or "").strip()
+    return f"{base} {tag}".strip()
+
+
 def merge_same_lines(items, prof):
     """Hóa đơn/PXK Bkav: các dòng giống hoàn toàn (cùng mã, tên, ĐVT, đơn giá, và cùng PO nếu PO được ghi trên dòng) gộp thành một dòng, chỉ lấy tổng SL và thành tiền."""
     out, seen = [], {}
@@ -3819,14 +3826,17 @@ def build_vat_bkav_sheet(wb, rec, sheet_name="VAT_BKAV"):
         color = "C0C0C0" if i == 1 else "FFCC99" if i == 2 else "FFFFCC" if i <= 12 else "CCCCFF" if i <= 22 else "CCFFCC"
         c.fill = make_fill(color)
 
+    per_item = bool(prof.get("bkavPerItem"))
     for idx, it in enumerate(merge_same_lines(rec.get("items", []), prof), 1):
         r = 5 + idx
         ws.row_dimensions[r].height = 70.5 if idx == 1 else 48
         ten_hang = with_code(prof, it, f"{it['ten_sp']}, PO:{it.get('po', '')}" if prof.get("vatPoSuffix") and it.get("po") else it["ten_sp"])
         po_cell = it.get("po", "") if prof.get("linePo") else (f"Po No {rec.get('poNumber', '')}" if prof.get("poInDocs") else "")
+        if prof.get("vatPoField") == "pr" and str(it.get("pr") or "").strip():
+            po_cell = str(it["pr"]).strip()  # Inoac: hóa đơn VAT ghi Số PR của PO (VD 260916-SF-02), không ghi số PO
         vals = {
-            1: idx,
-            2: vat_id,
+            1: 1 if per_item else idx,
+            2: bkav_item_id(vat_id, it) if per_item else vat_id,
             3: ten_hang,
             4: po_cell,
             5: it.get("unit") or prof["unit"],
@@ -3841,8 +3851,10 @@ def build_vat_bkav_sheet(wb, rec, sheet_name="VAT_BKAV"):
             20: prof["addr"],
             22: "CK",
             23: "Có",
-            24: prof.get("emails", "") if idx == 1 else "",
+            24: prof.get("emails", "") if (idx == 1 or per_item) else "",
         }
+        if per_item and prof.get("province"):
+            vals[31] = prof["province"]
         if is_arizon(prof) and not is_best_docset(prof):  # Arizon: tên = mã + xuống dòng + tên, không ghi PO, thông tin người mua chỉ ở dòng đầu
             vals[3] = f"{it.get('ma_sp', '')}\n{strip_leading_code(it['ten_sp'], it.get('ma_sp'))}".strip() if it.get("ma_sp") else it["ten_sp"]
             vals[4] = ""
@@ -3920,14 +3932,18 @@ def build_pxk_bkav_sheet(wb, rec, sheet_name="PXK_BKAV"):
     drv = rec.get("driver") or prof.get("driver", "")
     acc_fmt = '_(* #,##0_);_(* \\(#,##0\\);_(* "-"??_);_(@_)'
 
+    per_item = bool(prof.get("bkavPerItem"))
     for idx, it in enumerate(merge_same_lines(rec.get("items", []), prof), 1):
         r = 2 + idx
         ws.row_dimensions[r].height = 39.95
         po_cell = it.get("po", "") if prof.get("linePo") else (f"Po No {rec.get('poNumber', '')}" if prof.get("poInDocs") else "")
+        if per_item and idx > 1:  # mỗi mã hàng một phiếu xuất kho: mỗi phiếu một số lệnh điều động kế tiếp
+            seq0 = str(rec.get("lddSeq") or prof["lenhSeq"])
+            ldd_code = f"LĐĐ{ddmmyyyy}-{int(seq0) + idx - 1:0{len(seq0)}d}" if seq0.isdigit() else ldd_code
         vals = {
-            1: idx,
+            1: 1 if per_item else idx,
             2: "pxk",
-            3: pxk_id,
+            3: bkav_item_id(pxk_id, it) if per_item else pxk_id,
             4: po_cell,
             5: with_code(prof, it, it["ten_sp"]),
             6: it.get("unit") or prof["unit"],
@@ -6486,7 +6502,14 @@ def find_po_date(text):
     m = re.search(r"(?:PO\s*Date|Ng[àa]y\s*xu[ốo]ng\s*đ[ơo]n|Order\s*Date|签订日期|日期)[^\n\d]{0,40}" + iso, text or "", re.I) or re.search(
         r"(?<!\d)" + iso, text or ""
     )
-    return f"{int(m.group(3)):02d}/{int(m.group(2)):02d}/{m.group(1)}" if m else ""
+    if m:
+        return f"{int(m.group(3)):02d}/{int(m.group(2)):02d}/{m.group(1)}"
+    # PO tiếng Anh: '16-Sep-2026' / '16 Sep 2026' (Inoac)
+    m = re.search(r"(?<!\d)(\d{1,2})\s*[-/ ]\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s*[-/ ,]\s*(20\d{2})(?!\d)", text or "", re.I)
+    if m:
+        mon = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"].index(m.group(2).upper()) + 1
+        return f"{int(m.group(1)):02d}/{mon:02d}/{m.group(3)}"
+    return ""
 
 
 def merge_learned_docs(results):
@@ -6603,6 +6626,8 @@ def build_custom_profile(key, fields):
     if fields.get("docSet") == "best":
         prof.update(json.loads(json.dumps(BEST_DOCSET_DEFAULTS)))
     prof.update({k: v for k, v in fields.items() if v not in (None, "")})
+    if fields.get("veViec") == "":  # PXK ghi 'Về việc' chỉ tên khách (Inoac, như Tesa): để trống có chủ ý thì giữ trống
+        prof["veViec"] = ""
     prof["key"] = key
     prof["file"] = key
     prof.setdefault("name", key.upper())
@@ -7356,6 +7381,133 @@ def mark_read(items, catalog=None):
         else:
             it["read"], it["read_note"] = "ok", ""
     return items
+
+
+def is_pick_items(prof):
+    """Khách có ít mã hàng (VD Inoac: 2 mã ống giấy, PO scan không ghi mã hàng): PO đọc theo đơn giá + chiều dài đã học,
+    và luôn có ô chọn mã bằng tay ở bước ② khi PO không đọc được hoặc đọc chưa chắc (cờ hồ sơ `pickItems`)."""
+    return bool((prof or {}).get("pickItems"))
+
+
+def _few_num(tok):
+    """Số trên PO dạng '1,000.00' / '49,200,000' / '98,400.00' -> số (bỏ phần thập phân .00). None nếu không đọc được."""
+    t = str(tok or "").strip().rstrip(".,")
+    t = re.sub(r"[.,]\d{2}$", "", t) if re.search(r"\d[.,]\d{3}[.,]\d{2}$|^\d{1,3}[.,]\d{2}$", t) else t
+    d = re.sub(r"[.,]", "", t)
+    return int(d) if d.isdigit() and len(d) <= 12 else None
+
+
+_FEW_SKIP = re.compile(r"TOTAL|TONG|TỔNG|TẲNG|VAT|THUE|THUÉ", re.I)
+_FEW_PR = re.compile(r"(?<![A-Za-z0-9])(\d{6}-[A-Z]{2}-\d{2})(?![A-Za-z0-9])")
+
+
+def _item_length(it):
+    """Chiều dài (số cuối của quy cách) của một mặt hàng: mã '76.5x10x1700' / tên '... x 1700 mm' -> '1700'."""
+    for src in (it.get("code"), it.get("name"), it.get("ten_hq")):
+        nums = re.findall(r"\d+(?:[.,]\d+)?", str(src or ""))
+        if len(nums) >= 3:
+            return nums[-1]
+    return ""
+
+
+def parse_few_items_po(text, catalog_items, po_no=""):
+    """PO scan của khách ít mã hàng (cờ `pickItems`, VD Inoac): PO không ghi mã hàng, OCR hay đọc hỏng quy cách/đơn giá.
+    Mỗi dòng có chữ Pcs/VND hoặc đủ bộ số SL - đơn giá - thành tiền: nhận mặt hàng theo đơn giá đã học (cho lệch 1 chữ số)
+    và chiều dài trong quy cách (dòng đó hoặc 2 dòng trên), lấy SL x đơn giá = thành tiền.
+    Trả [{code, name, qty, price, po, pr, read, read_note}] (read ok khi SL x đơn giá đã học = thành tiền in trên PO)."""
+    cat = [it for it in (catalog_items or []) if float(it.get("price") or 0) > 0]
+    if not cat:
+        return []
+    lens = {id(it): _item_length(it) for it in cat}
+    rows = [ln for ln in str(text or "").splitlines()]
+    out = []
+    for i, ln in enumerate(rows):
+        if _FEW_SKIP.search(ln):
+            continue
+        tail = _FEW_PR.sub(" ", ln)
+        nums = [v for v in (_few_num(t) for t in re.findall(r"\d[\d,.]*", tail)) if v]
+        if len(nums) < 2 or not re.search(r"\b(?:PCS|VND|CHIEC|CHIẾC)\b", ln, re.I):
+            continue
+        ctx = " ".join(rows[max(0, i - 2):i + 1])
+        amt = max(nums)  # thành tiền là số lớn nhất của dòng
+        best = None
+        for it in cat:
+            p = int(round(float(it["price"])))
+            has_len = bool(lens[id(it)]) and bool(re.search(r"(?<![\d.])" + re.escape(lens[id(it)]) + r"(?![\d.])", ctx))
+            score, qty, note, price = 0, 0, "", p
+            for q in nums:
+                if 0 < q < 5_000_000 and q != amt and q * p == amt:
+                    score, qty = 3, q  # SL x đơn giá đã học = thành tiền in trên PO
+                    break
+            if not score:
+                for q in nums:  # đơn giá / thành tiền đọc hỏng 1 chữ số: SL x giá đã học gần đúng thành tiền đọc được
+                    if 0 < q < 5_000_000 and q != amt and po_scan_close(amt, q * p):
+                        score, qty = 2, q
+                        note = f"Đơn giá/thành tiền trên PO đọc chưa rõ: lấy giá đã học {p:,} — hãy so với PO"
+                        break
+            if not score and has_len:  # đơn giá mới (khác giá đã học) nhưng SL x đơn giá = thành tiền và đúng chiều dài
+                pair = next(((q, x) for q in nums for x in nums if q != x and 0 < q < 5_000_000 and x > 0 and q * x == amt), None)
+                if pair:
+                    score, (qty, price) = 1.5, pair
+                    note = f"Đơn giá trên PO ({price:,}) khác giá đã học ({p:,}): kiểm tra lại"
+            if not score and p in nums:
+                cand = [q for q in nums if q != p and 0 < q < 5_000_000 and q * p not in nums]
+                if cand:
+                    score, qty, note = 1, cand[0], "Không đối chiếu được thành tiền: kiểm tra số lượng"
+            if score and has_len:
+                score += 0.5
+            if score and (best is None or score > best[0]):
+                best = (score, it, qty, note, price)
+        if not best:
+            continue
+        score, it, qty, note, price = best
+        if score < 3 and not re.search(r"(?<![\d.])" + re.escape(lens[id(it)] or "#") + r"(?![\d.])", ctx):
+            note = (note + "; " if note else "") + "không thấy chiều dài trong quy cách"
+        prm = _FEW_PR.search(ln)
+        out.append({"code": str(it.get("code") or ""), "name": it.get("name", ""), "qty": qty, "price": price, "po": po_no,
+                    "pr": prm.group(1) if prm else "", "read": "ok" if score >= 3 else "suy_ra", "read_note": note})
+    return out
+
+
+def po_scan_close(a, b):
+    """Hai số cùng số chữ số, lệch tối đa 1 chữ số (OCR nhầm 1/4, 0/8…)."""
+    a, b = str(int(a)), str(int(b))
+    return len(a) == len(b) and sum(x != y for x, y in zip(a, b)) <= 1
+
+
+def lot_pick_items(store, customer, picks, po, tare_text="1.0", pr=""):
+    """Dòng hàng từ ô CHỌN MÃ (PO không đọc được): picks = [(mã hàng, SL, đơn giá)] chỉ gồm mã đã tích. Ném ValueError (tiếng Việt) nếu thiếu."""
+    cat = {str(x.get("code") or x.get("name")): x for x in store.items_for_customer(customer) or []}
+    if not str(po or "").strip():
+        raise ValueError("Chưa có số PO.")
+    lines = []
+    for code, qty, price in picks:
+        item = cat.get(str(code))
+        if not item:
+            raise ValueError(f"Không có mã {code} trong danh mục khách.")
+        try:
+            q = float(str(qty).replace(",", "").replace(" ", "") or 0)
+            p = float(str(price).replace(",", "").replace(" ", "") or 0)
+        except ValueError:
+            raise ValueError("Số lượng và đơn giá phải là số.")
+        if q <= 0:
+            raise ValueError(f"Hãy nhập số lượng cho mã {code}.")
+        if p <= 0:
+            raise ValueError(f"Hãy nhập đơn giá cho mã {code}.")
+        mem = store.get_item_norm(item.get("name")) or {}
+        hit = {"ma_sp": str(item.get("code") or ""), "ten_sp": item.get("name", ""), "price": int(p) if p == int(p) else p,
+               "unit": item.get("unit") or (PROFILES.get(customer) or {}).get("unit", ""),
+               "div": mem.get("div") or item.get("div", 0), "kg": mem.get("kg") or item.get("kg", 0), "hs": mem.get("hs") or item.get("hs") or "48229090"}
+        line = lot_item_from_catalog(store, customer, hit, int(q) if q == int(q) else q, str(po).strip(), tare_text)
+        if item.get("ten_hq"):
+            line["ten_hq"] = item["ten_hq"]
+        if str(pr or "").strip():
+            line["pr"] = str(pr).strip()
+        line["read"], line["read_note"] = "tay", "Chọn mã bằng tay"
+        lines.append(line)
+    if not lines:
+        raise ValueError("Hãy tích ít nhất một mã hàng.")
+    return lines
 
 
 def lines_from_able_scan(rows, prof, catalog, store, tare_val=0.0):
@@ -8449,6 +8601,24 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
         if able_rows and lines and not (scan_rep and scan_rep["rows"]):
             for ln in lines:
                 ln.setdefault("read", "ok")  # PO có lớp chữ: SL x giá đã đối chiếu thành tiền khi đọc
+        if is_pick_items(prof) and raw_text and not table_rows and not (scan_rep and scan_rep["rows"]):
+            # khách ít mã, PO không ghi mã hàng (Inoac): nhận dòng theo đơn giá + chiều dài đã học; không ra dòng nào thì người dùng chọn mã ở bước ②
+            few = parse_few_items_po(raw_text, store.items_for_customer(customer), po_no)
+            if few:
+                lines = lines_from_able_scan(few, prof, store.items_for_customer(customer), store, tare_v)
+                cat_by_code = {str(x.get("code") or ""): x for x in store.items_for_customer(customer)}
+                for ln, r in zip(lines, few):
+                    ln["po"], ln["pr"] = po_no, r.get("pr", "")
+                    if not ln.get("ten_hq") and cat_by_code.get(r["code"], {}).get("ten_hq"):
+                        ln["ten_hq"] = cat_by_code[r["code"]]["ten_hq"]
+                chk = po_total_check(raw_text, lines)
+                if chk.startswith("✅"):  # tổng PO khớp SL x giá đã học: dòng đọc hỏng đơn giá/thành tiền cũng đã được xác nhận
+                    for ln in lines:
+                        if ln.get("read") == "suy_ra" and str(ln.get("read_note") or "").startswith("Đơn giá/thành tiền"):
+                            ln["read"], ln["read_note"] = "ok", "Lấy giá đã học; tổng tiền khớp dòng Tổng cộng trên PO"
+                res["read_report"] = read_report(lines, chk)
+            else:
+                lines = []
         if not lines and scan_ok and not (scan_rep and scan_rep["rows"]):  # đọc cả trang không ra dòng nào: thử đọc theo ô bảng ERP chữ Hán
             scan_rep = po_scan.read_cn_erp_pdf(sys.modules[__name__], path, store.items_for_customer(customer), prof.get("po_pattern", ""), progress=progress)
             if scan_rep["rows"]:
@@ -8468,6 +8638,10 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
             store.dt_fill_lines(customer, lines)  # thiếu kg/chiếc hoặc SL/kiện: lấy từ data tổng dùng chung
         if not lines:
             res["msg"] = "Không tìm thấy dòng hàng nào khớp mã/tên hàng đã học. Hãy thêm dòng trực tiếp, hoặc nạp thêm chứng từ mẫu cho khách này."
+            if is_pick_items(prof):  # khách ít mã: số PO / ngày / PR đọc được vẫn trả về để điền sẵn ô chọn mã
+                prm = _FEW_PR.search(raw_text or "")
+                res.update(po=po_no or "", po_date=po_date or "", pr=prm.group(1) if prm else "",
+                           msg="Không đọc được dòng hàng trong PO.")
             return res
         if append and existing_items:
             if po_no and po_no in {str(x.get("po") or "") for x in existing_items}:

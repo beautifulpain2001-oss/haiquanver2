@@ -254,6 +254,9 @@ class PoStep(QWidget):
         dl.addLayout(self.dates_row)
         self.date_checks = {}
         lay.addWidget(self.dates_box)
+        self.pick_box = self._build_pick_box()  # khách ít mã (Inoac): PO không đọc được thì chọn mã
+        lay.addWidget(self.pick_box)
+        self._pick_for = None
         self.ncu_box = self._build_ncu_box()  # Shirai: chọn nhà cung ứng theo nhóm hàng sau khi chọn ngày
         lay.addWidget(self.ncu_box)
         self.no_file_hint = _label("Không có file PO? Bấm “Tiếp tục” rồi thêm dòng hàng bằng tay ở bước ③.", "hint", wrap=True)
@@ -293,6 +296,71 @@ class PoStep(QWidget):
         self.f_ok.clicked.connect(self.confirm_fixed)
         form.addRow("", self.f_ok)
         return box
+
+    # ---- khách ít mã hàng (Inoac): PO không đọc được / đọc chưa chắc thì tích chọn mã + nhập SL, giá ----
+    def _build_pick_box(self):
+        box = QGroupBox("Không đọc được PO? Chọn mã hàng (khách chỉ có vài mã)")
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(14, 18, 14, 12)
+        lay.addWidget(_label("Tích mã có trong PO, nhập số lượng (đơn giá điền sẵn theo lần gần nhất), rồi bấm “Dùng các mã đã chọn”. "
+                             "Đọc được PO rồi mà có dòng sai thì cũng làm lại ở đây được.", "hint", wrap=True))
+        self.pick_grid = QGridLayout()
+        self.pick_grid.setHorizontalSpacing(10)
+        lay.addLayout(self.pick_grid)
+        self.pick_rows = []
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignLeft)
+        self.p_po, self.p_po_date, self.p_pr = QLineEdit(), QLineEdit(), QLineEdit()
+        self.p_pr.setPlaceholderText("VD 260916-SF-02 (ghi ở cột UDD_PO của hóa đơn VAT)")
+        form.addRow("Số PO", self.p_po)
+        form.addRow("Ngày PO (dd/mm/yyyy)", self.p_po_date)
+        form.addRow("Số PR", self.p_pr)
+        lay.addLayout(form)
+        self.p_ok = QPushButton("✅  Dùng các mã đã chọn")
+        self.p_ok.clicked.connect(self.confirm_pick)
+        row = QHBoxLayout()
+        row.addWidget(self.p_ok)
+        row.addStretch(1)
+        lay.addLayout(row)
+        return box
+
+    def fill_pick(self):
+        """Dựng lại danh sách mã của khách; SL/giá lấy theo dòng đang có trong lô (nếu có), số PO/ngày/PR theo lô."""
+        while self.pick_grid.count():
+            w = self.pick_grid.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        self.pick_rows = []
+        have = {str(it.get("ma_sp") or ""): it for it in self.lot.items}
+        for h, txt in enumerate(("Mã hàng", "Số lượng", "Đơn giá (VNĐ)")):
+            self.pick_grid.addWidget(_label(f"<b>{txt}</b>"), 0, h)
+        for i, c in enumerate(self.lot.pick_choices(), 1):
+            cur = have.get(c["code"])
+            chk = QCheckBox(c["name"])
+            chk.setChecked(bool(cur))
+            qty, price = QLineEdit(f"{cur['qty']:g}" if cur and cur.get("qty") else ""), QLineEdit(f"{(cur or c)['price']:g}" if (cur or c).get("price") else "")
+            qty.setPlaceholderText("Số lượng")
+            price.setToolTip("Đơn giá theo " + c["price_from"])
+            qty.textEdited.connect(lambda t, chk=chk: chk.setChecked(bool(t.strip())) if t.strip() else None)
+            self.pick_grid.addWidget(chk, i, 0)
+            self.pick_grid.addWidget(qty, i, 1)
+            self.pick_grid.addWidget(price, i, 2)
+            self.pick_rows.append((c["code"], chk, qty, price))
+        guess = getattr(self, "_pick_guess", None) or {}
+        self.p_po.setText(str(self.lot.form.get("po", "")).strip() or guess.get("po", ""))
+        self.p_po_date.setText(str(self.lot.form.get("po_date", "")).strip() or guess.get("po_date", ""))
+        self.p_pr.setText(next((str(it.get("pr")) for it in self.lot.items if it.get("pr")), "") or guess.get("pr", ""))
+
+    def confirm_pick(self):
+        picks = [(code, qty.text(), price.text()) for code, chk, qty, price in self.pick_rows if chk.isChecked()]
+        try:
+            self.lot.confirm_pick(picks, self.p_po.text(), self.p_po_date.text(), self.p_pr.text())
+        except ValueError as e:
+            widgets.warn(self, "Chưa dùng được các mã đã chọn", str(e))
+            return
+        self.set_status(self.lot.read_text + " Bấm “Tiếp tục” để kiểm tra.", ok=True)
+        self.refresh()
+        self.changed.emit()
 
     # ---- khách không gửi PO (Deli): lập Sale Contract, số hợp đồng theo quy chuẩn như Sunlu, dòng hàng tra mã thêm bằng tay ----
     def _build_contract_box(self):
@@ -421,6 +489,11 @@ class PoStep(QWidget):
             self.fill_contract()
         if contract:
             self._contract_lines()
+        pick = self.lot.pick_items and not fixed and not contract
+        self.pick_box.setVisible(pick)
+        if pick and self._pick_for != (c, id(self.lot.items), len(self.lot.items)):
+            self._pick_for = (c, id(self.lot.items), len(self.lot.items))
+            self.fill_pick()
         self.drop.setEnabled(bool(c) and not self.busy.isVisible())
         self.add_po.setVisible(self.lot.multi_po and not fixed and not contract)
         self.refresh_dates()
@@ -562,13 +635,16 @@ class PoStep(QWidget):
         if self.lot.apply_po(res):
             self.set_status(res["msg"] + " Bấm “Tiếp tục” để kiểm tra các dòng hàng.", ok=True)
         else:
-            self.set_status(res["msg"] or "Không đọc được file PO.", ok=False)
+            self.set_status((res["msg"] or "Không đọc được file PO.") + (" Hãy chọn mã hàng ở ô bên dưới." if self.lot.pick_items else ""), ok=False)
+            if self.lot.pick_items:  # số PO / ngày / PR đọc được thì vẫn điền sẵn vào ô chọn mã
+                self._pick_for = None
+                self._pick_guess = {k: res.get(k, "") for k in ("po", "po_date", "pr")}
         self.refresh()
         self.changed.emit()
 
     def on_failed(self, msg):
         self._idle()
-        self.set_status(f"Không đọc được file: {msg}", ok=False)
+        self.set_status(f"Không đọc được file: {msg}" + (" Hãy chọn mã hàng ở ô bên dưới." if self.lot.pick_items else ""), ok=False)
 
     def set_status(self, text, ok):
         color = {True: theme.OK, False: theme.WARN, None: theme.MUTED}[ok]

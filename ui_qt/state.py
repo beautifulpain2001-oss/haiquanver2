@@ -119,6 +119,36 @@ class Lot:
         return items
 
     @property
+    def pick_items(self):
+        """Khách ít mã hàng (VD Inoac, cờ pickItems): PO không đọc được hoặc đọc chưa chắc thì người dùng chọn mã trong danh mục."""
+        return bool(self.customer) and self.customer not in self.core.BUILTIN_CUSTOMERS and self.core.is_pick_items(self.profile)
+
+    def pick_choices(self):
+        """Các mã của khách để chọn: [{code, name, price, price_from}] (giá = giá của hồ sơ gần nhất có mã đó, chưa có thì giá danh mục)."""
+        out = []
+        for it in self.store.items_for_customer(self.customer) or []:
+            rec, last = self.core.last_fixed_order(self.store, self.customer, it)
+            price = (last or {}).get("price") or it.get("price") or 0
+            out.append({"code": str(it.get("code") or it.get("name")), "name": it.get("name", ""), "price": price,
+                        "price_from": "hồ sơ gần nhất" if last else "danh mục khách"})
+        return out
+
+    def confirm_pick(self, picks, po, po_date="", pr=""):
+        """Lô gồm các mã người dùng chọn: picks = [(mã, SL, đơn giá)]. Ném ValueError (tiếng Việt) nếu thiếu/sai."""
+        po, po_date = str(po or "").strip(), str(po_date or "").strip()
+        if po_date and not self.core._parse_dmy(po_date):
+            raise ValueError("Ngày PO phải dạng dd/mm/yyyy.")
+        items = self.core.lot_pick_items(self.store, self.customer, picks, po, self.form.get("tare", ""), pr)
+        self.items = items
+        self.form["po"], self.form["po_date"] = po, po_date
+        self.po_dates = {po: po_date}
+        self.po_touched, self.po_auto = True, False
+        self.schedules, self.selected_dates = None, []
+        self.read_text = f"PO {po}: chọn mã bằng tay " + "; ".join(f"{it['ten_sp']} — {it['qty']:,} × {it['price']:,} đ" for it in items) + "."
+        self.saved = False
+        return items
+
+    @property
     def contract_order(self):
         """Khách không gửi PO (VD Deli): Hồng Thiên lập Sale Contract, nhập số hợp đồng rồi tra mã thêm dòng hàng bằng tay."""
         return bool(self.customer) and self.customer not in self.core.BUILTIN_CUSTOMERS and self.core.is_contract_order(self.profile)
