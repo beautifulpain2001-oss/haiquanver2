@@ -349,6 +349,7 @@ CUSTOMER_FIELDS = [
     ("deliveryTerm", "Điều kiện giao hàng ghi trên Sale Contract (vd DAP BAC NINH)"),
     ("poGen", "Công thức số PO tự tạo (vd HT{yyyymm}{nn}; YNCGDD{yymmdd}{nnnn} = tiền tố + ngày + 4 số thứ tự)"),
     ("bkavId", "Mã chứng từ Bkav IDChungTu (vd deli{dd}/{mm} hd; trống = mã khách + ngày.tháng)"),
+    ("bkavIdPxk", "Mã IDChungTu riêng cho Phiếu xuất kho Bkav (vd HSMT {d}.{m}; trống = dùng mã của hóa đơn VAT)"),
     ("shareItems", "Dùng chung danh mục mã hàng với khách khác (nhập mã khách, vd delihd; Deli Hải Dương / Bắc Ninh tự dùng chung)"),
     ("fixedItem", "Mã hàng cố định (khách chỉ đặt 1 mã: không đọc PO, chỉ xác nhận số PO, SL, giá)"),
     ("note", "Lưu ý đặc thù khi làm chứng từ (hiện ở trang Khách hàng và nhắc ở bước xuất)"),
@@ -3742,8 +3743,9 @@ def get_vat_and_pxk_ids(rec):
     if cust not in BUILTIN_CUSTOMERS:
         fmt = str((PROFILES.get(cust) or {}).get("bkavId") or "").strip()
         if fmt:  # khách tự đặt mã IDChungTu (VD Deli Hải Dương 'deli{dd}/{mm} hd' -> 'deli29/10 hd'): dùng cho cả VAT và PXK
-            bid = fmt.replace("{dd}", dd).replace("{mm}", mm).replace("{d}", str(d)).replace("{m}", str(m))
-            return bid, bid
+            fill = lambda f: f.replace("{dd}", dd).replace("{mm}", mm).replace("{d}", str(d)).replace("{m}", str(m))
+            fmt_pxk = str((PROFILES.get(cust) or {}).get("bkavIdPxk") or "").strip()  # PXK đặt mã riêng (VD Hashimoto: VAT 'HD HSMT 0610', PXK 'HSMT 6.10')
+            return fill(fmt), fill(fmt_pxk or fmt)
         if is_arizon(PROFILES.get(cust, {})):  # Arizon: VAT 'HĐ arizon16/10 xk', PXK 'arizon16/10'
             return f"HĐ arizon{dd}/{mm} xk", f"arizon{dd}/{mm}"
         if is_best_docset(rec):  # Best: 'best 02.11 POS261008053' (nhiều PO thì nối liền các số PO)
@@ -3937,6 +3939,8 @@ def build_pxk_bkav_sheet(wb, rec, sheet_name="PXK_BKAV"):
         r = 2 + idx
         ws.row_dimensions[r].height = 39.95
         po_cell = it.get("po", "") if prof.get("linePo") else (f"Po No {rec.get('poNumber', '')}" if prof.get("poInDocs") else "")
+        if prof.get("pxkPo") is False:  # Hashimoto: PXK không ghi số PO (hóa đơn VAT vẫn ghi)
+            po_cell = ""
         if per_item and idx > 1:  # mỗi mã hàng một phiếu xuất kho: mỗi phiếu một số lệnh điều động kế tiếp
             seq0 = str(rec.get("lddSeq") or prof["lenhSeq"])
             ldd_code = f"LĐĐ{ddmmyyyy}-{int(seq0) + idx - 1:0{len(seq0)}d}" if seq0.isdigit() else ldd_code
@@ -7404,7 +7408,8 @@ _FEW_PR = re.compile(r"(?<![A-Za-z0-9])(\d{6}-[A-Z]{2}-\d{2})(?![A-Za-z0-9])")
 def _item_length(it):
     """Chiều dài (số cuối của quy cách) của một mặt hàng: mã '76.5x10x1700' / tên '... x 1700 mm' -> '1700'."""
     for src in (it.get("code"), it.get("name"), it.get("ten_hq")):
-        nums = re.findall(r"\d+(?:[.,]\d+)?", str(src or ""))
+        src = re.sub(r"\bCode\s*[:.]?\s*[A-Za-z0-9-]+", " ", str(src or ""), flags=re.I)  # 'Ống 38x0.8x287mm (Code PCD650007)': mã khách không phải quy cách
+        nums = re.findall(r"\d+(?:[.,]\d+)?", src)
         if len(nums) >= 3:
             return nums[-1]
     return ""
@@ -7466,6 +7471,33 @@ def parse_few_items_po(text, catalog_items, po_no=""):
         prm = _FEW_PR.search(ln)
         out.append({"code": str(it.get("code") or ""), "name": it.get("name", ""), "qty": qty, "price": price, "po": po_no,
                     "pr": prm.group(1) if prm else "", "read": "ok" if score >= 3 else "suy_ra", "read_note": note})
+    return out or _few_items_by_code(rows, cat, po_no)
+
+
+def _few_items_by_code(rows, cat, po_no=""):
+    """PO scan có ghi mã hàng của khách (VD Hashimoto 'Code PCD650007') nhưng OCR làm mất cột SL / đơn giá của ô bảng:
+    thấy mã hàng thì lấy thành tiền ở mấy dòng sau (số chia hết cho đơn giá đã học), SL = thành tiền / giá. Luôn là dòng vàng để người dùng so PO."""
+    out = []
+    for it in cat:
+        code = re.sub(r"[^A-Z0-9]", "", str(it.get("code") or "").upper())
+        if len(code) < 5 or not re.search(r"\d", code) or not re.search(r"[A-Z]", code):
+            continue  # chỉ mã có cả chữ và số (mã quy cách '76x7x270' dễ trùng chữ khác)
+        p = int(round(float(it["price"])))
+        for i, ln in enumerate(rows):
+            toks = re.findall(r"[A-Z0-9]{5,}", re.sub(r"[\s-]", "", ln.upper()))
+            if not any(len(t) >= len(code) and sum(a != b for a, b in zip(t[-len(code):], code)) <= 1 for t in toks):
+                continue  # cho OCR sai 1 ký tự của mã
+            amt = 0
+            for ln2 in rows[i:i + 8]:
+                if _FEW_SKIP.search(ln2):
+                    break
+                for v in (_few_num(t) for t in re.findall(r"\d[\d,.]*", ln2)):
+                    if v and v >= p * 2 and v % p == 0 and v // p < 5_000_000 and v > amt and len(re.sub(r"\D", "", str(v))) >= 5:
+                        amt = v
+            if amt:
+                out.append({"code": str(it.get("code") or ""), "name": it.get("name", ""), "qty": amt // p, "price": p, "po": po_no, "pr": "",
+                            "read": "suy_ra", "read_note": f"Đọc thấy mã {it.get('code')} và thành tiền {amt:,}; SL = thành tiền / giá đã học {p:,} — hãy so với PO"})
+                break
     return out
 
 
