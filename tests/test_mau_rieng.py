@@ -146,3 +146,29 @@ def test_export_step_shows_button_per_custom_form(qapp, store, rec, tmp_path):
     step.do_export("R:PLX khach.docx")
     assert any(f["mode"] == "R:PLX khach.docx" and f["name"].endswith(".docx") for f in lot.files)
     step.close()
+
+
+def test_fill_xlsx_moves_row_heights_merges_and_print_area():
+    """Nhân dòng hàng: dòng chữ cao (2 hàng) bên dưới vẫn cao, ô gộp và vùng in dời theo, không cắt nửa chữ khi in."""
+    import io as _io
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws["A1"] = "TIÊU ĐỀ"
+    ws["A3"] = "{{ten}}"
+    ws["B3"] = "{{sl}}"
+    ws["A4"] = "Tổng"
+    ws["B4"] = "=SUM(B3:B3)"
+    ws["A6"] = "Dòng ký\nhai hàng"
+    ws.row_dimensions[6].height = 33
+    ws.merge_cells("A6:C7")
+    ws.merge_cells("D2:D5")
+    ws.print_area = "A1:C7"
+    buf = _io.BytesIO()
+    wb.save(buf)
+    rows = [{"ten": f"H{i}", "sl": i} for i in range(1, 4)]
+    out, _u = mau_rieng.fill_xlsx(buf.getvalue(), {"__so__": {}}, rows)
+    ws = openpyxl.load_workbook(_io.BytesIO(out)).active
+    assert ws["B6"].value == "=SUM(B3:B5)"
+    assert ws.row_dimensions[8].height == 33 and not ws.row_dimensions[6].height
+    assert {str(m) for m in ws.merged_cells.ranges} == {"A8:C9", "D2:D7"}
+    assert str(ws.print_area).replace("$", "").endswith("A1:C9")

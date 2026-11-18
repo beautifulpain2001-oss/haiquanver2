@@ -5583,6 +5583,18 @@ def lot_totals(rec):
     }
 
 
+def kien_formula(items, col, first_row, total_cell=None):
+    """Công thức tổng kiện kiểu Best (tổng SL / SL mỗi kiện, làm tròn LÊN cả lô, không làm tròn từng dòng).
+    Cùng một định mức: =ROUNDUP(<ô tổng SL>/20,0); định mức khác nhau: =ROUNDUP(I17/20+I18/25,0)."""
+    divs = [float(it.get("div") or 0) for it in items]
+    if not items or any(d <= 0 for d in divs):
+        return None
+    if len(set(divs)) == 1:
+        ref = total_cell or (f"SUM({col}{first_row}:{col}{first_row + len(items) - 1})")
+        return f"=ROUNDUP({ref}/{divs[0]:g},0)"
+    return "=ROUNDUP(" + "+".join(f"{col}{first_row + i}/{d:g}" for i, d in enumerate(divs)) + ",0)"
+
+
 def split_name_spec(name):
     """'Ống giấy chống bụi 40 x 4 x 1350mm' -> ('Ống giấy chống bụi', '40 x 4 x 1350mm')."""
     m = re.search(r"(?:phi\s*|ø|Φ)?\d+(?:[.,]\d+)?\s*(?:mm)?\s*[x*×]\s*\d", name or "", re.I)
@@ -5782,7 +5794,8 @@ def build_pkl_best_sheet(wb, rec, sheet_name="Invoice"):
     _box(ws, hr, 1, tr, 13)
     sr = tr + 1
     put(f"B{sr}", None, "Tổng: ", 12, True)
-    put(f"C{sr}", None, t["kien"], 12, True, "center")
+    c = put(f"C{sr}", None, kien_formula(items, "I", hr + 1, f"I{tr}") or t["kien"], 12, True, "center")
+    c.number_format = "#,##0"
     put(f"D{sr}", None, "kiện", 12, True)
     put(f"F{sr}", None, "", 12)
     c = put(f"G{sr}", None, t["gross"], 12, True, "right")
@@ -5866,7 +5879,8 @@ def build_packing_best_sheet(wb, rec, sheet_name="DongGoi"):
         c.number_format = fmt
     _box(ws, hr, 1, tr, 6)
     put(f"A{tr + 2}", None, "Tổng", 12)
-    put(f"B{tr + 2}", None, lot_totals(rec)["kien"], 12, True, "right")
+    c = put(f"B{tr + 2}", None, kien_formula(items, "D", hr + 1, f"D{tr}") or lot_totals(rec)["kien"], 12, True, "right")
+    c.number_format = "#,##0"
     put(f"C{tr + 2}", None, "kiện", 12)
     put(f"D{tr + 3}", None, "Signed by: ", 12, True)
     put(f"C{tr + 4}", f"C{tr + 4}:F{tr + 4}", HT_NAME, 12, True, "right")
@@ -7961,6 +7975,47 @@ def lot_mode_label(mode):
     return LOT_MODE_LABELS.get(mode) or (os.path.splitext(mode[2:])[0] if str(mode).startswith("R:") else str(mode))
 
 
+def print_ready_workbook(wb):
+    """Mở file ra là in được: sheet nào chưa đặt trang in thì in vừa bề ngang một trang A4 (bảng rộng thì in ngang),
+    sheet nào chưa có vùng in thì để Excel in đúng vùng có dữ liệu. Không đổi số liệu (file nạp Bkav vẫn nạp được)."""
+    for ws in wb.worksheets:
+        try:
+            pr = ws.sheet_properties.pageSetUpPr
+            if pr is not None and pr.fitToPage:
+                continue  # mẫu đã đặt trang in riêng
+            if pr is None:
+                from openpyxl.worksheet.properties import PageSetupProperties
+                ws.sheet_properties.pageSetUpPr = PageSetupProperties()
+            width = sum((ws.column_dimensions[get_column_letter(c)].width or 8.43) for c in range(1, ws.max_column + 1)
+                        if not ws.column_dimensions[get_column_letter(c)].hidden)
+            if width > 250:
+                continue  # bảng nạp phần mềm (Bkav) rất rộng: thu vào 1 trang thì không đọc được
+            ws.page_setup.paperSize = ws.PAPERSIZE_A4
+            ws.page_setup.orientation = "landscape" if width > 100 else "portrait"
+            ws.sheet_properties.pageSetUpPr.fitToPage = True
+            ws.page_setup.fitToWidth = 1
+            ws.page_setup.fitToHeight = 0
+        except Exception:  # không để phần trình bày chặn xuất chứng từ
+            pass
+    return wb
+
+
+def _xlsx_print_ready_bytes(data):
+    """File Excel điền từ form: chữ dài tự xuống dòng / dòng tự cao như chứng từ dựng sẵn, rồi đặt trang in."""
+    import io as _io
+    try:
+        wb = openpyxl.load_workbook(_io.BytesIO(data))
+        if mau_chung_tu:
+            mau_chung_tu.autofit_workbook(wb)
+        print_ready_workbook(wb)
+        out = _io.BytesIO()
+        wb.save(out)
+        return out.getvalue()
+    except Exception as e:
+        log_soft_error(f"Không chỉnh được trang in của file điền từ form: {e}")
+        return data
+
+
 def lot_export_custom_form(store, rec, fname, work_dir, s_key):
     import mau_rieng
     cust = rec["customer"]
@@ -7976,9 +8031,12 @@ def lot_export_form_file(rec, path, out_base, work_dir):
     with open(path, "rb") as f:
         data = f.read()
     prof = PROFILES.get(rec["customer"], {})
-    consts = {"name": HT_NAME, "addr": ADDR_HT, "mst": MST_HT, "date": _iso_to_date, "words": num_to_vn_words}
+    consts = {"name": HT_NAME, "addr": ADDR_HT, "mst": MST_HT, "date": _iso_to_date, "words": num_to_vn_words,
+              "kien": lot_totals(rec)["kien"], "kien_gop": is_best_docset(prof)}
     ext = os.path.splitext(path)[1]
     out, unknown = mau_rieng.fill(ext, data, mau_rieng.batch_values(rec, prof, consts), mau_rieng.item_values(rec))
+    if ext.lower() in (".xlsx", ".xlsm"):
+        out = _xlsx_print_ready_bytes(out)
     out_name = out_base + ext
     out_path = os.path.join(work_dir, out_name)
     with open(out_path, "wb") as f:
@@ -8059,6 +8117,8 @@ def _lot_export_one(store, rec, mode="ALL", skip_h=False):
         return {"path": out_path, "fname": fname, "problems": problems, "dsh": None}
     if mau_chung_tu:
         mau_chung_tu.autofit_workbook(wb)  # chữ dài tự xuống dòng, dòng tự cao, cột số vừa đủ: mở ra là in được
+    if mode not in ("VAT", "PXK"):  # file nạp Bkav rộng hơn 40 cột: in vừa 1 trang thì chữ quá nhỏ, để nguyên như Bkav
+        print_ready_workbook(wb)
     wb.save(out_path)
     return {"path": out_path, "fname": fname, "problems": problems, "dsh": None}
 
@@ -8274,6 +8334,9 @@ def _form_tokenize_workbook(wb, item, title="Sheet"):
                         c.value = "{{gross}}"  # tịnh + bì mỗi dòng (bì nhập ở bước xuất): lấy số app tính
                     elif in_item and f"*{_FORM_SENT['kg']:g}" in v.replace(" ", ""):
                         c.value = "{{net}}"  # SL x kg/chiếc của mặt hàng mẫu: mỗi mặt hàng một kg nên lấy số app tính
+                    elif not in_item and re.search(re.escape(div_lit) + r"(?![\d.])", v.replace(" ", "")):
+                        # tổng kiện kiểu Best =ROUNDUP(I17/53,0): giữ công thức, SL mỗi kiện lấy theo lô lúc xuất
+                        c.value = re.sub(re.escape(div_lit) + r"(?![\d.])", "/{{sl_kien}}", v.replace(" ", ""))
                 elif isinstance(v, (datetime.datetime, datetime.date)):
                     if v.strftime("%Y-%m-%d") == _FORM_SENT["date"]:
                         c.value = "{{ngay_so}}"
