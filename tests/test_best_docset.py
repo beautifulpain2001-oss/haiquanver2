@@ -204,7 +204,7 @@ def test_best_bundle_documents(store, best_customer):
     assert tong_kien == ["=ROUNDUP(I16/20,0)"] and wb["Invoice_29.10"]["I16"].value == "=SUM(I13:I15)"  # tổng kiện là công thức: tổng SL (ô I16 = 1.900) / 20 ống mỗi kiện = 95
 
     pk = cells(wb["DongGoi_29.10"])
-    assert [v for v in pk if isinstance(v, str) and v.startswith("=ROUNDUP(")] == ["=ROUNDUP(D19/20,0)"]
+    assert [v for v in pk if isinstance(v, str) and v.startswith("=ROUNDUP(")] == ["=ROUNDUP(D17/20,0)"]
     assert "Số ĐĐH: POS269990001 + POS269990002" in pk and "Ngày: 08/10/2026 + 02/10/2026" in pk
     assert sum(1 for v in pk if str(v).startswith("Số ĐĐH")) == 1
     dg = wb["DongGoi_29.10"]

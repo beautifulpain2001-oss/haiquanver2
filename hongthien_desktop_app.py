@@ -5842,29 +5842,34 @@ def build_packing_best_sheet(wb, rec, sheet_name="DongGoi"):
     put(f"F{r}", None, f"Ngày: {po_d}", 12, wrap=True)
     r += 1
     put(f"A{r}", f"A{r}:C{r}", ADDR_HT.rstrip("."), 12, wrap=True, valign="top")
-    put(f"D{r}", f"D{r}:F{r}", "Phương thức thanh toán", 12)
+    put(f"D{r}", f"D{r}:F{r}", "Phương thức thanh toán", 12, valign="top")
     put(f"A{r + 1}", f"A{r + 1}:C{r + 1}", f"Tel : {HT_TEL}", 12)
     put(f"D{r + 1}", f"D{r + 1}:F{r + 1}", "TTR", 12)
-    r += 3
+    r += 2
     put(f"A{r}", f"A{r}:C{r}", "Người mua:", 12)
     put(f"A{r + 1}", f"A{r + 1}:C{r + 1}", prof["name"], 12, True, wrap=True)
     put(f"A{r + 2}", f"A{r + 2}:C{r + 2}", prof["addr"], 12, wrap=True)
     ws.row_dimensions[r + 2].height = 33
-    r += 4
+    ws.merge_cells(f"D{r}:F{r}")
+    ws.merge_cells(f"D{r + 1}:F{r + 2}")
+    r += 3
     put(f"A{r}", f"A{r}:B{r}", "Điểm xuất phát:", 11)
     put(f"C{r}", None, "Điểm giao hàng", 11)
     put(f"D{r}", f"D{r}:F{r}", "Điều kiện giao hàng", 11)
     put(f"A{r + 1}", f"A{r + 1}:B{r + 1}", short_place(ADDR_HT), 11)
     put(f"C{r + 1}", None, prof.get("deliveryPlace") or short_place(prof.get("addr", "")), 11)
-    put(f"D{r + 1}", f"D{r + 1}:F{r + 1}", f"{incoterm} {city}".strip(), 11)
+    put(f"D{r + 1}", f"D{r + 1}:F{r + 2}", f"{incoterm} {city}".strip(), 11, valign="top")
     put(f"A{r + 2}", f"A{r + 2}:B{r + 2}", "Phương thức vận chuyển:", 11)
     put(f"A{r + 3}", f"A{r + 3}:B{r + 3}", "Xe tải", 11)
-    _outline(ws, 2, 1, r - 2, 3)
-    _outline(ws, 2, 4, r - 2, 6)
-    _outline(ws, r - 1, 1, r + 1, 2)
-    _outline(ws, r - 1, 3, r + 1, 3)
-    _outline(ws, r - 1, 4, r + 3, 6)
-    _outline(ws, r + 2, 1, r + 3, 3)
+    ws.merge_cells(f"C{r + 2}:C{r + 3}")
+    ws.merge_cells(f"D{r + 3}:F{r + 3}")
+    # khung theo đúng bản in Huy gửi (18/11): mỗi ô đầu trang một khung riêng
+    for r1, c1, r2, c2 in ((2, 1, 2, 3), (2, 4, 2, 5), (2, 6, 2, 6), (3, 1, 3, 3), (3, 4, 3, 5), (3, 6, 3, 6),
+                           (4, 1, 5, 3), (4, 4, 5, 6),  # địa chỉ + Tel | Phương thức thanh toán + TTR
+                           (r - 3, 1, r - 1, 3), (r - 3, 4, r - 3, 6), (r - 2, 4, r - 1, 6),  # người mua | 2 ô trống bên phải
+                           (r, 1, r + 1, 2), (r, 3, r + 1, 3), (r, 4, r + 2, 6),  # điểm xuất phát | điểm giao | điều kiện giao hàng
+                           (r + 2, 1, r + 3, 2), (r + 2, 3, r + 3, 3), (r + 3, 4, r + 3, 6)):  # phương thức vận chuyển | ô trống
+        _outline(ws, r1, c1, r2, c2)
     r += 4
 
     hr = r
@@ -5873,6 +5878,7 @@ def build_packing_best_sheet(wb, rec, sheet_name="DongGoi"):
     items = rec.get("items", [])
     for idx, it in enumerate(items, 1):
         rr = hr + idx
+        ws.row_dimensions[rr].height = 25  # dòng hàng cao như bản in mẫu
         put(f"A{rr}", None, idx, 12, align_h="center")
         put(f"B{rr}", f"B{rr}:C{rr}", it["ten_sp"], 12)
         for col, key, fmt in (("D", "qty", "#,##0"), ("E", "net", "#,##0.00"), ("F", "gross", "#,##0.00")):
@@ -5888,8 +5894,10 @@ def build_packing_best_sheet(wb, rec, sheet_name="DongGoi"):
     c = put(f"B{tr + 2}", None, kien_formula(items, "D", hr + 1, f"D{tr}") or lot_totals(rec)["kien"], 12, True, "right")
     c.number_format = "#,##0"
     put(f"C{tr + 2}", None, "kiện", 12)
-    put(f"D{tr + 3}", None, "Signed by: ", 12, True)
+    c = put(f"D{tr + 3}", None, "Signed by: ", 12, True)
+    c.font = Font(name="Times New Roman", size=12, bold=True, underline="single")
     put(f"C{tr + 4}", f"C{tr + 4}:F{tr + 4}", HT_NAME, 12, True, "right")
+    apply_region_outer_edge(ws, 1, tr + 1, 6, tr + 9, b=True, l=True, r=True)  # khung cả chỗ ký, đóng dấu như bản in mẫu
     _fit_page(ws, landscape=False)
     return ws
 
