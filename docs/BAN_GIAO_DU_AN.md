@@ -309,6 +309,14 @@ File `master_catalog.json` trong thư mục chung của project là bản danh m
 - `find_po_date` đọc thêm ngày dạng `16-Sep-2026`.
 - Dữ liệu khách thật nằm trong `inoac/khach_inoac_hoc.json` ở thư mục file chung (nạp bằng Cài đặt → Nạp dữ liệu học). Test dùng dữ liệu giả (`tests/test_khach_it_ma.py`).
 
+### 6.6 Khách ít mã, PO scan có mã hàng riêng (kiểu Hashimoto)
+- Vẫn là cờ `pickItems` như Inoac. PO scan ghi mã khách (`Code PCD…`) nhưng OCR hay làm mất cột SL / ĐVT / đơn giá: `parse_few_items_po` không ra dòng nào thì `_few_items_by_code` tìm mã hàng (có cả chữ và số, cho sai 1 ký tự) rồi lấy thành tiền ở các dòng sau chia hết cho giá đã học: SL = thành tiền / giá, dòng vàng.
+- `_item_length` bỏ phần `Code …` trong tên hàng trước khi lấy chiều dài quy cách.
+- `bkavIdPxk`: mã IDChungTu riêng của PXK Bkav (VD VAT `HD HSMT {dd}{mm}`, PXK `HSMT {d}.{m}`); trống thì PXK dùng mã của VAT.
+- `pxkPo: false`: PXK Bkav không ghi số PO (VAT vẫn ghi theo `linePo`).
+- Invoice và Giấy đề nghị thanh toán dùng form của khách (`thay/PKL.xlsx`, `thay/DNTT.xlsx`, ô `{{...}}`) nằm trong file dữ liệu học, không dựng riêng trong mã nguồn.
+- Dữ liệu khách thật: `hashimoto/khach_hashimoto_hoc.json` ở thư mục file chung. Test dữ liệu giả: `tests/test_khach_hashimoto.py`.
+
 ## 7. Quy trình bộ hồ sơ khách Best (docSet `best`)
 
 Tài liệu nghiệp vụ đầy đủ (có số liệu thật, **không đưa vào repo**): `best/QUY_TRINH_BO_HO_SO_BEST.md` trong thư mục file chung của project. Tóm tắt quy tắc:
