@@ -196,13 +196,19 @@ def test_best_bundle_documents(store, best_customer):
     assert wb.sheetnames == ["Invoice_29.10", "DongGoi_29.10", "VAT_BKAV_29.10", "PXK_29.10", "PGH_29.10", "DCCN_29.10", "DNTT"]
 
     inv = cells(wb["Invoice_29.10"])
-    assert "Số ĐĐH: POS269990001" in inv and "Số ĐĐH: POS269990002" in inv and "Ngày:08/10/2026" in inv
+    # một dòng Số ĐĐH (Huy duyệt 18/11): lô 2 PO nối 'PO1 + PO2', ngày PO theo đúng thứ tự
+    assert "Số ĐĐH: POS269990001 + POS269990002" in inv and "Ngày:08/10/2026 + 02/10/2026" in inv
+    assert sum(1 for v in inv if str(v).startswith("Số ĐĐH")) == 1
     assert "Hàng được sản xuất tại Việt Nam, mới 100 %" in inv
     tong_kien = [v for v in inv if isinstance(v, str) and v.startswith("=ROUNDUP(")]
-    assert tong_kien == ["=ROUNDUP(I17/20,0)"] and wb["Invoice_29.10"]["I17"].value == "=SUM(I14:I16)"  # tổng kiện là công thức: tổng SL (ô I17 = 1.900) / 20 ống mỗi kiện = 95
+    assert tong_kien == ["=ROUNDUP(I16/20,0)"] and wb["Invoice_29.10"]["I16"].value == "=SUM(I13:I15)"  # tổng kiện là công thức: tổng SL (ô I16 = 1.900) / 20 ống mỗi kiện = 95
 
     pk = cells(wb["DongGoi_29.10"])
-    assert [v for v in pk if isinstance(v, str) and v.startswith("=ROUNDUP(")] == ["=ROUNDUP(D20/20,0)"]
+    assert [v for v in pk if isinstance(v, str) and v.startswith("=ROUNDUP(")] == ["=ROUNDUP(D17/20,0)"]
+    assert "Số ĐĐH: POS269990001 + POS269990002" in pk and "Ngày: 08/10/2026 + 02/10/2026" in pk
+    assert sum(1 for v in pk if str(v).startswith("Số ĐĐH")) == 1
+    dg = wb["DongGoi_29.10"]
+    assert dg["A3"].value == app.HT_NAME and dg["A4"].value  # địa chỉ ngay dưới dòng PO, không còn ô trống
     assert "CHI TIẾT ĐÓNG GÓI" in pk and "TTR" in pk and "DAP Hải Phòng" in pk and "Thử Nghiệm - Hải Phòng" in pk
 
     vat = wb["VAT_BKAV_29.10"]
@@ -311,6 +317,7 @@ def test_best_form_keeps_kien_formula_line_po_and_print_setup(store, best_custom
     assert ws[f"D{total}"].value == f"=SUM(D{total - 3}:D{total - 1})"
     assert ws[f"B{total + 2}"].value == f"=ROUNDUP(D{total}/20,0)"
     assert ws.sheet_properties.pageSetUpPr.fitToPage and ws.page_setup.fitToWidth == 1
+    assert (ws["D3"].value, ws["F3"].value) == ("Số ĐĐH: POS269990001 + POS269990002", "Ngày: 08/10/2026 + 02/10/2026")
     store.form_make(best_customer, "DCCN")
     ws = openpyxl.load_workbook(app.lot_export(store, rec, "DCCN")["path"]).worksheets[0]
     assert [ws[f"D{r}"].value for r in (9, 10, 11)] == ["POS269990001", "POS269990001", "POS269990002"]

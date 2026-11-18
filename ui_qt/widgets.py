@@ -1,5 +1,6 @@
 """Tiện ích dùng chung: chạy việc nặng ở luồng nền, hộp thoại thông báo, mở thư mục."""
 
+import gc
 import os
 import subprocess
 import sys
@@ -44,6 +45,9 @@ def run_job(owner, fn, on_done, on_failed=None, on_progress=None):
     job.finished.connect(lambda j=job: _JOBS.discard(j))
     job.done.connect(on_done)
     job.failed.connect(on_failed or (lambda _msg: None))
+    # Dọn rác Python ngay ở luồng chính trước khi chạy luồng nền: nếu để bộ dọn rác chạy giữa chừng trong luồng nền,
+    # nó có thể hủy đối tượng Qt (cửa sổ/ô cũ) ngoài luồng chính và làm phần mềm sập (Segmentation fault).
+    gc.collect()
     job.start()
     return job
 

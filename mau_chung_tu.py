@@ -193,16 +193,25 @@ def unify_pxk(ws, pxk):
     return n
 
 
+def _po_rows(tws, left_col="A"):
+    """Mẫu khách có 2 dòng 'Số ĐĐH' (hàng 3-4). Giờ chỉ ghi MỘT dòng Số ĐĐH (lô nhiều PO nối 'PO1 + PO2', Huy duyệt 18/11):
+    bỏ hàng 4 nếu cột trái của nó trống; cột trái có chữ thì giữ hàng nhưng xóa số PO cũ của mẫu ở hàng đó."""
+    return 1 if tws[f"{left_col}4"].value in (None, "") else 2
+
+
 def fill_pkl(core, wb, rec, prof, tws, title):
-    items, pos = rec.get("items", []), core.rec_po_list(rec) or [("", "")]
-    ws, pl = clone_sheet(wb, tws, title, [(3, 4, max(len(pos), 2)), (15, 26, max(len(items), 1))])
+    items = rec.get("items", [])
+    n_po = _po_rows(tws)
+    ws, pl = clone_sheet(wb, tws, title, [(3, 4, n_po), (15, 26, max(len(items), 1))])
     dt = core._dmy(core._iso_to_date(rec.get("docDate")))
     ws[f"I{pl.map(2)}"] = f"PXKKVCNB : {rec.get('pxkNo', '')}"
     ws[f"L{pl.map(2)}"] = f"     Ngày :{dt}"
     ws["A3"] = core.HT_NAME
-    for i, (po, pd) in enumerate(pos):
-        ws[f"I{pl.first[3] + i}"] = f"Số ĐĐH: {po}"
-        ws[f"L{pl.first[3] + i}"] = f"     Ngày:{pd}"
+    po_txt, pd = core.po_header(rec)
+    ws[f"I{pl.first[3]}"] = f"Số ĐĐH: {po_txt}"
+    ws[f"L{pl.first[3]}"] = f"     Ngày:{pd}"
+    if n_po == 2:
+        ws[f"I{pl.first[3] + 1}"] = ws[f"L{pl.first[3] + 1}"] = None
     for col in ("A", "I"):
         ws[f"{col}{pl.map(9)}"] = prof["name"]
         ws[f"{col}{pl.map(10)}"] = prof["addr"]
@@ -226,15 +235,18 @@ def fill_pkl(core, wb, rec, prof, tws, title):
 
 
 def fill_pack(core, wb, rec, prof, tws, title):
-    items, pos = rec.get("items", []), core.rec_po_list(rec) or [("", "")]
-    ws, pl = clone_sheet(wb, tws, title, [(3, 4, max(len(pos), 2)), (18, 29, max(len(items), 1))])
+    items = rec.get("items", [])
+    n_po = _po_rows(tws)
+    ws, pl = clone_sheet(wb, tws, title, [(3, 4, n_po), (18, 29, max(len(items), 1))])
     dt = core._dmy(core._iso_to_date(rec.get("docDate")))
     ws["D2"] = f"PXKKVCNB : {rec.get('pxkNo', '')}"
     ws["F2"] = f" Ngày: {dt}"
     ws["A3"] = core.HT_NAME
-    for i, (po, pd) in enumerate(pos):
-        ws[f"D{3 + i}"] = f"Số ĐĐH: {po}"
-        ws[f"F{3 + i}"] = f"       Ngày: {pd}"
+    po_txt, pd = core.po_header(rec)
+    ws["D3"] = f"Số ĐĐH: {po_txt}"
+    ws["F3"] = f"       Ngày: {pd}"
+    if n_po == 2:
+        ws["D4"] = ws["F4"] = None
     ws[f"A{pl.map(6)}"] = core.ADDR_HT.rstrip(".")
     ws[f"A{pl.map(7)}"] = f"Tel : {core.HT_TEL}"
     ws[f"A{pl.map(10)}"] = prof["name"]

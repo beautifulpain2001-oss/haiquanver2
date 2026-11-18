@@ -43,6 +43,17 @@ def _dots(x):
     return s.replace(",", "§").replace(".", ",").replace("§", ".")
 
 
+def _po_dates(rec):
+    """Lô nhiều PO (không có một ngày PO chung): ngày của từng PO nối 'ngày1 + ngày2' theo thứ tự PO trên các dòng hàng."""
+    dates, seen = rec.get("poDates") or {}, []
+    for it in rec.get("items") or []:
+        p = str(it.get("po") or "").strip()
+        if p and p not in seen:
+            seen.append(p)
+    got = [str(dates.get(p) or "") for p in seen]
+    return " + ".join(got) if any(got) else ""
+
+
 def batch_values(rec, prof, consts):
     """Giá trị các ô chung của lô. `consts`: {name, addr, mst, dmy, words} từ phần mềm (tên bên bán, hàm đổi ngày, đọc số thành chữ)."""
     items = rec.get("items") or []
@@ -65,7 +76,7 @@ def batch_values(rec, prof, consts):
         "po_dd": po_parts[0], "po_mm": po_parts[1], "po_yyyy": po_parts[2],
         "khach_ten": prof.get("name", ""), "khach_dia_chi": prof.get("addr", ""), "khach_mst": prof.get("mst", ""),
         "ben_ban_ten": consts["name"], "ben_ban_dia_chi": consts["addr"].rstrip("."), "ben_ban_mst": consts["mst"],
-        "so_po": rec.get("poNumber", ""), "ngay_po": rec.get("poDate", ""), "so_pxk": rec.get("pxkNo", ""), "so_hd": rec.get("hdNo", ""), "so_tk": rec.get("tkNo", ""),
+        "so_po": rec.get("poNumber", ""), "ngay_po": rec.get("poDate") or _po_dates(rec), "so_pxk": rec.get("pxkNo", ""), "so_hd": rec.get("hdNo", ""), "so_tk": rec.get("tkNo", ""),
         "ngay": d.strftime("%d/%m/%Y"), "dd": d.strftime("%d"), "mm": d.strftime("%m"), "yyyy": d.strftime("%Y"),
         "tong_sl": _dots(num("qty")), "tong_tri_gia": _dots(total), "tong_tri_gia_chu": consts["words"](round(total)),
         "tong_kien": _dots(kien), "sl_kien": sl_kien, "__kien_gop__": bool(consts.get("kien_gop")), "tong_net": _dots(num("net")), "tong_gross": _dots(num("gross")),

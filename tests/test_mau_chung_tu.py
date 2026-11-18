@@ -1,6 +1,7 @@
 """Chứng từ theo file mẫu của khách: nhân dòng hàng, dời hàng cuối, sửa công thức tổng (dữ liệu giả)."""
 import openpyxl
 
+import hongthien_desktop_app as app
 import mau_chung_tu as mct
 
 
@@ -79,3 +80,34 @@ def test_arizon_invoice_hides_b_and_j_and_shows_h(tmp_path):
     out = mau_chung_tu.fill_pkl_arizon(core, wb, rec, {"name": "ARZ", "addr": "HY", "unit": "chiếc"}, mau_chung_tu.load_template(str(path)), "Inv")
     d = out.column_dimensions
     assert d["B"].hidden and d["J"].hidden and not d["H"].hidden
+
+
+def _pack_template():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws["A1"] = "CHI TIẾT ĐÓNG GÓI"
+    ws["D2"], ws["F2"] = "PXKKVCNB : 00000111", "Ngày: 01/01/2026"
+    ws["A3"], ws["D3"], ws["F3"] = "TÊN CŨ", "Số ĐĐH: POSCU0000001", "Ngày: 01/01/2026"
+    ws["D4"], ws["F4"] = "Số ĐĐH: POSCU0000002", "Ngày: 02/01/2026"
+    ws["A6"], ws["A7"] = "Địa chỉ cũ", "Tel cũ"
+    ws["A17"] = "STT"
+    for r in range(18, 30):
+        ws[f"A{r}"] = r - 17
+    ws["A30"], ws["D30"] = "TOTAL:", "=SUM(D18:D29)"
+    ws["A32"], ws["B32"], ws["C32"] = "Tổng", "=ROUNDUP(D30/20,0)", "kiện"
+    return ws
+
+
+def test_best_pack_template_writes_one_po_row_without_old_po():
+    """Mẫu khách có 2 dòng Số ĐĐH: lô 1 PO không còn dòng PO cũ của mẫu, lô 2 PO nối 'PO1 + PO2' trên một dòng."""
+    prof = {"name": "KHÁCH THỬ", "addr": "Xã Thử, Thành phố Hải Phòng", "customs": {"incoterm": "DAP"}}
+    items = [{"ten_sp": "Ống A", "qty": 100, "kg": 0.5, "tare": 1, "div": 20, "po": "POS1"},
+             {"ten_sp": "Ống B", "qty": 50, "kg": 0.5, "tare": 1, "div": 20, "po": "POS2"}]
+    for its, po_txt, dates in ((items[:1], "Số ĐĐH: POS1", "Ngày: 03/11/2026"), (items, "Số ĐĐH: POS1 + POS2", "Ngày: 03/11/2026 + 04/11/2026")):
+        rec = {"items": its, "docDate": "2026-11-18", "pxkNo": "00000340", "poDates": {"POS1": "03/11/2026", "POS2": "04/11/2026"}}
+        wb = openpyxl.Workbook()
+        ws = mct.fill_pack(app, wb, rec, prof, _pack_template(), "DG")
+        vals = [str(c.value) for row in ws.iter_rows() for c in row if c.value]
+        assert ws["D3"].value == po_txt and ws["F3"].value.strip() == dates
+        assert sum(v.startswith("Số ĐĐH") for v in vals) == 1 and not any("POSCU" in v for v in vals)
+        assert ws["A5"].value == app.ADDR_HT.rstrip(".")  # hàng PO thứ 2 (trống bên trái) đã bỏ: địa chỉ lên ngay dưới
