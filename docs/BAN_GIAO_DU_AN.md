@@ -317,6 +317,12 @@ File `master_catalog.json` trong thư mục chung của project là bản danh m
 - Invoice và Giấy đề nghị thanh toán dùng form của khách (`thay/PKL.xlsx`, `thay/DNTT.xlsx`, ô `{{...}}`) nằm trong file dữ liệu học, không dựng riêng trong mã nguồn.
 - Dữ liệu khách thật: `hashimoto/khach_hashimoto_hoc.json` ở thư mục file chung. Test dữ liệu giả: `tests/test_khach_hashimoto.py`.
 
+### 6.7 Form mỗi mã hàng một phiếu (kiểu TSCO: phiếu kiểm tra chất lượng công đoạn OQC)
+- Mẫu riêng (`rieng`) có tên trong `riengMoiMa` của hồ sơ khách: `mau_rieng.fill_xlsx_per_item` lấy sheet đầu của file làm phiếu mẫu, mỗi dòng hàng một sheet chép từ phiếu mẫu (giữ ô gộp, định dạng, ảnh, trang in), tên sheet = mã trên phiếu. Không có trong `riengMoiMa` thì vẫn nhân dòng như form thường.
+- Ô mới theo dòng hàng: `{{quy_cach}}` (114 x 2.5 x 265, lấy từ mã hoặc tên), `{{phi}}` `{{day}}` `{{dai}}` (số), `{{tc_phi}}` `{{tc_day}}` `{{tc_dai}}` (VD 114±0,5), `{{ma_kt}}` (mã trên phiếu).
+- `qcItems` trong hồ sơ khách: `{mã hàng: {"ma": mã trên phiếu, "phi"/"day"/"dai": dung sai}}`; thiếu thì dùng mã hàng và dung sai mặc định 0,2 / 0,2 / 2.
+- TSCO: PO 'Order Note' scan đọc bằng `parse_few_items_po` (cờ `pickItems`, giá + chiều dài); VAT/PXK không ghi PO; Invoice là form `thay/PKL.xlsx` lấy từ hàng 5 của file mẫu khách. Dữ liệu thật: `tsco/khach_tsco_hoc.json` ở thư mục file chung. Test dữ liệu giả: `tests/test_khach_tsco.py`.
+
 ## 7. Quy trình bộ hồ sơ khách Best (docSet `best`)
 
 Tài liệu nghiệp vụ đầy đủ (có số liệu thật, **không đưa vào repo**): `best/QUY_TRINH_BO_HO_SO_BEST.md` trong thư mục file chung của project. Tóm tắt quy tắc:

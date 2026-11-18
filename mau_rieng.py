@@ -31,6 +31,9 @@ ITEM_TOKENS = [
     ("stt", "Số thứ tự"), ("ma", "Mã hàng"), ("ten", "Tên hàng"), ("dvt", "Đơn vị tính"), ("sl", "Số lượng"), ("gia", "Đơn giá"),
     ("thanh_tien", "Thành tiền"), ("kg", "kg/chiếc"), ("kien", "Số kiện"), ("net", "Trọng lượng tịnh"), ("gross", "Trọng lượng cả bì"), ("hs_dong", "Mã HS"),
     ("dvt_hoa", "Đơn vị tính viết hoa chữ đầu"),
+    ("quy_cach", "Quy cách 'phi x dày x dài' (VD 114 x 2.5 x 265)"), ("phi", "Đường kính trong (số)"), ("day", "Độ dày (số)"), ("dai", "Chiều dài (số)"),
+    ("tc_phi", "Tiêu chuẩn đường kính trong (VD 114±0,5)"), ("tc_day", "Tiêu chuẩn độ dày (VD 2.5±0,2)"), ("tc_dai", "Tiêu chuẩn chiều dài (VD 265±2)"),
+    ("ma_kt", "Mã sản phẩm trên phiếu kiểm tra chất lượng (không đặt thì là mã hàng)"),
 ]
 _ITEM_KEYS = {k for k, _ in ITEM_TOKENS}
 _TOKEN = re.compile(r"\{\{\s*([A-Za-z0-9_]+)\s*\}\}")
@@ -91,8 +94,43 @@ def batch_values(rec, prof, consts):
     }
 
 
-def item_values(rec):
-    """Giá trị ô theo dòng hàng, mỗi mặt hàng một dict."""
+_DIMS = re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:mm)?\s*[xX*]\s*(\d+(?:[.,]\d+)?)\s*(?:mm)?\s*[xX*]\s*(\d+(?:[.,]\d+)?)")
+# Dung sai mặc định trên phiếu kiểm tra chất lượng (theo phiếu mẫu TSCO ống 77x3: 77±0,2 / 3±0,2 / 87±2)
+QC_TOL = {"phi": "0,2", "day": "0,2", "dai": "2"}
+
+
+def item_dims(it):
+    """Quy cách (phi, dày, dài) của dòng hàng, dạng chữ như ghi trên mã/tên: mã '114x2.5x265' -> ('114', '2.5', '265'). () nếu không có."""
+    for src in (it.get("ma_sp"), it.get("ten_sp")):
+        m = _DIMS.search(re.sub(r"\([^)]*\)", " ", str(src or "")))
+        if m:
+            return tuple(d.replace(",", ".") for d in m.groups())
+    return ()
+
+
+def _num(t):
+    v = float(t)
+    return int(v) if v == int(v) else v
+
+
+def qc_values(it, qc=None):
+    """Ô của phiếu kiểm tra chất lượng cho một dòng hàng. `qc`: mục của mã hàng trong hồ sơ khách (`qcItems`):
+    {"ma": mã trên phiếu, "phi"/"day"/"dai": dung sai dạng chữ '0,5'}; thiếu thì dùng mã hàng và dung sai mặc định."""
+    qc = qc or {}
+    out = {"ma_kt": str(qc.get("ma") or it.get("ma_sp") or "")}
+    dims = item_dims(it)
+    if dims:
+        out["quy_cach"] = " x ".join(dims)
+        for k, d in zip(("phi", "day", "dai"), dims):
+            out[k] = _num(d)
+            out["tc_" + k] = f"{d}±{qc.get(k) or QC_TOL[k]}"
+    else:
+        out.update({k: "" for k in ("quy_cach", "phi", "day", "dai", "tc_phi", "tc_day", "tc_dai")})
+    return out
+
+
+def item_values(rec, qc_items=None):
+    """Giá trị ô theo dòng hàng, mỗi mặt hàng một dict. `qc_items`: {mã hàng: mục phiếu kiểm tra chất lượng} của khách (nếu có)."""
     out = []
     for i, it in enumerate(rec.get("items") or [], 1):
         qty, price = float(it.get("qty") or 0), float(it.get("price") or 0)
@@ -100,6 +138,7 @@ def item_values(rec):
                     "thanh_tien": float(it.get("amount") or 0) or qty * price, "kg": float(it.get("kg") or 0), "kien": float(it.get("kien") or 0),
                     "net": float(it.get("net") or 0), "gross": float(it.get("gross") or 0), "hs_dong": it.get("hs", ""),
                     "dvt_hoa": str(it.get("unit") or "")[:1].upper() + str(it.get("unit") or "")[1:]})
+        out[-1].update(qc_values(it, (qc_items or {}).get(str(it.get("ma_sp") or ""))))
         if str(it.get("po") or "").strip():  # {{so_po}} nằm trong dòng hàng = số PO của chính dòng đó (lô nhiều PO)
             out[-1]["so_po"] = str(it["po"]).strip()
     return out
@@ -337,6 +376,64 @@ def fill_xlsx(data, batch, rows):
                         c.value = f"=ROUNDUP(SUM({col}{a}:{col}{b})/{batch['sl_kien']},0)"
                     else:
                         c.value = so[m.group(1)] if m and m.group(1) in so else _sub(c.value, batch, unknown)
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue(), sorted(unknown)
+
+
+def _copy_images(src, dst):
+    """Chép ảnh (logo, ảnh sản phẩm...) của sheet mẫu sang sheet chép (openpyxl copy_worksheet không chép ảnh)."""
+    from copy import deepcopy
+    from openpyxl.drawing.image import Image
+    for img in getattr(src, "_images", []):
+        raw = img._data()  # _data() đóng luồng của ảnh gốc: gắn lại bản bytes để lúc lưu file vẫn đọc được
+        img.ref = io.BytesIO(raw)
+        new = Image(io.BytesIO(raw))
+        new.width, new.height = img.width, img.height
+        new.anchor = deepcopy(img.anchor)
+        dst.add_image(new)
+
+
+def fill_xlsx_per_item(data, batch, rows):
+    """Form MỖI MÃ HÀNG MỘT PHIẾU (VD phiếu kiểm tra chất lượng TSCO): sheet đầu của file là phiếu mẫu; mỗi mặt hàng một sheet chép
+    từ phiếu mẫu (giữ ô gộp, định dạng, ảnh, thiết lập in), ô {{...}} điền số liệu của chính mặt hàng đó. Tên sheet = mã trên phiếu.
+    Trả (bytes mới, [ô lạ])."""
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(data))
+    tpl = wb.worksheets[0]
+    for ws in wb.worksheets[1:]:
+        wb.remove(ws)
+    rows = rows or [{}]
+    sheets = [tpl]
+    for _ in rows[1:]:
+        ws = wb.copy_worksheet(tpl)
+        _copy_images(tpl, ws)
+        ws.page_setup.orientation, ws.page_setup.paperSize = tpl.page_setup.orientation, tpl.page_setup.paperSize
+        ws.page_margins = copy(tpl.page_margins)
+        ws.print_options.horizontalCentered = tpl.print_options.horizontalCentered
+        ws.sheet_properties.pageSetUpPr = copy(tpl.sheet_properties.pageSetUpPr)
+        ws.page_setup.fitToWidth, ws.page_setup.fitToHeight = tpl.page_setup.fitToWidth, tpl.page_setup.fitToHeight
+        sheets.append(ws)
+    unknown, so, used = set(), batch.get("__so__") or {}, set()
+    for ws, row in zip(sheets, rows):
+        v = dict(batch, **row)
+        for r in ws.iter_rows():
+            for c in r:
+                if isinstance(c.value, str) and "{{" in c.value:
+                    m = _TOKEN.fullmatch(c.value.strip())
+                    if m and m.group(1) in row and isinstance(row[m.group(1)], (int, float)) and not isinstance(row[m.group(1)], bool):
+                        c.value = row[m.group(1)]  # ô chỉ chứa một ô số: ghi số thật
+                    elif m and m.group(1) in so and m.group(1) not in row:
+                        c.value = so[m.group(1)]
+                    else:
+                        c.value = _sub(c.value, v, unknown)
+        title = re.sub(r"[\\/*?:\[\]]", "-", str(row.get("ma_kt") or row.get("ma") or ws.title))[:31] or ws.title
+        base, n = title, 2
+        while title in used:  # hai dòng cùng mã: thêm (2), (3)
+            title = f"{base[:27]} ({n})"
+            n += 1
+        used.add(title)
+        ws.title = title
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue(), sorted(unknown)
