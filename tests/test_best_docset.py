@@ -197,9 +197,12 @@ def test_best_bundle_documents(store, best_customer):
 
     inv = cells(wb["Invoice_29.10"])
     assert "Số ĐĐH: POS269990001" in inv and "Số ĐĐH: POS269990002" in inv and "Ngày:08/10/2026" in inv
-    assert 95 in inv and "Hàng được sản xuất tại Việt Nam, mới 100 %" in inv
+    assert "Hàng được sản xuất tại Việt Nam, mới 100 %" in inv
+    tong_kien = [v for v in inv if isinstance(v, str) and v.startswith("=ROUNDUP(")]
+    assert tong_kien == ["=ROUNDUP(I17/20,0)"] and wb["Invoice_29.10"]["I17"].value == "=SUM(I14:I16)"  # tổng kiện là công thức: tổng SL (ô I17 = 1.900) / 20 ống mỗi kiện = 95
 
     pk = cells(wb["DongGoi_29.10"])
+    assert [v for v in pk if isinstance(v, str) and v.startswith("=ROUNDUP(")] == ["=ROUNDUP(D20/20,0)"]
     assert "CHI TIẾT ĐÓNG GÓI" in pk and "TTR" in pk and "DAP Hải Phòng" in pk and "Thử Nghiệm - Hải Phòng" in pk
 
     vat = wb["VAT_BKAV_29.10"]
@@ -290,3 +293,30 @@ def test_learn_dialog_then_two_pos_one_lot(qapp, store, best_invoice, tmp_path):
     item = next(x for x in store.custom_items["mauthu"] if x["name"].endswith("1350mm"))
     assert item["code"] == "VN0000003" and item["inquiry"] == "QS2600000003"
     assert lot.items[2]["customsNo"] == "PackingF001"
+
+
+def test_best_kien_formula_mixed_div():
+    items = [{"qty": 30, "div": 20}, {"qty": 25, "div": 25}]
+    assert app.kien_formula(items, "D", 17) == "=ROUNDUP(D17/20+D18/25,0)"
+    assert app.kien_formula([{"qty": 30, "div": 20}, {"qty": 10, "div": 20}], "I", 5) == "=ROUNDUP(SUM(I5:I6)/20,0)"
+    assert app.kien_formula([{"qty": 30, "div": 0}], "I", 5) is None
+
+
+def test_best_form_keeps_kien_formula_line_po_and_print_setup(store, best_customer):
+    """Đổi Đóng gói / ĐCCN thành form ở Kho mẫu rồi xuất: tổng kiện vẫn là công thức, cột PO ghi PO của từng dòng, mở ra là in được."""
+    rec = make_rec(store, best_customer)
+    store.form_make(best_customer, "PACK")
+    ws = openpyxl.load_workbook(app.lot_export(store, rec, "PACK")["path"]).worksheets[0]
+    total = next(r for r in range(1, ws.max_row + 1) if ws[f"A{r}"].value == "TOTAL:")
+    assert ws[f"D{total}"].value == f"=SUM(D{total - 3}:D{total - 1})"
+    assert ws[f"B{total + 2}"].value == f"=ROUNDUP(D{total}/20,0)"
+    assert ws.sheet_properties.pageSetUpPr.fitToPage and ws.page_setup.fitToWidth == 1
+    store.form_make(best_customer, "DCCN")
+    ws = openpyxl.load_workbook(app.lot_export(store, rec, "DCCN")["path"]).worksheets[0]
+    assert [ws[f"D{r}"].value for r in (9, 10, 11)] == ["POS269990001", "POS269990001", "POS269990002"]
+
+
+def test_builtin_check_sheet_opens_print_ready(store, best_customer):
+    rec = make_rec(store, best_customer)
+    ws = openpyxl.load_workbook(app.lot_export(store, rec, "CHECK")["path"]).worksheets[0]
+    assert ws.sheet_properties.pageSetUpPr.fitToPage and ws.page_setup.fitToWidth in (1, None) and int(ws.page_setup.paperSize) == 9  # A4, vừa 1 trang ngang

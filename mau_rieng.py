@@ -24,6 +24,7 @@ TOKENS = [
     ("dvt_chung", "Đơn vị tính của lô (theo mặt hàng đầu)"), ("dvt_chung_hoa", "Đơn vị tính của lô, viết hoa chữ đầu"),
     ("ngay_so", "Ngày chứng từ dạng ngày của Excel (ô chỉ chứa ô này)"), ("d", "Ngày (không có số 0 đầu)"), ("m", "Tháng (không có số 0 đầu)"), ("ngay_ngan", "Ngày chứng từ d/m/yyyy"),
     ("han_tt", "Hạn thanh toán dd/mm/yyyy (ngày chứng từ + số ngày nợ)"), ("so_ngay_no", "Số ngày nợ (thanh toán sau)"),
+    ("sl_kien", "Số lượng mỗi kiện (định mức chung của lô, dùng trong công thức tổng kiện)"),
     ("po_dd", "Ngày của ngày PO (2 số)"), ("po_mm", "Tháng của ngày PO (2 số)"), ("po_yyyy", "Năm của ngày PO"), ("tong_tri_gia_phay", "Tổng trị giá dạng 22,534,720"),
 ]
 ITEM_TOKENS = [
@@ -48,6 +49,9 @@ def batch_values(rec, prof, consts):
     d = consts["date"](rec.get("docDate"))
     total = sum(float(it.get("amount") or 0) or float(it.get("qty") or 0) * float(it.get("price") or 0) for it in items)
     num = lambda k: sum(float(it.get(k) or 0) for it in items)
+    kien = consts.get("kien", num("kien"))  # tổng kiện phần mềm tính (Best: tổng SL / SL mỗi kiện, làm tròn cả lô)
+    divs = {float(it.get("div") or 0) for it in items}
+    sl_kien = f"{next(iter(divs)):g}" if len(divs) == 1 and next(iter(divs)) > 0 else ""  # định mức khác nhau: không có số chung
     unit = str((items[0].get("unit") if items else "") or prof.get("unit") or "")
     try:
         days = int(float(rec.get("payDays") or prof.get("payDays") or 30))
@@ -64,7 +68,7 @@ def batch_values(rec, prof, consts):
         "so_po": rec.get("poNumber", ""), "ngay_po": rec.get("poDate", ""), "so_pxk": rec.get("pxkNo", ""), "so_hd": rec.get("hdNo", ""), "so_tk": rec.get("tkNo", ""),
         "ngay": d.strftime("%d/%m/%Y"), "dd": d.strftime("%d"), "mm": d.strftime("%m"), "yyyy": d.strftime("%Y"),
         "tong_sl": _dots(num("qty")), "tong_tri_gia": _dots(total), "tong_tri_gia_chu": consts["words"](round(total)),
-        "tong_kien": _dots(num("kien")), "tong_net": _dots(num("net")), "tong_gross": _dots(num("gross")),
+        "tong_kien": _dots(kien), "sl_kien": sl_kien, "__kien_gop__": bool(consts.get("kien_gop")), "tong_net": _dots(num("net")), "tong_gross": _dots(num("gross")),
         "ten_hang": "; ".join(str(it.get("ten_sp") or "") for it in items), "ma_hang": "; ".join(str(it.get("ma_sp") or "") for it in items),
         "hs": ", ".join(dict.fromkeys(str(it.get("hs") or "") for it in items if it.get("hs"))),
         "dvt_chung": unit, "dvt_chung_hoa": unit[:1].upper() + unit[1:],
@@ -72,7 +76,7 @@ def batch_values(rec, prof, consts):
         "tong_tri_gia_phay": f"{total:,.0f}",
         # số thật của các ô tổng: ô Excel chỉ chứa đúng một ô tổng thì ghi số (cộng/định dạng được), không ghi chữ
         "ngay_so": d.strftime("%d/%m/%Y"),
-        "__so__": {"ngay_so": datetime.datetime(d.year, d.month, d.day), "tong_sl": num("qty"), "tong_tri_gia": total, "tong_kien": num("kien"), "tong_net": num("net"), "tong_gross": num("gross")},
+        "__so__": {"ngay_so": datetime.datetime(d.year, d.month, d.day), "tong_sl": num("qty"), "tong_tri_gia": total, "tong_kien": kien, "tong_net": num("net"), "tong_gross": num("gross")},
     }
 
 
@@ -85,6 +89,8 @@ def item_values(rec):
                     "thanh_tien": float(it.get("amount") or 0) or qty * price, "kg": float(it.get("kg") or 0), "kien": float(it.get("kien") or 0),
                     "net": float(it.get("net") or 0), "gross": float(it.get("gross") or 0), "hs_dong": it.get("hs", ""),
                     "dvt_hoa": str(it.get("unit") or "")[:1].upper() + str(it.get("unit") or "")[1:]})
+        if str(it.get("po") or "").strip():  # {{so_po}} nằm trong dòng hàng = số PO của chính dòng đó (lô nhiều PO)
+            out[-1]["so_po"] = str(it["po"]).strip()
     return out
 
 
@@ -224,6 +230,18 @@ def _is_formula(v):
     return isinstance(v, str) and v.startswith("=")
 
 
+def _shift_print_rows(ws, r, extra):
+    """Vùng in và dòng tiêu đề in lặp: dòng dưới dòng mẫu r dời xuống `extra` dòng, vùng chứa dòng r kéo dài thêm."""
+    pa = re.search(r"\$?([A-Z]+)\$?(\d+):\$?([A-Z]+)\$?(\d+)", str(ws.print_area or ""))
+    if pa:
+        a, b = int(pa.group(2)), int(pa.group(4))
+        ws.print_area = f"{pa.group(1)}{a + extra if a > r else a}:{pa.group(3)}{b + extra if b >= r else b}"
+    t = re.search(r"\$?(\d+):\$?(\d+)", str(ws.print_title_rows or ""))
+    if t:
+        a, b = int(t.group(1)), int(t.group(2))
+        ws.print_title_rows = f"{a + extra if a > r else a}:{b + extra if b >= r else b}"
+
+
 def fill_xlsx(data, batch, rows):
     """Điền ô thay thế vào file Excel (bytes). Dòng có ô theo dòng hàng được nhân lên cho mỗi mặt hàng (chép cả công thức, ô gộp,
     chữ cố định của dòng mẫu; công thức tổng bên dưới tự kéo dài theo số dòng). Trả (bytes mới, [ô lạ])."""
@@ -233,6 +251,7 @@ def fill_xlsx(data, batch, rows):
     wb = openpyxl.load_workbook(io.BytesIO(data))
     unknown = set()
     for ws in wb.worksheets:
+        qty_ranges = []  # (cột, dòng đầu, dòng cuối) của cột {{sl}} sau khi nhân dòng: dùng cho công thức tổng kiện
         # dòng mẫu của bảng hàng (từ dưới lên để chèn dòng không làm lệch chỉ số)
         item_rows = [r for r in range(ws.max_row, 0, -1) if any(isinstance(c.value, str) and _has_item_token(c.value) for c in ws[r])]
         for r in item_rows:
@@ -244,17 +263,33 @@ def fill_xlsx(data, batch, rows):
                     for c in row:
                         if c.row != r and _is_formula(c.value):
                             c.value = shift_formula_rows(c.value, r, extra)
-                merged = [(m.min_row, m.min_col, m.max_row, m.max_col) for m in list(ws.merged_cells.ranges) if m.min_row > r]
+                # ô gộp nằm dưới dòng mẫu dời xuống; ô gộp nhiều dòng chứa dòng mẫu thì kéo dài thêm
+                merged = [(m.min_row + (extra if m.min_row > r else 0), m.min_col, m.max_row + extra, m.max_col)
+                          for m in list(ws.merged_cells.ranges) if m.max_row > r and not (m.min_row == m.max_row == r)]
                 for m in list(ws.merged_cells.ranges):
-                    if m.min_row > r:
+                    if m.max_row > r and not (m.min_row == m.max_row == r):
                         ws.unmerge_cells(str(m))
+                # chiều cao / ẩn của các dòng dưới dòng mẫu dời theo (openpyxl không tự dời): không dời thì dòng chữ 2 hàng
+                # rơi vào dòng cao 15 và bị cắt nửa chữ khi in
+                dims = {k: (d.height, d.hidden) for k, d in list(ws.row_dimensions.items()) if k > r}
+                for k in dims:
+                    del ws.row_dimensions[k]
                 ws.insert_rows(r + 1, extra)
+                for k, (h, hid) in dims.items():
+                    if h:
+                        ws.row_dimensions[k + extra].height = h
+                    if hid:
+                        ws.row_dimensions[k + extra].hidden = True
                 for mr0, mc0, mr1, mc1 in merged:
-                    ws.merge_cells(start_row=mr0 + extra, start_column=mc0, end_row=mr1 + extra, end_column=mc1)
+                    ws.merge_cells(start_row=mr0, start_column=mc0, end_row=mr1, end_column=mc1)
+                _shift_print_rows(ws, r, extra)
                 for k in range(1, extra + 1):
                     _copy_row_style(ws, r, r + k)
                     for c0, c1 in row_merges:
                         ws.merge_cells(start_row=r + k, start_column=c0, end_row=r + k, end_column=c1)
+            qty_ranges = [(c, a + extra, b + extra) for c, a, b in qty_ranges]  # bảng hàng bên dưới (đã nhân trước) bị đẩy xuống
+            qty_ranges += [(get_column_letter(col), r, r + extra) for col, val in tpl
+                           if isinstance(val, str) and (_TOKEN.fullmatch(val.strip()) or [None, None])[1] == "sl"]
             for k in range(max(len(rows), 1)):
                 v = dict(batch, **(rows[k] if rows else {}))
                 for col, val in tpl:
@@ -284,7 +319,13 @@ def fill_xlsx(data, batch, rows):
             for c in row:
                 if isinstance(c.value, str) and "{{" in c.value:
                     m = _TOKEN.fullmatch(c.value.strip())
-                    c.value = so[m.group(1)] if m and m.group(1) in so else _sub(c.value, batch, unknown)
+                    if _is_formula(c.value) and "sl_kien" in tokens_in(c.value) and not batch.get("sl_kien"):
+                        c.value = so.get("tong_kien", 0)  # định mức khác nhau giữa các dòng: ghi số kiện phần mềm tính
+                    elif m and m.group(1) == "tong_kien" and batch.get("__kien_gop__") and batch.get("sl_kien") and len(qty_ranges) == 1:
+                        col, a, b = qty_ranges[0]  # form cũ ghi số: đổi thành công thức tổng SL / SL mỗi kiện
+                        c.value = f"=ROUNDUP(SUM({col}{a}:{col}{b})/{batch['sl_kien']},0)"
+                    else:
+                        c.value = so[m.group(1)] if m and m.group(1) in so else _sub(c.value, batch, unknown)
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue(), sorted(unknown)

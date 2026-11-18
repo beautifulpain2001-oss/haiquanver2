@@ -218,8 +218,8 @@ def fill_pkl(core, wb, rec, prof, tws, title):
             ws[f"{col}{r}"] = v
         for col in "JK":
             ws[f"{col}{r}"].number_format = core.WT2
-    if not _all_div(rec, 20):  # mẫu chia 20 ống/kiện; khác định mức thì ghi số kiện đã tính
-        ws[f"C{pl.map(28)}"] = _kien_total(rec)
+    if not _all_div(rec, 20):  # mẫu chia 20 ống/kiện; khác định mức thì ghi công thức theo định mức thật (vẫn là công thức, sửa SL là tự tính lại)
+        ws[f"C{pl.map(28)}"] = core.kien_formula(items, "I", pl.first[15]) or _kien_total(rec)
     acc3_totals(core, ws, "JK", pl.first[15] + max(len(items), 1))
     unify_pxk(ws, rec.get("pxkNo"))
     return ws
@@ -250,7 +250,7 @@ def fill_pack(core, wb, rec, prof, tws, title):
         for col in "EF":
             ws[f"{col}{r}"].number_format = core.WT2
     if not _all_div(rec, 20):
-        ws[f"B{pl.map(32)}"] = _kien_total(rec)
+        ws[f"B{pl.map(32)}"] = core.kien_formula(items, "D", pl.first[18]) or _kien_total(rec)
     acc3_totals(core, ws, "EF", pl.first[18] + max(len(items), 1))
     unify_pxk(ws, rec.get("pxkNo"))
     return ws
@@ -575,6 +575,10 @@ def autofit_sheet(ws):
                                            indent=al.indent, text_rotation=al.text_rotation)
                 al = cell.alignment
             if not (al and al.wrap_text) and "\n" not in text:
+                # chữ một dòng cỡ lớn (tiêu đề 16-20, tên công ty 12 ở dòng ký cuối trang): dòng mặc định cao 15 thì in bị cắt nửa chữ
+                one = round(size * 1.32 + 0.5, 1)  # cỡ 11 vẫn 15 như mặc định; cỡ 12 -> 16,3; cỡ 20 -> 26,9
+                if r0 == r1 and one > (ws.row_dimensions[r1].height or 15):
+                    need_h[r1] = max(need_h.get(r1, 0), one)
                 continue
             h = _lines_needed(text, width, size, bold) * size * 1.33 + 5
             have = sum((ws.row_dimensions[r].height or 15) for r in range(r0, r1 + 1))
