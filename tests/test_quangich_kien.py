@@ -381,3 +381,26 @@ def test_able_dccn_is_a_monthly_statement_of_all_lots(store):
     assert tot == 15 and ws[f"K{tot}"].value == "=SUM(K12:K14)"
     total = 4320 * 2807 + 4320 * 3181 + 3120 * 5239
     assert app.num_to_vn_words(total) in str(ws[f"B{tot + 3}"].value)
+
+
+def test_cap_nhat_ma_sets_unit_kien_kg_by_code_and_adds_missing(store):
+    """File dữ liệu chuẩn Quang Ích: theo MÃ HÀNG ghi đè ĐVT, SL/kiện, kg/chiếc (giữ tên, đơn giá); mã chưa có thì thêm; ĐVT mặc định của khách đổi theo file."""
+    store.save_learned_customer("quangich", dict(QI), [dict(x) for x in ITEMS])
+    data = {"version": "hongthien-hoc-v1", "cap_nhat_ma": {"khach": "Quang Ích", "don_vi": "Chiếc", "bi": 1, "ma": {
+        "2V01PRB000002": {"name": "Tên khác", "unit": "Chiếc", "div": 250, "kg": 0.7, "price": 1},
+        "2V1004P000001": {"name": "Thanh nẹp góc giấy carton chữ V 50 x 50 x 5 x 1000 mm", "unit": "Chiếc", "div": 20, "kg": 0.03, "price": 5800}}}}
+    res = store.import_learned(data)
+    assert (res["ma_sua"], res["ma_them"]) == (1, 1)
+    items = {it["code"]: it for it in store.custom_items["quangich"]}
+    old = items["2V01PRB000002"]
+    assert (old["name"], old["price"], old["unit"], old["div"], old["kg"]) == (ITEMS[0]["name"], 12800, "Chiếc", 250, 0.7)
+    new = items["2V1004P000001"]
+    assert (new["unit"], new["div"], new["kg"], new["price"]) == ("Chiếc", 20, 0.03, 5800)
+    assert app.PROFILES["quangich"]["unit"] == "Chiếc" and store.get_item_norm(ITEMS[0]["name"])["div"] == 250
+    assert app.lot_defaults("quangich")["tare"] == "1.0"  # cả bì = tịnh + 1 kg mỗi dòng
+    lines = [{"qty": 1000, "div": 250, "kg": 0.696}]
+    app.lot_recalc(lines, "quangich", app.lot_defaults("quangich")["tare"])
+    assert (lines[0]["kien"], lines[0]["net"], lines[0]["gross"]) == (4, 696, 697)
+    with pytest.raises(ValueError, match="chưa có khách"):
+        store.import_learned({"cap_nhat_ma": {"khach": "Khong co", "ma": {}}})
+

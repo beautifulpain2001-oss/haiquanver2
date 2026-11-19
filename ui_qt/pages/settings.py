@@ -253,8 +253,11 @@ class SettingsPage(_Page):
             widgets.warn(self, "Chưa nạp được dữ liệu học", str(e))
             return
         kh = f" Đã thêm khách hàng “{res['khach']}”." if res.get("khach") else ""
-        self.learn_msg.setText(f"✅ {kh} Đã thêm {res['them']} mặt hàng; bỏ qua {res['bo_qua']} mặt hàng đã có định mức.")
-        if res.get("khach"):
+        if "ma_sua" in res:
+            self.learn_msg.setText(f"✅ Đã cập nhật ĐVT, SL/kiện, kg theo mã cho {res['ma_sua']} mặt hàng; thêm mới {res['ma_them']} mã chưa có.")
+        else:
+            self.learn_msg.setText(f"✅ {kh} Đã thêm {res['them']} mặt hàng; bỏ qua {res['bo_qua']} mặt hàng đã có định mức.")
+        if res.get("khach") or "ma_sua" in res:
             self.data_changed.emit()
 
     def save_user(self):
