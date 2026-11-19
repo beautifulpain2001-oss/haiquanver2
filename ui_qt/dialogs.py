@@ -390,7 +390,7 @@ class LearnCustomerDialog(QDialog):
             _m, added, filled = self.core.merge_learned_items(exist, self.draft["items"])
             self.target_msg.setObjectName("banner_info")
             self.target_msg.setText(f"Khách “{old.get('label') or k}” đã có ({len(exist)} mặt hàng). Chứng từ mẫu này sẽ được THÊM VÀO khách đó: {added} mặt hàng mới, "
-                                    f"{filled} mặt hàng cũ được bổ sung chỗ còn trống; mặt hàng và thông tin đã sửa tay được giữ nguyên.")
+                                    f"{filled} mặt hàng cũ được cập nhật (SL/kiện, kg/chiếc, ĐVT lấy theo chứng từ này; mã đã khóa ở bảng Kg & kiện được giữ nguyên).")
         else:
             self.edits["key"].setText(self.init_values.get("key", ""))
             self.target_msg.setObjectName("")
@@ -441,6 +441,8 @@ class LearnCustomerDialog(QDialog):
             k = self.existing_key()
             items = self.core.merge_learned_items(self.store.custom_items.get(k, []), self.draft["items"])[0] if k else self.draft["items"]
             self.key = self.store.save_learned_customer(k or self.edits["key"].text(), self.collect(), items)
+            if k:  # khách đã có: số mới học phải thắng số cũ ở bộ nhớ định mức và Data tổng (nếu không, đọc PO vẫn ra số cũ)
+                self.store.dinh_muc_dong_bo(k, self.draft["items"])
         except ValueError as e:
             widgets.warn(self, "Chưa lưu được", str(e))
             return
