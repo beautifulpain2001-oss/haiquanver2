@@ -1035,7 +1035,7 @@ class DedicatedDataStore:
         Mặc định không ghi đè định mức người dùng đã tự nhập. Trả {"them", "ghi_de", "bo_qua"}."""
         cust = data.get("khach_moi") if isinstance(data, dict) else None
         if not isinstance(data, dict) or not (isinstance(data.get("item_mem"), dict) or isinstance(cust, dict) or isinstance(data.get("tesa_items"), list)
-                                              or isinstance(data.get("cap_nhat_kien"), dict)):
+                                              or isinstance(data.get("cap_nhat_kien"), dict) or isinstance(data.get("cap_nhat_ma"), dict)):
             raise ValueError("File này không phải file dữ liệu học của phần mềm (thiếu mục item_mem).")
         res = {"them": 0, "ghi_de": 0, "bo_qua": 0, "khach": "", "mau": 0}
         ck = data.get("cap_nhat_kien")
@@ -1054,6 +1054,9 @@ class DedicatedDataStore:
                     self.item_mem.setdefault(it["name"], {"div": 0, "kg": it.get("kg") or 0, "hs": it.get("hs") or ""})["div"] = n
                     done.add(str(it["code"]).strip())
             res["kien"], res["kien_thieu"] = len(done), sorted(set(table) - done)
+        cm = data.get("cap_nhat_ma")
+        if isinstance(cm, dict):  # dữ liệu chuẩn theo MÃ HÀNG của một khách đã có (VD Quang Ích): ĐVT, SL/kiện, kg/chiếc; mã chưa có thì thêm vào danh mục
+            res.update(self._apply_code_standard(cm))
         for it in data.get("tesa_items") or []:  # mã Tesa mới (chưa có trong dữ liệu có sẵn, có ở ERP): chỉ bổ sung, không đụng mã cũ
             if isinstance(it, dict) and str(it.get("name") or "").strip() and not any(
                     x.get("name") == it["name"] or (it.get("code") and x.get("code") == it["code"]) for x in self.tesa_items):
@@ -1098,6 +1101,54 @@ class DedicatedDataStore:
             self.item_mem[name] = new
         self.save_catalog()
         return res
+
+    def _apply_code_standard(self, cm):
+        """{"khach": "Quang Ích", "don_vi": "Chiếc", "bi": 1, "ma": {mã: {"unit", "div", "kg", "name", "price"}}}.
+        Mã đã có: ghi đè ĐVT, SL/kiện, kg/chiếc theo file chuẩn (giữ tên, đơn giá). Mã chưa có: thêm mặt hàng mới.
+        "don_vi" (nếu có) thành ĐVT mặc định của khách. Trả {"ma_sua", "ma_them"}."""
+        kh = str(cm.get("khach") or "").strip()
+        key = next((k for k, p in self.custom_profiles.items() if kh and (k == kh.lower() or str(p.get("label") or "").lower() == kh.lower()
+                                                                           or strip_accents_upper(kh) in strip_accents_upper(str(p.get("name") or "")))), None)
+        if not key or key not in PROFILES:
+            raise ValueError(f"Máy này chưa có khách “{kh}” để cập nhật theo mã hàng (nạp file học của khách đó trước).")
+        table = {}
+        for c, v in (cm.get("ma") or {}).items():
+            if not str(c).strip() or not isinstance(v, dict):
+                continue
+            try:
+                table[str(c).strip()] = {"unit": str(v.get("unit") or "").strip(), "div": float(v.get("div") or 0), "kg": float(v.get("kg") or 0),
+                                         "name": str(v.get("name") or "").strip(), "price": float(v.get("price") or 0)}
+            except (TypeError, ValueError):
+                raise ValueError(f"Số liệu của mã “{c}” không phải số.")
+        if str(cm.get("don_vi") or "").strip() and key in self.custom_profiles:
+            self.custom_profiles[key]["unit"] = PROFILES[key]["unit"] = str(cm["don_vi"]).strip()
+        if str(cm.get("bi") or "").strip() and key in self.custom_profiles:  # kg bì cộng thêm mỗi dòng: cả bì = tịnh + bì (ô "bì" ở bước xuất lấy số này)
+            try:
+                bi = float(str(cm["bi"]).replace(",", "."))
+            except ValueError:
+                raise ValueError("Số kg bì (bi) không phải số.")
+            self.custom_profiles[key]["tare"] = PROFILES[key]["tare"] = bi
+            for it in self.custom_items.get(key, []):
+                it["tare"] = bi
+        lst = self.custom_items.setdefault(key, [])
+        sua, them = [], []
+        for code, v in table.items():
+            hits = [it for it in lst if str(it.get("code") or "").strip() == code]
+            if not hits and v["name"]:
+                row = {"name": v["name"], "code": code, "price": v["price"], "div": 0, "kg": 0, "hs": "", "unit": "", "ten_hq": v["name"],
+                       "tare": PROFILES[key].get("tare", 0.0)}
+                lst.append(row)
+                hits = [row]
+                them.append(code)
+            elif hits:
+                sua.append(code)
+            for it in hits:
+                for f in ("unit", "div", "kg"):
+                    if v[f]:
+                        it[f] = v[f]
+                mem = self.item_mem.setdefault(it["name"], {"div": 0, "kg": 0, "hs": it.get("hs") or ""})
+                mem.update({f: v[f] for f in ("div", "kg") if v[f]})
+        return {"ma_sua": len(sua), "ma_them": len(them)}
 
     def export_tesa_new(self):
         """Mã Tesa đã thêm thêm sau khi cài (không nằm trong danh mục có sẵn) để máy khác nạp bằng "Nạp dữ liệu học"."""
