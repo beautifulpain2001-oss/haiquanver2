@@ -174,19 +174,31 @@ def test_merged_lot_refreshes_and_exports(qapp, store, tmp_path):
 
 
 def test_code_links_erp_and_customer_entries(store):
-    """Cùng mã khách: mục ERP (70g, mã ERP) và mục học từ invoice (67g, SL/kiện) gộp một; kg theo ERP, SL/kiện theo invoice; sửa tay thắng cả hai."""
+    """Cùng mã khách: mục ERP (70g, mã ERP) và mục học từ invoice (67g, SL/kiện) gộp một; số khai theo invoice (ưu tiên hơn ERP), ERP chỉ để đối chiếu; sửa tay thắng cả hai."""
     store.save_learned_customer("arzl", {"name": "CÔNG TY TNHH ARIZON L", "label": "ArzL", "mst": "0100000032", "addr": "HY", "unit": "Chiếc"},
                                 [{"name": "Ống giấy 76x5x67", "code": "3609100670001", "price": 10, "div": 0, "kg": 0.067}])
     store._dt_upsert("ArzL", "Ống giấy 76x5x67", ma_hang="3609100670001", kg=0.067, kg_nguon="invoice", kien=200, kien_nguon="invoice", exact=True)
     store._dt_upsert("ArzL", "ống 76x5x67, T.nâu", ma_erp="FG10496-010-00000", kg=0.07, kg_nguon="erp", exact=True, ma_kh="3609100670001")
     m = store.dt_merged("arzl", "FG10496-010-00000")  # tra bằng mã ERP cũng ra mục kia
-    assert (m["kg"], m["kien"], m["ma_erp"], m["ma_hang"]) == (0.07, 200, "FG10496-010-00000", "3609100670001")
+    assert (m["kg"], m["kien"], m["ma_erp"], m["ma_hang"]) == (0.067, 200, "FG10496-010-00000", "3609100670001")
     line = {"ma_sp": "3609100670001", "ten_sp": "Ống giấy 76x5x67", "qty": 1000, "kg": 0.067, "div": 0, "tare": 0}
     assert store.dt_fill_lines("arzl", [line]) == 1
-    assert (line["kg"], line["div"], line["kien"], line["net"], line["ma_erp"]) == (0.07, 200.0, 5, 70.0, "FG10496-010-00000")
-    assert "ERP" in line["read_note"]
+    assert (line["kg"], line["div"], line["kien"], line["net"], line["ma_erp"]) == (0.067, 200.0, 5, 67.0, "FG10496-010-00000")
+    assert "ERP" not in str(line.get("read_note") or "")
+    erp = app.lot_erp_info(store, "arzl", line)  # nút "Hiện dữ liệu ERP": vẫn xem được số ERP
+    assert (erp["ma_erp"], erp["kg"], erp["ten_erp"]) == ("FG10496-010-00000", 0.07, "ống 76x5x67, T.nâu")
     hit = app.lot_lookup_code(store, "arzl", "FG10496-010-00000")
-    assert (hit["kg"], hit["div"], hit["ma_erp"]) == (0.07, 200, "FG10496-010-00000")
+    assert (hit["kg"], hit["div"], hit["ma_erp"]) == (0.067, 200, "FG10496-010-00000")
+    # dòng chưa có kg (invoice không ghi): ERP điền chỗ trống
+    empty = {"ma_sp": "FG10496-010-00000", "ten_sp": "x", "qty": 1000, "kg": 0, "div": 0, "tare": 0}
+    store._dt_upsert("ArzL", "Ống giấy 76x5x67", ma_hang="3609100670001", kg=0, exact=True)
+    store.dt_fill_lines("arzl", [empty])
+    assert empty["kg"] > 0
+    # sửa tay (đã xác nhận) thắng cả invoice lẫn ERP
+    store.dt_confirm_item("arzl", "Ống giấy 76x5x67", "3609100670001", 0.068, 200)
+    line2 = {"ma_sp": "3609100670001", "ten_sp": "Ống giấy 76x5x67", "qty": 1000, "kg": 0.067, "div": 200, "tare": 0}
+    store.dt_fill_lines("arzl", [line2])
+    assert line2["kg"] == 0.068
 
 
 def test_gross_uses_tare_field_for_every_invoice(qapp, store):
@@ -404,3 +416,27 @@ def test_cap_nhat_ma_sets_unit_kien_kg_by_code_and_adds_missing(store):
     with pytest.raises(ValueError, match="chưa có khách"):
         store.import_learned({"cap_nhat_ma": {"khach": "Khong co", "ma": {}}})
 
+
+
+def test_items_step_erp_button_shows_erp_columns_without_changing_invoice_numbers(qapp, store):
+    """Bước kiểm tra dòng: cột ERP ẩn mặc định; bấm "Hiện dữ liệu ERP" thì hiện mã/tên/kg ERP để đối chiếu, số khai vẫn theo invoice."""
+    from ui_qt.pages_lot import C_ERP, COLS, ItemsStep
+    from ui_qt.state import Lot
+    store.save_learned_customer("arzn", {"name": "CÔNG TY TNHH ARIZON N", "label": "ArzN", "mst": "0100000033", "addr": "HY", "unit": "Chiếc"},
+                                [{"name": "Ống giấy 76x5x67", "code": "3609100670009", "price": 10, "div": 200, "kg": 0.067}])
+    store._dt_upsert("ArzN", "ống 76x5x67, T.nâu", ma_erp="FG10496-010-00009", kg=0.07, kg_nguon="erp", exact=True, ma_kh="3609100670009")
+    lot = Lot(app, store)
+    lot.select_customer("arzn")
+    lot.items = [{"po": "P", "ma_sp": "3609100670009", "ten_sp": "Ống giấy 76x5x67", "hs": "", "unit": "Chiếc", "qty": 1000, "price": 10, "div": 200, "kg": 0.067}]
+    lot.recalc()
+    page = ItemsStep(lot)
+    page.refresh()
+    assert all(page.table.isColumnHidden(c) for c in range(C_ERP, len(COLS)))
+    page.erp_btn.click()
+    assert not any(page.table.isColumnHidden(c) for c in range(C_ERP, len(COLS))) and "Ẩn" in page.erp_btn.text()
+    assert page.table.item(0, C_ERP).text() == "FG10496-010-00009" and page.table.item(0, len(COLS) - 1).text() == "0.07"
+    assert "invoice" in page.table.item(0, len(COLS) - 1).toolTip()
+    assert page.table.item(0, 10).text() == "0.067" and lot.items[0]["kg"] == 0.067
+    page.erp_btn.click()
+    assert page.table.isColumnHidden(C_ERP)
+    page.close()

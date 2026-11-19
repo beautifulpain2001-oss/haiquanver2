@@ -695,6 +695,10 @@ class PoStep(QWidget):
 COLS = ["STT", "Đọc PO", "Số PO", "Mã hàng", "Tên hàng hóa & quy cách", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền", "SL/kiện",
         "kg/chiếc", "Số kiện", "KL tịnh", "KL cả bì", "Lưu ý"]
 C_STT, C_READ, C_PO, C_CODE, C_NAME, C_UNIT, C_QTY, C_NOTE = 0, 1, 2, 3, 4, 5, 6, 14
+# Cột ERP: chỉ để đối chiếu, ẩn mặc định; số khai hải quan trên dòng luôn theo invoice/danh mục khách
+ERP_COLS = ["Mã ERP", "Tên ERP", "Tên theo KH (ERP)", "kg/chiếc ERP"]
+C_ERP = len(COLS)
+COLS = COLS + ERP_COLS
 STATUS_BG = {"bad": "#FDE8E8", "check": "#FDF6B2", "hand": "#E1EFFE"}
 STATUS_FG = {"ok": "#03543F", "check": "#92400E", "bad": "#9B1C1C", "hand": "#1E429F"}
 
@@ -730,6 +734,13 @@ class ItemsStep(QWidget):
         self.merge_btn.setToolTip("Gộp các dòng cùng mã hàng + cùng đơn giá thành một dòng (cộng số lượng). Chọn dòng gộp thì khung PO hiện các dòng gốc. Bấm lại để tách ra.")
         self.merge_btn.clicked.connect(self.merge)
         bar.addWidget(self.merge_btn)
+        self.show_erp = False
+        self.erp_btn = QPushButton("🗂  Hiện dữ liệu ERP")
+        self.erp_btn.setObjectName("sec")
+        self.erp_btn.setCheckable(True)
+        self.erp_btn.setToolTip("Mã hàng, tên, kg/chiếc khai hải quan luôn lấy theo invoice (danh mục khách). Bấm để hiện thêm cột dữ liệu ERP đối chiếu; ô kg ERP tô cam khi khác invoice.")
+        self.erp_btn.clicked.connect(self.toggle_erp)
+        bar.addWidget(self.erp_btn)
         bar.addStretch(1)
         self.view_btn = QPushButton("📄  Xem PO")
         self.view_btn.setObjectName("sec")
@@ -840,6 +851,11 @@ class ItemsStep(QWidget):
             self.lot.merge_duplicates()
         self.refresh()
 
+    def toggle_erp(self):
+        self.show_erp = self.erp_btn.isChecked()
+        self.erp_btn.setText("🗂  Ẩn dữ liệu ERP" if self.show_erp else "🗂  Hiện dữ liệu ERP")
+        self.refresh()
+
     def toggle_viewer(self):
         if not self.viewer.isHidden():
             self.hide_viewer()
@@ -860,6 +876,8 @@ class ItemsStep(QWidget):
         for c in list(range(9, 14)) + [C_CODE]:
             self.table.setColumnHidden(c, compact)
         self.table.setColumnWidth(C_NAME, 200 if compact else 260)
+        for c in range(C_ERP, len(COLS)):
+            self.table.setColumnHidden(c, not self.show_erp)
 
     def show_viewer(self):
         self.viewer.show()
@@ -910,6 +928,16 @@ class ItemsStep(QWidget):
                     widgets.fmt_num(it.get("qty")), widgets.fmt_num(it.get("price")), widgets.fmt_num(it.get("amount")),
                     f"{float(it.get('div') or 0):g}", f"{float(it.get('kg') or 0):g}", f"{float(it.get('kien') or 0):g}",
                     widgets.fmt_num(it.get("net"), 2), widgets.fmt_num(it.get("gross"), 2), "; ".join(([f"Gộp {len(it['parts'])} dòng"] if it.get("parts") else []) + issues)]
+            erp = {}
+            if self.show_erp:
+                try:
+                    erp = core.lot_erp_info(lot.store, lot.customer, it)
+                except Exception:  # noqa: BLE001 - chỉ là cột xem thêm, lỗi tra ERP không được chặn bảng
+                    erp = {}
+                vals += [erp.get("ma_erp", ""), erp.get("ten_erp", ""), erp.get("ten_kh", ""), f"{erp['kg']:g}" if erp.get("kg") else ""]
+            else:
+                vals += [""] * len(ERP_COLS)
+            kg_diff = bool(erp.get("kg")) and float(it.get("kg") or 0) > 0 and abs(float(erp["kg"]) - float(it.get("kg") or 0)) > 1e-9
             for c, v in enumerate(vals):
                 cell = QTableWidgetItem("" if v is None else str(v))
                 if 6 <= c <= 13:
@@ -926,6 +954,14 @@ class ItemsStep(QWidget):
                     cell.setToolTip(core.READ_LABELS.get(it.get("read"), "") + (f": {note}" if note else ""))
                 if c == C_NOTE and issues:
                     cell.setToolTip("; ".join(issues))
+                if c >= C_ERP:
+                    cell.setForeground(QColor("#6B7280"))  # chữ xám: dữ liệu ERP chỉ để xem, không dùng khai
+                    if c == len(COLS) - 1:
+                        cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                        if kg_diff:
+                            cell.setBackground(QColor("#FED7AA"))
+                            cell.setForeground(QColor("#9A3412"))
+                            cell.setToolTip(f"ERP ghi {float(erp['kg']):g} kg/chiếc, invoice ghi {float(it.get('kg') or 0):g}: khai theo invoice")
                 self.table.setItem(r, c, cell)
         # Cột Số PO chỉ cần khi lô có nhiều PO; ĐVT ít khi cần soát; cột "Đọc PO" chỉ khi PO được đọc có kiểm tra từng dòng
         self.table.setColumnHidden(C_PO, len({str(x.get("po") or "") for x in lot.items}) <= 1)
