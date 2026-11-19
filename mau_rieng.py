@@ -292,6 +292,9 @@ def _shift_print_rows(ws, r, extra):
         ws.print_title_rows = f"{a + extra if a > r else a}:{b + extra if b >= r else b}"
 
 
+_OLD_PAY = re.compile(r"(=\$?[A-Z]{1,2}\$?\d+)\+45")  # ngày + 45: số ngày nợ đánh dấu khi đổi chứng từ dựng sẵn thành form
+
+
 def fill_xlsx(data, batch, rows):
     """Điền ô thay thế vào file Excel (bytes). Dòng có ô theo dòng hàng được nhân lên cho mỗi mặt hàng (chép cả công thức, ô gộp,
     chữ cố định của dòng mẫu; công thức tổng bên dưới tự kéo dài theo số dòng). Trả (bytes mới, [ô lạ])."""
@@ -340,6 +343,8 @@ def fill_xlsx(data, batch, rows):
             qty_ranges = [(c, a + extra, b + extra) for c, a, b in qty_ranges]  # bảng hàng bên dưới (đã nhân trước) bị đẩy xuống
             qty_ranges += [(get_column_letter(col), r, r + extra) for col, val in tpl
                            if isinstance(val, str) and (_TOKEN.fullmatch(val.strip()) or [None, None])[1] == "sl"]
+            # cả bảng cùng một số hóa đơn: ô {{so_hd}} dòng đầu ghi số, dòng dưới là công thức theo ô đầu (sửa ô đầu là đổi theo)
+            one_hd = len({str(dict(batch, **row).get("so_hd", "")) for row in (rows or [{}])}) == 1
             for k in range(max(len(rows), 1)):
                 v = dict(batch, **(rows[k] if rows else {}))
                 for col, val in tpl:
@@ -347,12 +352,28 @@ def fill_xlsx(data, batch, rows):
                     if isinstance(val, str) and "{{" in val:
                         m = _TOKEN.fullmatch(val.strip())
                         so = batch.get("__so__") or {}
-                        if m and m.group(1) in v and isinstance(v[m.group(1)], (int, float)):
+                        if _is_formula(val):  # công thức có ô thay thế (VD hạn thanh toán =C9+{{so_ngay_no}}): điền số rồi dời theo dòng
+                            f = _sub(val, v, unknown)
+                            addr = get_column_letter(col)
+                            try:
+                                cell.value = Translator(f, origin=f"{addr}{r}").translate_formula(f"{addr}{r + k}") if k else f
+                            except Exception:  # noqa: BLE001 - công thức lạ: chép nguyên
+                                cell.value = f
+                        elif m and m.group(1) == "so_hd" and one_hd:
+                            a = f"${get_column_letter(col)}${r}"
+                            cell.value = str(v.get("so_hd") or "") if k == 0 else f'=IF({a}="","",{a})'
+                            cell.number_format = "@" if k == 0 else "General"
+                        elif m and m.group(1) in v and isinstance(v[m.group(1)], (int, float)):
                             cell.value = v[m.group(1)]  # ô chỉ chứa một ô số: ghi số thật để cộng được
                         elif m and m.group(1) in so and not (rows and m.group(1) in rows[k]):
                             cell.value = so[m.group(1)]
                         else:
                             cell.value = _sub(val, v, unknown)
+                    elif _is_formula(val) and _OLD_PAY.fullmatch(val.replace(" ", "")) and batch.get("so_ngay_no"):
+                        # form làm trước 18/11 còn ghi cứng hạn thanh toán =C9+45 (45 là số ngày của lô mẫu): dùng số ngày nợ của lô
+                        f = _OLD_PAY.sub(lambda mm: mm.group(1) + "+" + str(batch["so_ngay_no"]), val.replace(" ", ""))
+                        addr = get_column_letter(col)
+                        cell.value = Translator(f, origin=f"{addr}{r}").translate_formula(f"{addr}{r + k}") if k else f
                     elif k and _is_formula(val):  # công thức của dòng mẫu: dời theo dòng mới (=E13*F13 -> =E14*F14)
                         addr = get_column_letter(col)
                         try:

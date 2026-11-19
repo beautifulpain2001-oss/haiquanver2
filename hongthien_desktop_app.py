@@ -6024,6 +6024,14 @@ def build_pgh_best_sheet(wb, rec, sheet_name="PhieuGiaoHang"):
     return ws
 
 
+def hd_cell(hd_no, col, first_row, row):
+    """Ô số hóa đơn của một dòng bảng (cả lô một hóa đơn): dòng đầu ghi số, các dòng dưới là công thức lấy theo ô đầu,
+    nên sửa / điền ô đầu (VD 00004938) là các dòng dưới đổi theo; ô đầu còn trống thì các dòng dưới cũng để trống."""
+    if row == first_row:
+        return str(hd_no or "")
+    return f'=IF(${col}${first_row}="","",${col}${first_row})'
+
+
 def build_dccn_best_sheet(wb, rec, sheet_name="DCCN"):
     """对账单 Đối Chiếu Công Nợ: mỗi dòng hàng một dòng, hạn thanh toán = ngày hóa đơn + số ngày."""
     tpl = best_template(PROFILES[rec["customer"]], "dccn")
@@ -6065,12 +6073,14 @@ def build_dccn_best_sheet(wb, rec, sheet_name="DCCN"):
     items = rec.get("items", [])
     for idx, it in enumerate(items, 1):
         r = 8 + idx
-        vals = [idx, rec.get("hdNo", ""), _dmy(d_hd), it.get("po", ""), it.get("ma_sp", ""), it["ten_sp"], it.get("qty", 0),
+        vals = [idx, hd_cell(rec.get("hdNo", ""), "B", 9, r), _dmy(d_hd), it.get("po", ""), it.get("ma_sp", ""), it["ten_sp"], it.get("qty", 0),
                 it.get("price", 0), it.get("amount", 0), "VND", f"{days} ngày", _dmy(due), ""]
         for i, v in enumerate(vals, 1):
             c = put(f"{get_column_letter(i)}{r}", None, v, 11, align_h="left" if i == 6 else ("right" if i in (7, 8, 9) else "center"))
             if i in (7, 8, 9):
                 c.number_format = "#,##0"
+            elif i == 2 and r == 9:
+                c.number_format = "@"  # ô đầu số hóa đơn là chữ: gõ 00004938 không mất số 0 đầu (ô công thức bên dưới để General)
     tr = 9 + len(items)
     put(f"A{tr}", f"A{tr}:F{tr}", "总共/TOTAL ：", 11, True, "center")
     for col in ("G", "I"):
@@ -8418,6 +8428,9 @@ def _form_tokenize_workbook(wb, item, title="Sheet"):
                         c.value = "{{gross}}"  # tịnh + bì mỗi dòng (bì nhập ở bước xuất): lấy số app tính
                     elif in_item and f"*{_FORM_SENT['kg']:g}" in v.replace(" ", ""):
                         c.value = "{{net}}"  # SL x kg/chiếc của mặt hàng mẫu: mỗi mặt hàng một kg nên lấy số app tính
+                    elif in_item and re.search(r"\+%d(?![\d.])" % _FORM_SENT["pay"], v.replace(" ", "")):
+                        # hạn thanh toán =C9+45 (ngày hóa đơn + số ngày nợ của lô mẫu): số ngày lấy theo lô lúc xuất, không cố định 45
+                        c.value = re.sub(r"\+%d(?![\d.])" % _FORM_SENT["pay"], "+{{so_ngay_no}}", v.replace(" ", ""))
                     elif not in_item and re.search(re.escape(div_lit) + r"(?![\d.])", v.replace(" ", "")):
                         # tổng kiện kiểu Best =ROUNDUP(I17/53,0): giữ công thức, SL mỗi kiện lấy theo lô lúc xuất
                         c.value = re.sub(re.escape(div_lit) + r"(?![\d.])", "/{{sl_kien}}", v.replace(" ", ""))

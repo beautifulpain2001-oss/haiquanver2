@@ -223,6 +223,9 @@ def test_best_bundle_documents(store, best_customer):
 
     dccn = wb["DCCN_29.10"]
     assert [c.value for c in dccn[9]][1:5] == ["00009999", "29/10/2026", "POS269990001", "AB0001"]
+    # số hóa đơn: ô đầu ghi số (dạng chữ), các dòng dưới là công thức theo ô đầu (Huy 18/11)
+    assert dccn["B9"].number_format == "@"
+    assert [dccn[f"B{r}"].value for r in (10, 11)] == ['=IF($B$9="","",$B$9)'] * 2
     assert dccn["K9"].value == "60 ngày" and dccn["L9"].value == "28/12/2026"
     assert "甲方（买方）: 测试纺织有限公司" in cells(dccn)
 
@@ -321,9 +324,73 @@ def test_best_form_keeps_kien_formula_line_po_and_print_setup(store, best_custom
     store.form_make(best_customer, "DCCN")
     ws = openpyxl.load_workbook(app.lot_export(store, rec, "DCCN")["path"]).worksheets[0]
     assert [ws[f"D{r}"].value for r in (9, 10, 11)] == ["POS269990001", "POS269990001", "POS269990002"]
+    assert [ws[f"B{r}"].value for r in (9, 10, 11)] == ["00009999", '=IF($B$9="","",$B$9)', '=IF($B$9="","",$B$9)']
+
+
+def _recalc(path, tmp_path):
+    """Mở file bằng LibreOffice, tính lại công thức, lưu ra bản .xlsx có giá trị đã tính."""
+    import shutil
+    import subprocess
+    soffice = shutil.which("soffice")
+    if not soffice:
+        pytest.skip("không có LibreOffice")
+    out = tmp_path / "out"
+    subprocess.run([soffice, "--headless", f"-env:UserInstallation=file://{tmp_path}/lo", "--convert-to", "xlsx", "--outdir", str(out), str(path)],
+                   check=True, capture_output=True, timeout=120)
+    return openpyxl.load_workbook(out / os.path.basename(path), data_only=True).worksheets[0]
+
+
+def test_dccn_invoice_number_follows_first_cell_when_edited(store, best_customer, tmp_path):
+    """Sửa ô số hóa đơn đầu (VD 00004938) thì các dòng dưới đổi theo; ô đầu trống thì dòng dưới cũng trống."""
+    rec = dict(make_rec(store, best_customer), hdNo="")
+    for form in (False, True):
+        if form:
+            store.form_make(best_customer, "DCCN")
+        path = app.lot_export(store, rec, "DCCN")["path"]
+        ws = openpyxl.load_workbook(path).worksheets[0]
+        assert ws["B9"].value in ("", None)
+        assert _recalc(path, tmp_path)["B10"].value in ("", None)
+        ws["B9"] = "00004938"  # người dùng gõ số hóa đơn vào ô đầu
+        edited = tmp_path / f"sua_{int(form)}.xlsx"
+        ws.parent.save(edited)
+        got = _recalc(edited, tmp_path)
+        assert [got[f"B{r}"].value for r in (9, 10, 11)] == ["00004938"] * 3
 
 
 def test_builtin_check_sheet_opens_print_ready(store, best_customer):
     rec = make_rec(store, best_customer)
     ws = openpyxl.load_workbook(app.lot_export(store, rec, "CHECK")["path"]).worksheets[0]
     assert ws.sheet_properties.pageSetUpPr.fitToPage and ws.page_setup.fitToWidth in (1, None) and int(ws.page_setup.paperSize) == 9  # A4, vừa 1 trang ngang
+
+
+def test_dccn_form_from_customer_template_uses_lot_pay_days(store, best_customer, tmp_path):
+    """Form ĐCCN đổi từ file mẫu khách: hạn thanh toán = ngày hóa đơn + số ngày nợ của lô (60), không cố định 45 của lô mẫu."""
+    tws = openpyxl.Workbook()
+    tws.active["A1"] = "对 账 单"
+    tws.active["A31"] = "hết"
+    os.makedirs(os.path.join(app.TEMPLATE_DIR, best_customer), exist_ok=True)
+    tws.save(os.path.join(app.TEMPLATE_DIR, best_customer, "dccn.xlsx"))
+    rec = make_rec(store, best_customer)
+    assert app.best_template(app.PROFILES[best_customer], "dccn")
+    store.form_make(best_customer, "DCCN")
+    path = app.lot_export(store, rec, "DCCN")["path"]
+    ws = openpyxl.load_workbook(path).worksheets[0]
+    assert [ws[f"L{r}"].value for r in (9, 10, 11)] == ["=C9+60", "=C10+60", "=C11+60"]
+    assert ws["K9"].value == "60 ngày"
+    assert [ws[f"B{r}"].value for r in (9, 10)] == ["00009999", '=IF($B$9="","",$B$9)']
+    got = _recalc(path, tmp_path)
+    assert {got[f"L{r}"].value.date() for r in (9, 10, 11)} == {__import__("datetime").date(2026, 12, 28)}
+
+
+def test_old_form_with_fixed_45_days_uses_lot_pay_days():
+    """Form làm trước đây còn ghi cứng =C9+45: lúc xuất đổi thành số ngày nợ của lô."""
+    import io
+    import mau_rieng
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws["A9"], ws["C9"], ws["L9"] = "{{ten}}", "{{ngay_so}}", "=C9+45"
+    buf = io.BytesIO()
+    wb.save(buf)
+    data, _ = mau_rieng.fill_xlsx(buf.getvalue(), {"so_ngay_no": "60"}, [{"ten": "A"}, {"ten": "B"}])
+    out = openpyxl.load_workbook(io.BytesIO(data)).active
+    assert (out["L9"].value, out["L10"].value) == ("=C9+60", "=C10+60")

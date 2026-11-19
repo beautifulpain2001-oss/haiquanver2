@@ -371,13 +371,14 @@ def fill_dccn(core, wb, rec, prof, tws, title):
     for i, it in enumerate(items):
         r = r0 + i
         po = it.get("po", "")
-        vals = {"A": i + 1, "B": rec.get("hdNo", "") if i == 0 else f"=$B${r0}", "C": d_hd if i == 0 else f"=$C${r0}",
+        vals = {"A": i + 1, "B": core.hd_cell(rec.get("hdNo", ""), "B", r0, r), "C": d_hd if i == 0 else f"=$C${r0}",
                 "D": po,
                 "E": it.get("ma_sp", ""), "F": it["ten_sp"], "G": it.get("qty", 0), "H": it.get("price", 0), "I": f"=G{r}*H{r}",
                 "J": "VND", "K": f"{days} ngày", "L": f"=C{r}+{days}"}
         for col, v in vals.items():
             ws[f"{col}{r}"] = v
         ws[f"C{r}"].number_format = ws[f"L{r}"].number_format = "dd/mm/yyyy"
+        ws[f"B{r}"].number_format = "@" if i == 0 else "General"  # ô đầu là chữ (giữ số 0 đầu); dòng dưới là công thức theo ô đầu
     base = pl.map(24)
     texts = {1: f"Bên bán 乙方（卖方）:  {core.HT_NAME}", 2: f"Mã số doanh nghiệp/Mã số thuế 企业编码/税务编码：{core.MST_HT}",
              3: f"Địa chỉ trụ sở chính地址：{core.ADDR_HT.rstrip('.')}", 4: f"Số tài khoản账号：'{core.HT_BANK_ACC}",
