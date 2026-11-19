@@ -234,6 +234,8 @@ def test_m22_and_lam_san_forms_only_when_due(qapp, store, tmp_path):
     item = {"stt": 1, "po": "P", "ma_sp": "A1", "ten_sp": "Ống A", "unit": "chiếc", "qty": 100, "price": 10, "amount": 1000, "div": 50, "kg": 0.1, "kien": 2, "net": 10.0, "gross": 11.0}
     rec = dict(make_rec(store, "arz22", [item]), tkNo="308800000001", tkNhap="108500000002", docDate="2026-11-09")
     assert "M22" in app.lot_bundle_modes(rec)
+    # Arizon đã ghi sẵn "PLX,DNTT,BBGH" ở chứng từ làm thêm: vẫn phải có Mẫu số 22
+    assert "M22" in app.customer_extra_docs({"name": "CÔNG TY TNHH CÔNG NGHỆ ARIZON (VIỆT NAM)", "extraDocs": "PLX,DNTT,BBGH"})
     res = app.lot_export(store, rec, "M22")
     text = mau_rieng.preview("docx", open(res["path"], "rb").read())["text"]
     assert "308800000001" in text and "108500000002" in text and "9/11/2026" in text and "308829221060" not in text

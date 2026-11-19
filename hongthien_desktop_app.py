@@ -4785,10 +4785,11 @@ def customer_extra_docs(prof):
         return list(SUNLU_DOCS)
     raw = str((prof or {}).get("extraDocs") or "")
     codes = [c for c in re.split(r"[,;\s]+", raw.upper()) if c in EXTRA_DOC_CODES]
-    if "ARIZON" in str((prof or {}).get("name") or "").upper() and "PLX" not in codes:
-        codes = ["PLX"] + codes  # Arizon luôn có Phụ lục X, kể cả khi mục "chứng từ làm thêm" đã ghi chứng từ khác
+    if "ARIZON" in str((prof or {}).get("name") or "").upper():
+        if "PLX" not in codes:
+            codes = ["PLX"] + codes  # Arizon luôn có Phụ lục X, kể cả khi mục "chứng từ làm thêm" đã ghi chứng từ khác
         if "M22" not in codes:
-            codes.append("M22")  # và Mẫu số 22 (thông báo hoàn thành thủ tục nhập khẩu tại chỗ)
+            codes.append("M22")  # và Mẫu số 22, kể cả khi "chứng từ làm thêm" đã ghi sẵn PLX (trước đây bị bỏ sót)
     if is_able(prof) and "DCCN" not in codes:
         codes.append("DCCN")  # Able luôn có Bảng đối chiếu công nợ
     return codes
