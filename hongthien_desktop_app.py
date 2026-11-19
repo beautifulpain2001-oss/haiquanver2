@@ -1667,11 +1667,12 @@ class DedicatedDataStore:
         return hit
 
     def dt_merged(self, cust_key, code):
-        """Một sản phẩm gộp từ các mục cùng mã (mục ERP + mục học từ invoice): kg theo tay > ERP > invoice, SL/kiện theo tay > invoice, kèm mã/tên ERP và tên theo khách. None nếu không có mã."""
+        """Một sản phẩm gộp từ các mục cùng mã (mục ERP + mục học từ invoice): kg theo tay > invoice > ERP, SL/kiện theo tay > invoice, kèm mã/tên ERP và tên theo khách. None nếu không có mã.
+        Số liệu khai hải quan lấy từ invoice luôn được ưu tiên hơn ERP; ERP chỉ điền chỗ còn trống (xem dt_erp_info để đối chiếu)."""
         hit = self.dt_by_code(cust_key, code)
         if not hit:
             return None
-        rk = {"tay": 3, "erp": 2, "invoice": 1, "": 0}
+        rk = self.DT_RANK
         out = dict(max(hit, key=lambda x: (bool(x.get("kg")) + bool(x.get("kien")), self.DT_RANK.get(x.get("kg_nguon", ""), 0))))
         kgs = [x for x in hit if x.get("kg")]
         if kgs:
@@ -1686,6 +1687,19 @@ class DedicatedDataStore:
         erp = next((x for x in hit if x.get("ma_erp")), None)
         out["ten_erp"] = (erp.get("ten_erp") or erp.get("ten") or "") if erp else ""
         return out
+
+    def dt_erp_info(self, cust_key, code):
+        """Dữ liệu ERP của một mã (chỉ để đối chiếu, không dùng làm số khai): mã ERP, tên ERP, tên theo KH (ERP), kg/chiếc theo ERP.
+        {} nếu mã không có trong ERP."""
+        code = str(code or "").strip()
+        hit = self.dt_by_code(cust_key, code) if code else []
+        erp = [x for x in hit if x.get("ma_erp") or x.get("kg_nguon") == "erp"]
+        if not erp:
+            return {}
+        kg = next((x["kg"] for x in erp if x.get("kg") and x.get("kg_nguon") == "erp"), 0)
+        first = lambda f: next((x[f] for x in erp if x.get(f)), "")
+        return {"ma_erp": first("ma_erp"), "ten_erp": next((x.get("ten_erp") or x.get("ten") or "" for x in erp if x.get("ma_erp")), ""),
+                "ten_kh": first("ten_kh"), "kg": float(kg or 0)}
 
     def dt_lookup(self, cust_key, name="", code=""):
         cands = self.dt_items_for(cust_key)
@@ -1936,8 +1950,9 @@ class DedicatedDataStore:
         return n
 
     def dt_fill_lines(self, cust_key, lines):
-        """Liên thông mã khách ↔ ERP: dòng có mã nằm trong Data tổng thì lấy mã/tên ERP, kg/chiếc theo ERP (hoặc số đã xác nhận) và SL/kiện; dòng không có mã thì chỉ điền chỗ còn thiếu theo tên.
-        Số kg khác với danh mục khách sẽ được ghi chú ở dòng. Trả số dòng được điền/đổi."""
+        """Liên thông mã khách ↔ ERP: dòng có mã nằm trong Data tổng thì gắn mã/tên ERP (để đối chiếu) và điền kg/chiếc, SL/kiện còn thiếu;
+        số liệu đã có từ invoice/danh mục khách KHÔNG bị ERP đè (chỉ số người dùng đã xác nhận mới đè). Dòng không có mã thì chỉ điền chỗ còn thiếu theo tên.
+        Trả số dòng được điền/đổi."""
         n = 0
         for ln in lines:
             code = str(ln.get("ma_sp") or "").strip()
@@ -1955,10 +1970,10 @@ class DedicatedDataStore:
                     if by_code.get(k_dt) and ln.get(k_ln) != by_code[k_dt]:
                         ln[k_ln] = by_code[k_dt]
             old_kg = float(ln.get("kg") or 0)
-            if it.get("kg") and (not old_kg or (by_code and abs(old_kg - float(it["kg"])) > 1e-9 and it.get("kg_nguon") in ("erp", "tay"))):
+            if it.get("kg") and (not old_kg or (by_code and abs(old_kg - float(it["kg"])) > 1e-9 and it.get("kg_nguon") == "tay")):
                 ln["kg"], changed = float(it["kg"]), True
                 if old_kg:
-                    note = f"kg/chiếc lấy theo {'ERP' if it.get('kg_nguon') == 'erp' else 'số đã xác nhận'} ({it['kg']:g}), danh mục khách ghi {old_kg:g}"
+                    note = f"kg/chiếc lấy theo số đã xác nhận ({it['kg']:g}), danh mục khách ghi {old_kg:g}"
                     ln["read_note"] = (str(ln.get("read_note") or "") + "; " if ln.get("read_note") else "") + note
             old_div = float(ln.get("div") or 0)
             if it.get("kien") and (not old_div or (by_code and it.get("kien_nguon") == "tay" and float(it["kien"]) != old_div)):
@@ -3547,7 +3562,7 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
         for r2 in rows2:
             item, name, code, src = resolve_tesa_item(r2, tesa_catalog, getattr(data_store, "erp_catalog", None))
             dt = tesa_erp_entry(data_store, r2["code"], r2["desc"])
-            if dt and (dt.get("ten") or dt.get("ten_kh")):  # tên theo danh mục sản phẩm của khách trong ERP (Data tổng) là tên chuẩn
+            if dt and (dt.get("ten") or dt.get("ten_kh")) and src != "tesa":  # mã đã có trong danh mục Tesa (học từ invoice): giữ tên đó, ERP chỉ để đối chiếu
                 # mã chưa có trong danh mục riêng của Tesa: dùng cột "Tên sản phẩm theo KH" của ERP
                 erp_name = dt.get("ten_kh") or dt.get("ten")  # tên hàng hóa = "Tên sản phẩm theo KH" của ERP (tên Tesa dùng trên chứng từ); chưa có thì tên ERP
                 name, src = re.sub(r"\s+", " ", str(erp_name)).strip(), "erp"
@@ -3595,7 +3610,7 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
         known = next((x for x in tesa_catalog if x["code"] == res["code"]), None)
         name = known["name"] if known else f"Ống lõi giấy {res['desc']} ({res['code']})"
         dt = tesa_erp_entry(data_store, res["code"], name)
-        if dt and (dt.get("ten") or dt.get("ten_kh")):  # tên theo danh mục sản phẩm của khách trong ERP (Data tổng); mã chưa có trong danh mục Tesa: tên theo KH
+        if dt and (dt.get("ten") or dt.get("ten_kh")) and not known:  # mã chưa có trong danh mục Tesa (học từ invoice): tên theo KH của ERP
             name = re.sub(r"\s+", " ", str(dt.get("ten_kh") or dt.get("ten"))).strip()
         hq_std, hd_std = tesa_names_for(res["code"])
         if hd_std:
@@ -8887,7 +8902,7 @@ def lot_item_defaults(customer, po="", tare_text="1.0"):
 
 def lot_lookup_code(store, customer, code):
     """Tra mã hàng (mã khách, mã ERP hoặc mã cũ) trong danh mục Tesa / khách đã học và Data tổng (ERP); trả dict điền sẵn
-    (tên theo khách, HS, ĐVT, giá, SL/kiện, kg, mã ERP, tên ERP) hoặc None. Số đã xác nhận > ERP > danh mục khách."""
+    (tên theo khách, HS, ĐVT, giá, SL/kiện, kg, mã ERP, tên ERP) hoặc None. Số đã xác nhận > danh mục khách / invoice > ERP."""
     code = (code or "").strip()
     hit = next((x for x in store.tesa_items + store.custom_items.get(customer, []) if code and (x.get("code") == code or code == str(x.get("erp") or ""))), None)
     try:
@@ -8897,13 +8912,33 @@ def lot_lookup_code(store, customer, code):
     if not hit and not dt:
         return None
     mem = store.get_item_norm(hit["name"]) if hit else None
-    pick = lambda mk, dk: (mem or {}).get(mk) or (dt or {}).get(dk) or (hit or {}).get(mk) or 0
+    dt_tay = lambda dk: (dt or {}).get(dk) if (dt or {}).get(dk + "_nguon") == "tay" else 0
+    pick = lambda mk, dk: (mem or {}).get(mk) or dt_tay(dk) or (hit or {}).get(mk) or (dt or {}).get(dk) or 0
     out = {"ten_sp": (hit or {}).get("name") or (dt or {}).get("ten_kh") or (dt or {}).get("ten", ""), "hs": (hit or {}).get("hs") or (dt or {}).get("hs") or "48229090",
            "unit": (hit or {}).get("unit") or (PROFILES.get(customer) or {}).get("unit", "ống"), "price": (hit or {}).get("price", 0),
            "div": pick("div", "kien"), "kg": pick("kg", "kg")}
     if dt:
         out.update(ma_erp=dt.get("ma_erp", ""), ten_erp=dt.get("ten_erp", ""))
     return out
+
+
+def lot_erp_info(store, customer, item):
+    """Dữ liệu ERP của một dòng hàng, chỉ để xem đối chiếu (nút "Hiện dữ liệu ERP" ở bước kiểm tra dòng): {ma_erp, ten_erp, ten_kh, kg}.
+    Số khai hải quan trên dòng vẫn theo invoice/danh mục khách; hàm này không đổi dòng. {} nếu không có dữ liệu ERP."""
+    code = str((item or {}).get("ma_sp") or "").strip()
+    try:
+        info = dict(store.dt_erp_info(customer, code)) if code else {}
+    except Exception:  # noqa: BLE001 - Data tổng chưa nạp/hỏng: chỉ dùng thông tin đã gắn trên dòng
+        info = {}
+    for f in ("ma_erp", "ten_erp"):
+        if not info.get(f) and (item or {}).get(f):
+            info[f] = item[f]
+    if code and not info.get("ten_erp"):  # danh mục ERP đầu TM (Tesa): mã hàng chính là mã ERP
+        e = next((x for x in getattr(store, "erp_catalog", None) or [] if str(x.get("ma_sp") or "").strip() == code), None)
+        if e:
+            info["ma_erp"] = info.get("ma_erp") or code
+            info["ten_erp"] = re.sub(r"\s+", " ", str(e.get("ten_sp") or "")).strip()
+    return {k: v for k, v in info.items() if v}
 
 
 def lot_item_from_values(store, customer, vals, tare_text="1.0", base=None):
