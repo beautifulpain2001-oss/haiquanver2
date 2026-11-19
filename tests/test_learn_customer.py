@@ -232,3 +232,39 @@ def test_find_existing_customer_matches_name_without_accents_or_by_tax_code(stor
     assert app.find_existing_customer(store, "Công ty khác", "0999") == ""
     items, added, filled = app.merge_learned_items([{"code": "A", "name": "Hàng A", "price": 10, "kg": 0}], [{"code": "A", "name": "Hàng A", "price": 99, "kg": 0.5}, {"code": "B", "name": "Hàng B"}])
     assert added == 1 and filled == 1 and items[0]["price"] == 10 and items[0]["kg"] == 0.5
+
+
+def test_sl_kien_lay_so_chia_trong_cong_thuc_khong_chia_nguoc(tmp_path):
+    """Số kiện =ROUNDUP(F/300,0): 1000 cái -> 4 kiện. SL/kiện phải là 300 (số chia), không phải 1000/4 = 250."""
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "INVOICE"
+    ws.append(["STT", "Mã hàng", "Tên hàng", "ĐVT", "Số lượng", "Đơn giá", "Thành tiền", "Số kiện"])
+    ws.append([1, "A1", "Ống giấy 77x2.5x1265", "Chiếc", 1000, 10, "=E2*F2", "=ROUNDUP((E2/300),0)"])
+    ws.append([2, "A2", "Nẹp góc chữ V 50x50x5", "Chiếc", 1000, 10, "=E3*F3", "=ROUNDUP((E3/20),0)"])
+    ws.append([3, "A3", "Ống giấy 76x2x260", "Chiếc", 215, 10, "=E4*F4", "=ROUND(E4/10,0)"])
+    ws.append([4, "A4", "Ống giấy 76x7x270", "Chiếc", 900, 10, "=E5*F5", 9])  # chỉ có giá trị: 900/9 = 100
+    p = tmp_path / "inv.xlsx"
+    wb.save(p)
+    # giả lập Excel đã tính (bản data_only): ghi giá trị số kiện đã làm tròn vào bản sao
+    vals = openpyxl.load_workbook(p)
+    for r, v in ((2, 4), (3, 50), (4, 22)):
+        vals.active.cell(r, 8).value = v
+    pv = tmp_path / "inv_vals.xlsx"
+    vals.save(pv)
+    real_load = openpyxl.load_workbook
+
+    def fake_load(path, *a, **k):
+        return real_load(pv if k.get("data_only") else path, *a, **k)
+
+    import hongthien_desktop_app as app_mod
+    orig = app_mod.openpyxl.load_workbook
+    app_mod.openpyxl.load_workbook = fake_load
+    try:
+        res = app_mod.learn_from_invoice_excel(str(p))
+    finally:
+        app_mod.openpyxl.load_workbook = orig
+    divs = {it["code"]: it.get("div") for it in res["items"]}
+    assert divs == {"A1": 300, "A2": 20, "A3": 10, "A4": 100}
+    assert all("_div_ct" not in it for it in res["items"])

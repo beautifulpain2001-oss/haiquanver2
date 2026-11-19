@@ -6380,6 +6380,18 @@ def _sheet_date(rows):
     return best or datetime.date(1900, 1, 1)
 
 
+def _kien_formula_div(fcell):
+    """Số chia trong công thức cột Số kiện: '=ROUNDUP((F14/300),0)' / '=ROUND(G16/196,0)' / '=I13/10' -> 300 / 196 / 10.
+    Trả 0 nếu ô không phải công thức hoặc chia cho ô khác (không có số)."""
+    if not (isinstance(fcell, str) and fcell.startswith("=")):
+        return 0
+    m = re.search(r"/\s*\(?\s*(\d+(?:\.\d+)?)(?![\d.]|\s*[*/^])", fcell)
+    if not m or float(m.group(1)) <= 0:
+        return 0
+    v = float(m.group(1))
+    return int(v) if v.is_integer() else v
+
+
 def _learn_norm_table(rows):
     """Bảng định mức đóng gói kiểu 'Mã code | Quy cách | Số lượng ống / 1 túi' -> {mã: SL/kiện}."""
     for i, r in enumerate(rows[:10]):
@@ -6506,14 +6518,14 @@ def learn_from_invoice_excel(file_path, ignore_norms=False):
                 it["kg"] = round(net / qty, 6)
             if qty > 0 and isinstance(net, (int, float)) and isinstance(gross, (int, float)) and gross > net > 0:
                 it["tare"] = round(gross - net, 3)
-            if qty > 0 and isinstance(kien, (int, float)) and kien > 0:
+            # SL/kiện: ưu tiên SỐ CHIA trong công thức Số kiện (=ROUNDUP(F14/300,0) -> 300). Không chia ngược
+            # SL cho số kiện đã tính: số kiện đã làm tròn lên nên 1000/4 = 250 thay vì 300.
+            fdiv = _kien_formula_div(frows[r_i][cols["kien"][0]] if cols.get("kien") and r_i < len(frows) and cols["kien"][0] < len(frows[r_i]) else None)
+            if fdiv:
+                it["div"], it["_div_ct"] = fdiv, True
+            elif qty > 0 and isinstance(kien, (int, float)) and kien > 0:
                 div = qty / kien
                 it["div"] = int(round(div)) if abs(div - round(div)) < 1e-6 else round(div, 3)
-            elif r_i < len(frows) and cols.get("kien"):
-                fcell = frows[r_i][cols["kien"][0]] if cols["kien"][0] < len(frows[r_i]) else None
-                m = re.search(r"/\s*\(?\s*(\d+(?:\.\d+)?)\s*\)?", str(fcell)) if isinstance(fcell, str) and fcell.startswith("=") else None
-                if m and float(m.group(1)) > 0:
-                    it["div"] = int(float(m.group(1))) if float(m.group(1)).is_integer() else float(m.group(1))
             items.append(it)
         if items:
             sheets.append((_sheet_date(rows), ws.title, items))
@@ -6530,10 +6542,14 @@ def learn_from_invoice_excel(file_path, ignore_norms=False):
     for it in items:
         by_name.setdefault(clean_str(it["name"]), []).append(it)
     for group in by_name.values():
-        ints = [x["div"] for x in group if x.get("div") and float(x["div"]).is_integer()]
+        tu_ct = [x["div"] for x in group if x.get("div") and x.get("_div_ct")]  # số chia trong công thức là chuẩn nhất
+        ints = tu_ct or [x["div"] for x in group if x.get("div") and float(x["div"]).is_integer()]
         if ints:
             for x in group:
-                x["div"] = ints[0]
+                if not (x.get("code", "") in norms and not ignore_norms):  # bảng định mức riêng vẫn thắng
+                    x["div"] = ints[0]
+    for it in items:
+        it.pop("_div_ct", None)
     with_po = next((its for _, _, its in sheets if any(x.get("po") for x in its)), [])
     pos = [it["po"] for it in with_po if it.get("po")]
     with_tare = next((its for _, _, its in sheets if any(x.get("tare") for x in its)), [])
