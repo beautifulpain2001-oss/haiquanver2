@@ -95,6 +95,11 @@ class CustomersPage(_Page):
         self.learn_btn.clicked.connect(self.learn)
         self.add_btn = QPushButton("➕  Thêm khách hàng mới")
         self.add_btn.clicked.connect(self.add)
+        self.dm_btn = QPushButton("⚖  Kg && kiện theo khách")
+        self.dm_btn.setObjectName("sec")
+        self.dm_btn.setToolTip("Bảng chuẩn ĐVT, SL/kiện, kg/chiếc của từng mã hàng và bì mỗi dòng, theo từng khách: sửa trực tiếp, số sửa tay được giữ.")
+        self.dm_btn.clicked.connect(lambda: self.open_dinh_muc())
+        top.addWidget(self.dm_btn, 0, Qt.AlignTop)
         top.addWidget(self.learn_btn, 0, Qt.AlignTop)
         top.addWidget(self.add_btn, 0, Qt.AlignTop)
         self.lay.addLayout(top)
@@ -190,6 +195,17 @@ class CustomersPage(_Page):
         self.forms_lay = QVBoxLayout(self.forms_box)
         self.forms_lay.setContentsMargins(6, 6, 6, 6)
         iv.addWidget(self.forms_box)
+        sec("4. Kg & kiện theo mã hàng")
+        dm = QVBoxLayout()
+        self.dm_info = QLabel("")
+        self.dm_info.setWordWrap(True)
+        self.dm_info.setStyleSheet("color:#475569")
+        dm.addWidget(self.dm_info, 1)
+        self.dm_open = QPushButton("Mở bảng kg && kiện")
+        self.dm_open.setObjectName("sec")
+        self.dm_open.clicked.connect(lambda: self.open_dinh_muc(self.current_key()))
+        dm.addWidget(self.dm_open, 0, Qt.AlignLeft)
+        iv.addLayout(dm)
         # phần còn lại gập lại: các ô thông tin khác + công cụ
         self.more_btn = QToolButton()
         self.more_btn.setText("Thông tin khác và công cụ  ▸")
@@ -304,6 +320,10 @@ class CustomersPage(_Page):
         for n in (prof.get("rieng") or []) if key else []:
             word = n.lower().endswith(".docx")
             items.append(("W" if word else "X", "#2563EB" if word else "#059669", f"{n.rsplit('.', 1)[0]} ({'Word' if word else 'Excel'})"))
+        n_dm = len(self.store.items_for_customer(key) or []) if key else 0
+        self.dm_open.setEnabled(bool(key) and (n_dm > 0 or custom))
+        self.dm_info.setText((f"{n_dm} mã hàng · bì {self.store.dinh_muc_bi(key):g} kg/dòng. Sửa SL/kiện, kg/chiếc, ĐVT trực tiếp; số sửa tay được giữ."
+                              if n_dm or custom else "Khách này không có danh mục mã hàng.") if key else "")
         for badge, color, text in items or [("", "", "Chưa có mẫu nào (thêm ở “Thông tin khác và công cụ → Thêm mẫu riêng”)")]:
             lab = QLabel((f"<span style='background:{color};color:white;font-weight:700'>&nbsp;{badge}&nbsp;</span>&nbsp; " if badge else "") + text)
             self.forms_lay.addWidget(lab)
@@ -342,6 +362,15 @@ class CustomersPage(_Page):
             self.msg.setText(f"✅  Đã lưu khách “{dlg.key}”: nay có {len(self.store.custom_items.get(dlg.key, []))} mã hàng. Chọn khách này ở Làm chứng từ rồi nạp PO.")
             self.refresh(select=dlg.key)
             self.changed.emit()
+
+    def open_dinh_muc(self, key=None):
+        """Bảng quản lý kg & kiện theo khách (mặc định mở khách đang chọn)."""
+        from ..dinh_muc import DinhMucDialog
+        dlg = DinhMucDialog(self.core, self.store, key or self.current_key(), self)
+        dlg.exec()
+        self.on_select()
+        self.changed.emit()
+        return dlg
 
     def export_learned(self, path=None):
         key = self.current_key()

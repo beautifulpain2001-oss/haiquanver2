@@ -1150,6 +1150,198 @@ class DedicatedDataStore:
                 mem.update({f: v[f] for f in ("div", "kg") if v[f]})
         return {"ma_sua": len(sua), "ma_them": len(them)}
 
+    # ---- Quản lý kg & kiện theo khách (trang Khách hàng → "Kg & kiện theo khách") ------------------------------------
+    # Một bảng duy nhất cho mỗi khách: ĐVT, SL/kiện, kg/chiếc của từng mã + bì mỗi dòng. Đây là nguồn chuẩn: lưu ở đây thì ghi
+    # đồng bộ vào danh mục khách, bộ nhớ định mức (theo tên) và Data tổng (nguồn 'tay'), nên PO, tra mặt hàng và file xuất dùng
+    # cùng một số. Dòng có "khoa" (sửa tay) không bị học Invoice / ERP ghi đè.
+    DM_FIELDS = ("unit", "div", "kg")
+
+    def dinh_muc_customers(self):
+        """Khách có danh mục mã hàng để quản lý kg & kiện: [(mã khách, tên hiển thị)]."""
+        out = []
+        for k, p in PROFILES.items():
+            if self.items_for_customer(k) or (k not in BUILTIN_CUSTOMERS and k in self.custom_profiles):
+                out.append((k, str(p.get("label") or k)))
+        return out
+
+    def _dm_effective(self, key, it):
+        """Số phần mềm đang dùng thật cho một mặt hàng: bộ nhớ định mức theo tên > danh mục; số Data tổng đã xác nhận (tay) theo mã thắng cả hai
+        (đúng thứ tự lúc đọc PO / tra mặt hàng)."""
+        mem = self.get_item_norm(it.get("name")) or {}
+        div, kg = float(mem.get("div") or it.get("div") or 0), float(mem.get("kg") or it.get("kg") or 0)
+        code = str(it.get("code") or "").strip()
+        if code:
+            try:
+                dt = self.dt_merged(key, code)
+            except Exception:  # noqa: BLE001 - Data tổng chưa nạp/hỏng: theo danh mục
+                dt = None
+            if dt and dt.get("kien_nguon") == "tay" and dt.get("kien"):
+                div = float(dt["kien"])
+            if dt and dt.get("kg_nguon") == "tay" and dt.get("kg"):
+                kg = float(dt["kg"])
+        return div, kg
+
+    def dinh_muc_rows(self, key):
+        """Bảng kg & kiện của khách: [{code, name, unit, div, kg, khoa, lech}] theo số phần mềm đang dùng thật.
+        `lech` = các nơi lưu đang ghi số khác nhau (lưu bảng là đồng bộ lại)."""
+        if key not in PROFILES:
+            raise ValueError("Không tìm thấy khách hàng này.")
+        rows = []
+        for it in self.items_for_customer(key) or []:
+            div, kg = self._dm_effective(key, it)
+            lech = abs(div - float(it.get("div") or 0)) > 1e-9 or abs(kg - float(it.get("kg") or 0)) > 1e-9
+            rows.append({"code": str(it.get("code") or ""), "name": str(it.get("name") or ""), "unit": str(it.get("unit") or PROFILES[key].get("unit") or ""),
+                         "div": div, "kg": kg, "khoa": bool(it.get("khoa")), "lech": lech})
+        return rows
+
+    def dinh_muc_bi(self, key):
+        """Bì cộng thêm mỗi dòng (kg) của khách: cả bì = tịnh + bì."""
+        return float((PROFILES.get(key) or {}).get("tare") or 0.0)
+
+    def _dm_sync(self, key, items):
+        """Ghi số của các mục danh mục `items` vào bộ nhớ định mức (theo tên) và Data tổng (nguồn 'tay', mọi mục cùng tên/cùng mã),
+        để mọi chỗ đọc ra cùng một số. Không lưu file (người gọi lưu)."""
+        prof = PROFILES.get(key) or {}
+        khach = prof.get("label") or key
+        dt_n = 0
+        for it in items:
+            name, code = str(it.get("name") or ""), str(it.get("code") or "").strip()
+            div, kg, hs = float(it.get("div") or 0), float(it.get("kg") or 0), str(it.get("hs") or "")
+            if name:
+                old = self.item_mem.get(name) or {}
+                self.item_mem[name] = {"div": div, "kg": kg, "hs": hs or old.get("hs", "")}
+            if not name or (div <= 0 and kg <= 0):
+                continue
+            try:
+                hits = [x for x in self.dt_items_for(key) if clean_str(x.get("ten")) == clean_str(name)]
+                hits += [x for x in self._dt_same_product(key, code or code_in_name(name), name) if x not in hits]
+                if hits:
+                    dt_n += self._dt_set_norm(hits, kg, div, hs)
+                elif self._dt_upsert(khach, name, ma_hang=code, kg=kg, kg_nguon="tay", kien=int(round(div)) if div else 0, kien_nguon="tay", hs=hs, exact=True):
+                    dt_n += 1
+            except Exception:  # noqa: BLE001 - Data tổng lỗi không được chặn việc lưu danh mục
+                pass
+        if dt_n:
+            self._dt_cache = {}
+            self.dt_save()
+        return dt_n
+
+    def dinh_muc_dong_bo(self, key, learned=None):
+        """Sau khi học chứng từ vào khách đã có: đồng bộ số của các mặt hàng vừa học (`learned`: [{code, name}], None = cả danh mục) sang bộ nhớ
+        định mức và Data tổng, để số cũ (VD 250 học sai trước PR 38) không còn thắng ở bước đọc PO. Mặt hàng đã khóa giữ nguyên. Trả số mục Data tổng đã đổi."""
+        lst = self.items_for_customer(key) or []
+        if learned is None:
+            items = [x for x in lst if not x.get("khoa")]
+        else:
+            codes = {str(x.get("code") or "").strip() for x in learned} - {""}
+            names = {x.get("name") for x in learned if x.get("name")}
+            items = [x for x in lst if not x.get("khoa") and (str(x.get("code") or "").strip() in codes or x.get("name") in names)]
+        n = self._dm_sync(key, items)
+        self.save_catalog()
+        return n
+
+    def set_dinh_muc(self, key, rows, bi=None):
+        """Lưu bảng kg & kiện của khách (nguồn chuẩn). `rows`: [{code, name, unit, div, kg, khoa}] — toàn bộ bảng: mã có trong danh mục mà
+        không còn trong bảng thì bị xóa khỏi danh mục khách. `bi`: kg bì cộng thêm mỗi dòng (None = giữ). Ném ValueError (tiếng Việt) nếu nhập sai.
+        Trả {"sua", "them", "xoa"}."""
+        if key not in PROFILES:
+            raise ValueError("Không tìm thấy khách hàng này.")
+        lst = self.items_for_customer(key)
+        if lst is None or (key in BUILTIN_CUSTOMERS and key not in ("kodi", "tesa")):
+            raise ValueError("Khách này không có danh mục mã hàng để quản lý kg & kiện.")
+        if key not in ("kodi", "tesa"):
+            lst = self.custom_items.setdefault(key, lst)
+        clean, seen = [], set()
+        for i, r in enumerate(rows or [], 1):
+            name, code = re.sub(r"\s+", " ", str(r.get("name") or "")).strip(), str(r.get("code") or "").strip()
+            if not name and not code:
+                continue
+            if not name:
+                raise ValueError(f"Dòng {i}: chưa có tên hàng.")
+            try:
+                div = float(str(r.get("div") or 0).replace(",", "."))
+                kg = float(str(r.get("kg") or 0).replace(",", "."))
+            except ValueError:
+                raise ValueError(f"Dòng {i} ({code or name}): SL/kiện và kg/chiếc phải là số.")
+            if div < 0 or kg < 0:
+                raise ValueError(f"Dòng {i} ({code or name}): SL/kiện và kg/chiếc không được âm.")
+            k = code or "ten:" + clean_str(name)
+            if k in seen:
+                raise ValueError(f"Dòng {i}: mã {code or name} bị trùng trong bảng.")
+            seen.add(k)
+            clean.append({"code": code, "name": name, "unit": str(r.get("unit") or "").strip(), "div": div, "kg": kg, "khoa": bool(r.get("khoa")),
+                          "_orig": r.get("_orig")})
+        if bi is not None and str(bi).strip() != "":
+            try:
+                bi_v = float(str(bi).replace(",", "."))
+            except ValueError:
+                raise ValueError("Bì mỗi dòng phải là số kg (vd 1 hoặc 0.5).")
+            if key in self.custom_profiles and abs(bi_v - self.dinh_muc_bi(key)) > 1e-9:
+                self.custom_profiles[key]["tare"] = PROFILES[key]["tare"] = bi_v
+                for it in lst:
+                    it["tare"] = bi_v
+        res, touched, keep = {"sua": 0, "them": 0, "xoa": 0}, [], []
+        for r in clean:
+            o = r["_orig"] or {}
+            hit = next((x for x in lst if (o.get("code") or o.get("name")) and str(x.get("code") or "") == str(o.get("code") or "") and x.get("name") == o.get("name")), None)
+            hit = hit or next((x for x in lst if (r["code"] and str(x.get("code") or "").strip() == r["code"]) or x.get("name") == r["name"]), None)
+            if hit is None:
+                hit = {"name": r["name"], "code": r["code"], "price": 0, "div": 0, "kg": 0, "hs": "", "unit": r["unit"] or PROFILES[key].get("unit", ""),
+                       "ten_hq": r["name"], "tare": PROFILES[key].get("tare", 0.0)}
+                lst.append(hit)
+                res["them"] += 1
+                is_new = True
+            else:
+                is_new = False
+            eff = self._dm_effective(key, hit)
+            changed = (abs(eff[0] - r["div"]) > 1e-9 or abs(eff[1] - r["kg"]) > 1e-9 or str(hit.get("unit") or "") != r["unit"]
+                       or bool(hit.get("khoa")) != r["khoa"] or hit.get("name") != r["name"] or str(hit.get("code") or "") != r["code"]
+                       or abs(float(hit.get("div") or 0) - r["div"]) > 1e-9 or abs(float(hit.get("kg") or 0) - r["kg"]) > 1e-9)
+            if hit.get("name") != r["name"]:
+                if hit.get("ten_hq") in (None, "", hit.get("name")):
+                    hit["ten_hq"] = r["name"]
+                hit["name"] = r["name"]
+            hit.update(code=r["code"], div=r["div"], kg=r["kg"])
+            if r["unit"]:
+                hit["unit"] = r["unit"]
+            if r["khoa"]:
+                hit["khoa"] = True
+            else:
+                hit.pop("khoa", None)
+            keep.append(hit)
+            if changed or is_new:
+                touched.append(hit)
+                res["sua"] += 0 if is_new else 1
+        gone = [x for x in lst if not any(x is k for k in keep)]
+        if gone:
+            lst[:] = [x for x in lst if any(x is k for k in keep)]
+            res["xoa"] = len(gone)
+        self._dm_sync(key, touched)
+        self.save_catalog()
+        return res
+
+    @staticmethod
+    def dinh_muc_tu_invoice(paths):
+        """Đọc Invoice Excel đúng của khách: {mã hoặc 'ten:<tên>': {code, name, unit, div, kg}}. SL/kiện lấy SỐ CHIA trong công thức cột Số kiện
+        (=ROUNDUP(F14/300,0) -> 300), không chia ngược. Trả (bảng, lỗi)."""
+        out, errs = {}, []
+        for p in paths or []:
+            try:
+                d = learn_from_invoice_excel(p)
+            except Exception as e:  # noqa: BLE001
+                errs.append(f"{os.path.basename(p)}: {e}")
+                continue
+            if not d.get("items"):
+                errs.append(f"{os.path.basename(p)}: không thấy bảng hàng (cần cột Tên hàng, Số lượng, Số kiện…).")
+            for it in d.get("items") or []:  # sheet mới nhất đứng trước: giữ số gặp đầu tiên
+                k = str(it.get("code") or "").strip() or "ten:" + clean_str(it.get("name"))
+                m = out.setdefault(k, {"code": str(it.get("code") or "").strip(), "name": it.get("name") or "", "unit": "", "div": 0, "kg": 0})
+                for f in ("unit", "div", "kg"):
+                    if it.get(f) and not m.get(f):
+                        m[f] = it[f]
+        return out, errs
+
+
     def export_tesa_new(self):
         """Mã Tesa đã thêm thêm sau khi cài (không nằm trong danh mục có sẵn) để máy khác nạp bằng "Nạp dữ liệu học"."""
         base = {x["code"] for x in DEFAULT_TESA_ITEMS if x.get("code")} | {x["name"] for x in DEFAULT_TESA_ITEMS}
@@ -6726,8 +6918,9 @@ def find_existing_customer(store, name="", mst=""):
 
 
 def merge_learned_items(existing, new):
-    """Gộp mặt hàng học thêm vào danh mục đã có của khách: trùng mã hoặc tên thì chỉ điền chỗ còn trống (giữ giá trị người dùng đã sửa), chưa có thì thêm.
-    Trả (danh sách gộp, số mặt hàng thêm mới, số mặt hàng đã có được bổ sung)."""
+    """Gộp mặt hàng học thêm vào danh mục đã có của khách: trùng mã hoặc tên thì SL/kiện, kg/chiếc, ĐVT lấy theo chứng từ mới học (Invoice đúng là
+    nguồn chuẩn, sửa được số cũ học sai, VD Quang Ích 250 -> 300), trừ mặt hàng đã KHÓA (sửa tay ở bảng kg & kiện); các ô khác chỉ điền chỗ còn trống.
+    Chưa có thì thêm. Trả (danh sách gộp, số mặt hàng thêm mới, số mặt hàng đã có được bổ sung/sửa)."""
     out = [dict(x) for x in existing]
     added = filled = 0
     for it in new:
@@ -6738,11 +6931,51 @@ def merge_learned_items(existing, new):
             continue
         changed = False
         for k, v in it.items():
-            if v not in (None, "", 0) and hit.get(k) in (None, "", 0):
+            if v in (None, "", 0):
+                continue
+            if hit.get(k) in (None, "", 0) or (k in ("div", "kg", "unit") and not hit.get("khoa") and hit.get(k) != v):
                 hit[k] = v
                 changed = True
         filled += changed
     return out, added, filled
+
+
+def dinh_muc_ap_invoice(rows, inv):
+    """Áp số trên Invoice đúng (`inv` từ dinh_muc_tu_invoice) vào bảng kg & kiện `rows` (sửa trực tiếp): dòng chưa khóa thì lấy SL/kiện, kg/chiếc,
+    ĐVT theo invoice; dòng đã khóa (sửa tay) giữ nguyên. Mã chỉ có trên invoice thì thêm dòng mới. Trả {"doi": [(mã, cột, cũ, mới)], "giu": [...], "them": [mã]}."""
+    res = {"doi": [], "giu": [], "them": []}
+    used = set()
+    for r in rows:
+        k = str(r.get("code") or "").strip()
+        v = inv.get(k) if k else None
+        if v is None:
+            v = inv.get("ten:" + clean_str(r.get("name")))
+            k = "ten:" + clean_str(r.get("name"))
+        if v is None:
+            continue
+        used.add(k)
+        for f in ("div", "kg", "unit"):
+            new = v.get(f)
+            if not new:
+                continue
+            old = r.get(f)
+            same = (str(old or "").strip().lower() == str(new).strip().lower()) if f == "unit" else abs(float(old or 0) - float(new)) < 1e-9
+            if same:
+                continue
+            ma = r.get("code") or r.get("name")
+            if r.get("khoa"):
+                res["giu"].append((ma, f, old, new))
+            else:
+                r[f] = new
+                r.setdefault("_doi", set()).add(f)
+                res["doi"].append((ma, f, old, new))
+    for k, v in inv.items():
+        if k not in used and v.get("name"):
+            rows.append({"code": v.get("code", ""), "name": v["name"], "unit": v.get("unit", ""), "div": v.get("div") or 0, "kg": v.get("kg") or 0,
+                         "khoa": False, "_doi": {"div", "kg", "unit"}, "_moi": True})
+            res["them"].append(v.get("code") or v["name"])
+    return res
+
 
 
 def build_custom_profile(key, fields):
