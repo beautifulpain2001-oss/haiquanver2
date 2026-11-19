@@ -45,7 +45,7 @@ def _norm(v):
 
 def test_customer_docs_lists_bundle_with_kinds(store, rec):
     kinds = {d["mode"]: d["kind"] for d in store.customer_docs("arz")}
-    assert kinds == {"PKL": "builtin", "VAT": "bkav", "PXK": "bkav", "PLX": "builtin", "DNTT": "builtin", "BBGH": "builtin", "PO": "builtin", "SC": "builtin", "DCCN": "builtin"}
+    assert kinds == {"PKL": "builtin", "VAT": "bkav", "PXK": "bkav", "PLX": "builtin", "DNTT": "builtin", "BBGH": "builtin", "PO": "builtin", "SC": "builtin", "DCCN": "builtin", "M22": "fixed"}  # Arizon luôn có Mẫu số 22
     with pytest.raises(ValueError, match="Bkav|giữ đúng"):
         store.form_make("arz", "VAT")
 
