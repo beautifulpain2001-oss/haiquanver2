@@ -784,7 +784,7 @@ class DedicatedDataStore:
             alt_sub = os.path.join(app_dir, "..", "intermediate", "HongThien_HaiQuan_Desktop_App", "DATA_LUU_TRU_HONG_THIEN")
             if os.path.exists(alt_sub):
                 default_sub = os.path.abspath(alt_sub)
-        self.base_dir = base_dir or saved_dir or default_sub
+        self.base_dir = self.resolve_data_dir(base_dir or saved_dir or default_sub)
         self.ensure_directories()
         self.weights_db = {}
         self.erp_catalog = []
@@ -879,6 +879,33 @@ class DedicatedDataStore:
         except Exception:
             pass
 
+    @classmethod
+    def resolve_data_dir(cls, d):
+        """Chọn chính thư mục HAI_QUAN trong khi file dữ liệu chung (master_catalog.json, hongthien_records.json) nằm ở thư mục
+        CHA của nó (cách xếp cũ: <thư mục chung>/master_catalog.json + <thư mục chung>/HAI_QUAN/...): dùng thư mục cha, nếu không
+        phần mềm không thấy danh mục khách đã thêm (chỉ còn Shirai, Tesa, Kodi). HAI_QUAN tự có danh mục khách riêng thì giữ nguyên."""
+        if not d:
+            return d
+        d0 = os.path.normpath(os.path.abspath(d))
+        if os.path.basename(d0).upper() != CUSTOMS_ROOT:
+            return d
+        parent = os.path.dirname(d0)
+        if not parent or parent == d0:
+            return d
+        names = ("master_catalog.json", "hongthien_records.json", "master_catalog.DA_CHUYEN.json", "hongthien_records.DA_CHUYEN.json")
+        if not any(os.path.isfile(os.path.join(parent, n)) for n in names):
+            return d
+        own = os.path.join(d0, "master_catalog.json")
+        if os.path.isfile(own):
+            try:
+                with open(own, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:  # noqa: BLE001
+                data = {}
+            if isinstance(data, dict) and (data.get("custom_profiles") or data.get("custom_items")):
+                return d  # HAI_QUAN đang là thư mục dữ liệu thật (có khách đã thêm): không đổi
+        return parent
+
     DATA_FILES = ("master_catalog.json", "hongthien_records.json", "hongthien_haiquan.db", DT_FILE)
 
     @classmethod
@@ -919,7 +946,7 @@ class DedicatedDataStore:
         sang: thư mục mới còn trống thì chép nguyên; đã có dữ liệu (máy khác) thì GỘP — thêm phần còn thiếu, chỗ trùng giữ bản trong
         thư mục chung, dòng 🔒 khóa (sửa tay) thắng; hồ sơ cùng mã lấy bản sửa sau. File hồ sơ/mẫu chứng từ chỉ chép file chưa có.
         Thư mục cũ giữ nguyên. Trả thống kê {"che_do": "chep"|"gop"|"", "file": n, "ho_so": n, "sao_luu": [..]}."""
-        new_dir = os.path.abspath(new_dir)
+        new_dir = os.path.abspath(self.resolve_data_dir(new_dir))
         old_base, old_customs = self.base_dir, self.customs_root()
         old_mau = TEMPLATE_DIR or os.path.join(old_base, "MAU_CHUNG_TU")
         old_cat = copy.deepcopy(self._catalog_payload())
