@@ -151,6 +151,31 @@ class SettingsPage(_Page):
         dl.addWidget(tip)
         lay.addWidget(dbox)
 
+        kbox = QGroupBox("Mỗi khách một file dữ liệu")
+        kl = QVBoxLayout(kbox)
+        tip = QLabel("Cách lưu mới: dữ liệu riêng của khách nào (danh mục mã hàng, học, Kg & kiện, danh sách hồ sơ) nằm trong thư mục khách đó, "
+                     "file HAI_QUAN/<Khách>/DU_LIEU_<MÃ>.json; chi tiết từng bộ hồ sơ ở thẻ 00_HO_SO.json trong thư mục lô. Chỉ phần dùng chung "
+                     "(thông tin công ty, lái xe, ERP chung, định mức theo tên) nằm ở HAI_QUAN/_HE_THONG. Lưu khách nào chỉ ghi file khách đó. "
+                     "TRƯỚC KHI CHUYỂN: cập nhật bản phần mềm này cho MỌI máy dùng chung thư mục (bản cũ không đọc được cách mới).")
+        tip.setObjectName("hint")
+        tip.setWordWrap(True)
+        kl.addWidget(tip)
+        self.kh_state = QLabel("")
+        self.kh_state.setWordWrap(True)
+        kl.addWidget(self.kh_state)
+        krow = QHBoxLayout()
+        self.kh_btn = QPushButton("🔀  Xem trước và chuyển sang mỗi khách một file…")
+        self.kh_btn.setObjectName("sec")
+        self.kh_btn.clicked.connect(self.chuyen_doi)
+        self.kh_undo = QPushButton("↩  Hoàn tác chuyển đổi…")
+        self.kh_undo.setObjectName("sec")
+        self.kh_undo.clicked.connect(self.hoan_tac)
+        krow.addWidget(self.kh_btn)
+        krow.addWidget(self.kh_undo)
+        krow.addStretch(1)
+        kl.addLayout(krow)
+        lay.addWidget(kbox)
+
         lbox = QGroupBox("Dữ liệu học (định mức từng mặt hàng)")
         ll = QVBoxLayout(lbox)
         ll.addWidget(QLabel("Nạp file dữ liệu học (.json) do người hỗ trợ cung cấp: số lượng mỗi kiện, kg mỗi cái của từng mặt hàng. "
@@ -241,7 +266,67 @@ class SettingsPage(_Page):
         if self.store.last_conflicts:
             bits.append(f"Đã gộp {self.store.last_conflicts} bản xung đột do OneDrive/Google Drive tạo.")
         self.sync_info.setText(" ".join(bits))
+        self.show_kh_state()
         self.show_ocr()
+
+    def show_kh_state(self):
+        on = self.store.theo_khach()
+        self.kh_state.setText("✅  Đang dùng cách lưu mỗi khách một file." if on else "Đang dùng cách lưu cũ (3 file chung cho mọi khách).")
+        self.kh_btn.setEnabled(not on)
+        self.kh_undo.setEnabled(on)
+
+    def chuyen_doi(self):
+        try:
+            pv = self.store.chuyen_doi_xem_truoc()
+        except Exception as e:  # noqa: BLE001
+            widgets.warn(self, "Chưa xem trước được", f"Lỗi: {e}")
+            return
+        lines = [f"Sẽ tạo {len(pv['files']) - 1} file khách + 1 file dùng chung, {pv['ho_so']} hồ sơ:", ""]
+        for r in pv["files"]:
+            ten = f"  (gộp tên: {' / '.join(r['ten_goi'])})" if r["ten_goi"] else ""
+            lines.append(f"• {r['ten']}: {r['file']} | {r['ma_hang']} mã, {r['data_tong']} dòng Kg & kiện, {r['ho_so']} hồ sơ{ten}")
+        if pv["pxk_trung"]:
+            lines += ["", "⚠ Số PXK trùng giữa các bộ (cần đổi một bộ theo số Bkav, phần mềm KHÔNG tự đổi):"]
+            lines += [f"   {x['pxk']}: {', '.join(x['ho_so'])}" for x in pv["pxk_trung"]]
+        if pv["kg_lech"]:
+            lines += ["", f"⚠ {len(pv['kg_lech'])} mã ghi 2 lần với kg khác nhau (giữ nguyên cả hai, kiểm tra ở Kho dữ liệu):"]
+            lines += [f"   {x['khach']} {x['ma']}: {' / '.join(x['kg'])} kg" for x in pv["kg_lech"][:15]]
+        if pv["ho_so_khong_thu_muc"]:
+            lines += ["", f"{pv['ho_so_khong_thu_muc']} hồ sơ chưa có thư mục lô: giữ cả hồ sơ trong file khách."]
+        lines += ["", f"Sao lưu trước khi chuyển: {', '.join(pv['file_cu'])}"
+                  + (f" và {len(pv['ban_xung_dot'])} bản xung đột" if pv["ban_xung_dot"] else "") + " vào _SAO_LUU/truoc_chuyen_doi_<giờ>.",
+                  "File cũ đổi tên thành *.DA_CHUYEN.json (không xóa). Số liệu chép nguyên, không tính lại.",
+                  "", "Mọi máy dùng chung thư mục đã cập nhật bản phần mềm này chưa? Chuyển ngay?"]
+        box = QMessageBox(self)
+        box.setWindowTitle("Chuyển sang mỗi khách một file")
+        box.setText("\n".join(lines))
+        yes = box.addButton("Chuyển ngay", QMessageBox.YesRole)
+        box.addButton("Hủy", QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is not yes:
+            return
+        try:
+            res = self.store.chuyen_doi_thuc_hien()
+        except Exception as e:  # noqa: BLE001
+            widgets.warn(self, "Chưa chuyển được", str(e))
+            return
+        self.refresh()
+        self.data_changed.emit()
+        widgets.info(self, "Đã chuyển", f"Đã tạo {res['files']} file khách, {res['ho_so']} hồ sơ, {res['data_tong']} dòng Kg & kiện.\n"
+                                        f"Bản sao lưu: {res['sao_luu']}")
+
+    def hoan_tac(self):
+        if not widgets.ask(self, "Hoàn tác chuyển đổi", "Quay về cách lưu cũ (3 file chung) từ bản sao lưu trước khi chuyển?\n\n"
+                                                        "Thay đổi làm SAU khi chuyển sẽ không có trong cách lưu cũ. File khách vẫn giữ trên đĩa."):
+            return
+        try:
+            d = self.store.chuyen_doi_hoan_tac()
+        except Exception as e:  # noqa: BLE001
+            widgets.warn(self, "Chưa hoàn tác được", str(e))
+            return
+        self.refresh()
+        self.data_changed.emit()
+        widgets.info(self, "Đã hoàn tác", f"Đã lấy lại dữ liệu cũ từ {d}.")
 
     def show_ocr(self):
         """Kiểm tra OCR phải chạy chương trình Tesseract nên làm ở nền; trang hiện ngay, kết quả điền sau."""

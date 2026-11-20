@@ -659,6 +659,15 @@ def num_to_vn_words(num):
 _MISSING = object()
 
 
+def ten_khach_chuan(name):
+    """Mã khách chuẩn hóa từ tên ghi trong dữ liệu: bỏ dấu, bỏ CÔNG TY / TNHH / CỔ PHẦN / VIỆT NAM / MTV, chữ thường nối bằng '_'.
+    'CÔNG TY TNHH FUJIDAN VIỆT NAM' và 'Fujidan' đều ra 'fujidan'."""
+    t = strip_accents_upper(str(name or ""))
+    t = re.sub(r"[^A-Z0-9]+", " ", t)
+    t = re.sub(r"\b(CONG TY|CTY|TNHH|CO PHAN|CP|MTV|MOT THANH VIEN|VIET NAM|VN)\b", " ", t)
+    return "_".join(t.lower().split())[:40]
+
+
 def merge3(base, mine, disk):
     if mine == disk:
         return mine
@@ -797,6 +806,8 @@ class DedicatedDataStore:
         self.records = []
         self._sigs, self._loaded_ids = {}, set()
         self._cat_base, self._rec_base = None, {}  # bản đọc/ghi gần nhất: gốc để gộp 3 bên với máy khác
+        self._kbase, self._kh_paths, self._kh_names = {}, {}, {}  # cách lưu mỗi khách một file: bản gốc từng file, đường dẫn, tên khách
+        self._rec_rel, self._rec_inline, self._rec_hashes = {}, set(), {}  # hồ sơ: thư mục lô (tương đối), hồ sơ giữ trong file khách, dấu nội dung
         self.last_sync, self.last_conflicts = "", 0
         # chỉ mục quét thư mục: chỉ đọc lại thư mục có giờ sửa đổi (xem _dir_listing, _activity, read_lot_card)
         self._ls_cache, self._act_cache, self._card_cache, self._card_paths = {}, {}, {}, {}
@@ -873,6 +884,8 @@ class DedicatedDataStore:
     @classmethod
     def folder_has_data(cls, d):
         """Thư mục đã có dữ liệu phần mềm (máy khác đã dùng làm thư mục chung)?"""
+        if os.path.isfile(os.path.join(d, CUSTOMS_ROOT, "_HE_THONG", "he_thong.json")) or os.path.isfile(os.path.join(d, "_HE_THONG", "he_thong.json")):
+            return True
         return any(os.path.isfile(os.path.join(d, f)) for f in ("master_catalog.json", "hongthien_records.json")) or \
             os.path.isfile(os.path.join(d, CUSTOMS_ROOT, DT_FILE)) or (os.path.basename(os.path.normpath(d)).upper() == CUSTOMS_ROOT and os.path.isfile(os.path.join(d, DT_FILE)))
 
@@ -953,6 +966,12 @@ class DedicatedDataStore:
         return stats
 
     def load_all(self):
+        if self.theo_khach():
+            self._load_theo_khach()
+            if self.apply_tesa_dinh_muc() | self.apply_tesa_dinh_muc_dt():
+                self._save_theo_khach()
+            self.absorb_khach_conflicts()
+            return
         if not os.path.exists(self.catalog_file) and EMBEDDED_MASTER_CATALOG_B64:
             try:
                 raw_bytes = zlib.decompress(base64.b64decode(EMBEDDED_MASTER_CATALOG_B64))
@@ -2001,6 +2020,13 @@ class DedicatedDataStore:
         self._dt_cache, self._dt_idx, self._dt_cust = {}, None, {}
 
     def dt_save(self):
+        if self.theo_khach():
+            try:
+                self._save_theo_khach()
+            except Exception as e:  # noqa: BLE001
+                print("Warning saving customer files:", e)
+            self._dt_cache, self._dt_idx = {}, None
+            return
         try:
             os.makedirs(os.path.dirname(self.dt_path()), exist_ok=True)
             with self._lock():
@@ -2435,16 +2461,25 @@ class DedicatedDataStore:
         except OSError:
             return None
 
+    def _watched_files(self):
+        if self.theo_khach():
+            return self._theo_khach_files()
+        return [self.catalog_file, self.records_file, self.dt_path(), self.he_thong_path()]
+
     def _note_sigs(self):
-        self._sigs = {p: self._sig(p) for p in (self.catalog_file, self.records_file, self.dt_path())}
+        self._sigs = {p: self._sig(p) for p in self._watched_files()}
+        self._kh_seen = set(self._scan_khach_files()) if self.theo_khach() else set()
 
     def changed_on_disk(self):
-        """True nếu máy khác đã ghi file dữ liệu kể từ lần đọc/ghi gần nhất của máy này."""
-        return any(self._sig(p) != self._sigs.get(p) for p in (self.catalog_file, self.records_file, self.dt_path()))
+        """True nếu máy khác đã ghi file dữ liệu kể từ lần đọc/ghi gần nhất của máy này (kể cả vừa thêm file khách mới,
+        hoặc vừa chuyển thư mục sang mỗi khách một file)."""
+        if any(self._sig(p) != self._sigs.get(p) for p in self._watched_files()):
+            return True
+        return self.theo_khach() and set(self._scan_khach_files()) != getattr(self, "_kh_seen", set())
 
     def sync(self):
         """Đọc lại dữ liệu nếu máy khác vừa thay đổi (và gộp bản xung đột do OneDrive/Google Drive tạo). Trả True nếu có đọc lại."""
-        got = self.absorb_conflict_copies() > 0
+        got = (self.absorb_khach_conflicts() if self.theo_khach() else self.absorb_conflict_copies()) > 0
         if not self.changed_on_disk():
             return got
         self.load_all()
@@ -2575,6 +2610,425 @@ class DedicatedDataStore:
             self.last_conflicts = n
         return n
 
+    # ---- MỖI KHÁCH MỘT FILE DỮ LIỆU (cách lưu mới) -----------------------------------------------------------------
+    # HAI_QUAN/_HE_THONG/he_thong.json : phần dùng chung của công ty (thông tin công ty, cặp xe, ERP chung, định mức theo tên,
+    #                                   nhà cung ứng). File này có mặt = thư mục dữ liệu đã chuyển sang cách lưu mới.
+    # HAI_QUAN/<Khách>/DU_LIEU_<MÃ>.json : MỘT file cho mỗi khách: hồ sơ khách, danh mục mã hàng, học/định mức, Data tổng
+    #                                   (kg, SL/kiện) và danh sách hồ sơ rút gọn. Chi tiết từng bộ hồ sơ nằm ở thẻ 00_HO_SO.json
+    #                                   trong thư mục lô của bộ đó, nên hai máy khai hai bộ khác nhau không ghi chung một file.
+    # Lưu: chỉ ghi file của khách có thay đổi; máy khác vừa ghi file đó thì gộp 3 bên (như PR đồng bộ thư mục chung).
+    HE_THONG_DIR, HE_THONG_FILE, KHACH_FILE_PRE = "_HE_THONG", "he_thong.json", "DU_LIEU_"
+    _HT_CAT_KEYS = ("company", "address", "tax_code", "company_info", "vehicle_pairs", "erp_catalog", "item_mem", "suppliers",
+                    "tesa_dinh_muc_v", "tesa_dinh_muc_dt_v")
+    _SHIRAI_CAT_KEYS = ("weights_db", "supplier_pref", "ten_kh_tay")
+
+    def he_thong_path(self):
+        return os.path.join(self.customs_root(), self.HE_THONG_DIR, self.HE_THONG_FILE)
+
+    def theo_khach(self):
+        """True nếu thư mục dữ liệu đã chuyển sang cách lưu mỗi khách một file."""
+        return os.path.isfile(self.he_thong_path())
+
+    @classmethod
+    def is_khach_file(cls, name):
+        return name.startswith(cls.KHACH_FILE_PRE) and name.lower().endswith(".json")
+
+    def _khach_dir_name(self, key):
+        """Tên thư mục khách: tên gọi khách (như thư mục lô); khách chỉ có trong Data tổng thì tên đã ghi trong Data tổng."""
+        if key in PROFILES:
+            return _safe_name(PROFILES[key].get("label") or key) or key
+        return _safe_name(getattr(self, "_kh_names", {}).get(key) or key) or key
+
+    def _khach_path(self, key):
+        if not key:
+            return self.he_thong_path()
+        known = getattr(self, "_kh_paths", {}).get(key)
+        if known:
+            return known
+        return os.path.join(self.customs_root(), self._khach_dir_name(key), f"{self.KHACH_FILE_PRE}{key.upper()}.json")
+
+    def _scan_khach_files(self):
+        """{mã khách: đường dẫn} của mọi file DU_LIEU_*.json nằm ngay trong thư mục từng khách."""
+        out = {}
+        root = self.customs_root()
+        try:
+            dirs = [d for d in os.listdir(root) if not d.startswith((".", "_")) and os.path.isdir(os.path.join(root, d))]
+        except OSError:
+            return out
+        for d in dirs:
+            try:
+                names = os.listdir(os.path.join(root, d))
+            except OSError:
+                continue
+            for n in names:
+                if self.is_khach_file(n) and re.fullmatch(re.escape(self.KHACH_FILE_PRE) + r"[A-Za-z0-9_]+\.json", n):
+                    out.setdefault(n[len(self.KHACH_FILE_PRE):-5].lower(), os.path.join(root, d, n))
+        return out
+
+    def dt_khach_key(self, row):
+        """Mã khách của một dòng Data tổng: khách đã có trong phần mềm (so tên gọi/tên đầy đủ), không thì tên chuẩn hóa
+        (bỏ dấu, hoa thường, bỏ CÔNG TY TNHH/CỔ PHẦN/VIỆT NAM): 'ARIZON' và 'Arizon' là một khách."""
+        for f in ("khach", "khach_day_du"):
+            name = row.get(f)
+            if not name:
+                continue
+            k = self._dt_cust.get(("k", name), _MISSING)
+            if k is _MISSING:
+                k = next((key for key, p in PROFILES.items() if self._khach_match(p, name)), None)
+                self._dt_cust[("k", name)] = k
+            if k:
+                return k
+        return ten_khach_chuan(row.get("khach") or row.get("khach_day_du") or "") or "khac"
+
+    def _split_parts(self):
+        """Chia dữ liệu trong bộ nhớ thành {mã khách: phần của khách}; mã '' là phần dùng chung (_HE_THONG)."""
+        cat = copy.deepcopy(self._catalog_payload())
+        cat["read_fixes"] = list(self.read_fixes)
+        parts = {}
+
+        def part(k):
+            return parts.setdefault(k, {"danh_muc": {}, "data_tong": [], "ho_so": [], "ten_goi": []})
+        part("")["danh_muc"] = {k: cat[k] for k in self._HT_CAT_KEYS if k in cat}
+        for k in self._SHIRAI_CAT_KEYS:
+            part("shirai")["danh_muc"][k] = cat.get(k) or {}
+        part("kodi")["danh_muc"]["kodi_items"] = cat.get("kodi_items") or []
+        part("tesa")["danh_muc"]["tesa_items"] = cat.get("tesa_items") or []
+        for field in ("custom_profiles", "custom_items", "profile_overrides"):
+            for key, v in (cat.get(field) or {}).items():
+                part(key)["danh_muc"].setdefault(field, {})[key] = v
+        for x in cat.get("read_fixes") or []:
+            part(str(x.get("customer") or "") if isinstance(x, dict) else "")["danh_muc"].setdefault("read_fixes", []).append(x)
+        self._kh_names = getattr(self, "_kh_names", {})
+        for row in self.data_tong:
+            key = self.dt_khach_key(row)
+            p = part(key)
+            p["data_tong"].append(row)
+            name = str(row.get("khach") or "").strip()
+            if name and name not in p["ten_goi"]:
+                p["ten_goi"].append(name)
+                if key not in PROFILES:
+                    self._kh_names.setdefault(key, name)
+        for r in self.records:
+            part(str(r.get("customer") or ""))["ho_so"].append(self._ho_so_entry(r))
+        return parts
+
+    def _ho_so_entry(self, r):
+        """Dòng hồ sơ rút gọn trong file khách; chi tiết đọc ở thẻ 00_HO_SO.json. Thẻ không ghi được thì giữ cả hồ sơ ở đây."""
+        rid = str(r.get("id") or "")
+        e = {"id": rid, "docDate": r.get("docDate", ""), "poNumber": r.get("poNumber", ""), "pxkNo": r.get("pxkNo", ""),
+             "updatedAt": str(r.get("updatedAt") or ""), "folder": self._rec_rel.get(rid, "")}
+        if rid in self._rec_inline or not e["folder"]:
+            e["record"] = {k: v for k, v in r.items() if not str(k).startswith("_")}
+        return e
+
+    @staticmethod
+    def _rec_hash(r):
+        return json.dumps({k: v for k, v in r.items() if not str(k).startswith("_")}, sort_keys=True, ensure_ascii=False, default=str)
+
+    def _write_rec_cards(self, force=False):
+        """Ghi thẻ 00_HO_SO.json cho các hồ sơ vừa đổi (hoặc mọi hồ sơ khi force). Hồ sơ chưa có thư mục lô trên đĩa thì
+        giữ cả hồ sơ trong file khách (không tạo thư mục rỗng)."""
+        for r in self.records:
+            rid = str(r.get("id") or "")
+            if not rid:
+                continue
+            h = self._rec_hash(r)
+            if not force and self._rec_hashes.get(rid) == h:
+                continue
+            try:
+                folder = self.get_record_folder_path(r)
+            except Exception:  # noqa: BLE001
+                folder = ""
+            ok = bool(folder) and os.path.isdir(folder) and self.write_lot_card(r, folder)
+            if ok:
+                rel = os.path.relpath(folder, self.customs_root())
+                self._rec_rel[rid] = "" if rel.startswith("..") else rel.replace(os.sep, "/")
+                self._rec_inline.discard(rid)
+                if not self._rec_rel[rid]:
+                    self._rec_inline.add(rid)
+            else:
+                self._rec_inline.add(rid)
+            self._rec_hashes[rid] = h
+
+    def _record_from_entry(self, e):
+        rid = str(e.get("id") or "")
+        if e.get("folder"):
+            card = self.read_lot_card(os.path.join(self.customs_root(), e["folder"].replace("/", os.sep)))
+            if card:
+                rec = (card.get("records") or {}).get(rid)
+                if not rec and isinstance(card.get("record"), dict) and str(card["record"].get("id") or "") == rid:
+                    rec = card["record"]
+                if isinstance(rec, dict):
+                    return dict(rec)
+        if isinstance(e.get("record"), dict):
+            self._rec_inline.add(rid)
+            return dict(e["record"])
+        return None
+
+    def _merge_part(self, base, mine, disk):
+        base = base or {}
+        out = {"danh_muc": merge_catalog(base.get("danh_muc") if base else None, mine.get("danh_muc") or {}, disk.get("danh_muc") or {})}
+        out["data_tong"] = self._merge_dt_items(mine.get("data_tong") or [], disk.get("data_tong") or [])
+        bmap = {e.get("id"): str(e.get("updatedAt") or "") for e in (base.get("ho_so") or [])} if base else None
+        out["ho_so"] = self._merge_records(mine.get("ho_so") or [], disk.get("ho_so") or [], bmap)
+        out["ten_goi"] = list(dict.fromkeys((mine.get("ten_goi") or []) + (disk.get("ten_goi") or [])))
+        return out
+
+    @staticmethod
+    def _part_body(data):
+        data = data if isinstance(data, dict) else {}
+        return {"danh_muc": data.get("danh_muc") or {}, "data_tong": list(data.get("data_tong") or []),
+                "ho_so": list(data.get("ho_so") or []), "ten_goi": list(data.get("ten_goi") or [])}
+
+    def _write_part(self, key, body):
+        path = self._khach_path(key)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        head = ({"loai": "HE_THONG", "phienBan": 1, "cachLuu": "theo_khach"} if not key else
+                {"loai": "DU_LIEU_KHACH", "phienBan": 1, "khach": key, "ten": (PROFILES.get(key) or {}).get("label") or self._kh_names.get(key, key)})
+        head["capNhat"] = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+        head["may"] = self.user_name() or self._machine_tag()
+        self._backup(path)
+        self._write_json(path, {**head, **body}, compact=bool(key) and len(body.get("data_tong") or []) > 200)
+        self._kh_paths[key] = path
+        self._kbase[path] = copy.deepcopy(body)
+        self._sigs[path] = self._sig(path)
+
+    def _join_parts(self, parts):
+        """Dựng lại dữ liệu trong bộ nhớ từ các phần của từng khách (sau khi đọc hoặc gộp với máy khác)."""
+        cat = {}
+        for key, p in parts.items():
+            dm = p.get("danh_muc") or {}
+            for k, v in dm.items():
+                if k in ("custom_profiles", "custom_items", "profile_overrides", "weights_db", "supplier_pref", "ten_kh_tay"):
+                    cat.setdefault(k, {}).update(v or {})
+                elif k == "read_fixes":
+                    cat.setdefault(k, []).extend(v or [])
+                else:
+                    cat[k] = v
+        cat["read_fixes"] = sorted(cat.get("read_fixes") or [], key=lambda x: str((x or {}).get("time") or ""))[-300:]
+        self._take_merged_catalog(cat)
+        self.data_tong = [row for p in parts.values() for row in (p.get("data_tong") or [])]
+        self._dt_cache, self._dt_idx = {}, None
+        have = {str(r.get("id") or ""): r for r in self.records}
+        recs = []
+        for key, p in parts.items():
+            for e in p.get("ho_so") or []:
+                rid = str(e.get("id") or "")
+                old = have.get(rid)
+                if old is not None and str(old.get("updatedAt") or "") == str(e.get("updatedAt") or ""):
+                    rec = old
+                else:
+                    rec = self._record_from_entry(e) or old
+                if rec is None:
+                    continue
+                if e.get("folder"):
+                    self._rec_rel[rid] = e["folder"]
+                self._rec_hashes[rid] = self._rec_hash(rec)
+                recs.append(rec)
+        recs.sort(key=lambda r: (str(r.get("docDate") or ""), str(r.get("updatedAt") or "")), reverse=True)
+        self.records = recs
+        self._loaded_ids = {r.get("id") for r in self.records}
+        self._rec_base = {r.get("id"): str(r.get("updatedAt") or "") for r in self.records}
+
+    def _load_theo_khach(self):
+        self._kh_paths = self._scan_khach_files()
+        parts = {"": self._part_body(self._read_json(self.he_thong_path(), {}))}
+        for key, path in self._kh_paths.items():
+            data = self._read_json(path, None)
+            if isinstance(data, dict):
+                parts[key] = self._part_body(data)
+                if data.get("ten") and key not in PROFILES:
+                    self._kh_names[key] = data["ten"]
+        self._kh_paths[""] = self.he_thong_path()
+        self._kbase = {self._khach_path(k): copy.deepcopy(p) for k, p in parts.items()}
+        self.records = []
+        self._join_parts(parts)
+        self._cat_base = copy.deepcopy(self._catalog_payload())
+        self._note_sigs()
+
+    def _save_theo_khach(self):
+        """Ghi các file khách có thay đổi (và file _HE_THONG); file máy khác vừa ghi thì gộp 3 bên trước."""
+        with self._lock():
+            self._write_rec_cards()
+            mine = self._split_parts()
+            for key, path in self._scan_khach_files().items():  # khách mới do máy khác tạo
+                if key not in self._kh_paths:
+                    self._kh_paths[key] = path
+                    mine.setdefault(key, {"danh_muc": {}, "data_tong": [], "ho_so": [], "ten_goi": []})
+            for key in self._kh_paths:
+                mine.setdefault(key, {"danh_muc": {}, "data_tong": [], "ho_so": [], "ten_goi": []})
+            merged_any, final = False, {}
+            for key, body in mine.items():
+                path = self._khach_path(key)
+                base = self._kbase.get(path)
+                if self._sig(path) != self._sigs.get(path) and os.path.isfile(path):
+                    disk = self._part_body(self._read_json(path, {}))
+                    body = self._merge_part(base, body, disk)
+                    merged_any = True
+                if base is None and not any(body.get(k) for k in ("danh_muc", "data_tong", "ho_so")):
+                    continue  # khách không có gì: không tạo file rỗng
+                if body != base or not os.path.isfile(path):
+                    self._write_part(key, body)
+                final[key] = body
+            if merged_any:
+                self._join_parts(final)
+
+    def _theo_khach_files(self):
+        return [self.he_thong_path()] + [p for k, p in getattr(self, "_kh_paths", {}).items() if k]
+
+    def absorb_khach_conflicts(self):
+        """Bản xung đột OneDrive/Google Drive của các file khách (DU_LIEU_ABLE-TENMAY.json…): gộp vào file chính rồi chuyển vào _SAO_LUU/xung_dot."""
+        n = 0
+        for path in self._theo_khach_files():
+            for cp in self.conflict_copies(path):
+                data = self._read_json(cp, None)
+                if not isinstance(data, dict):
+                    continue
+                key = next((k for k, p in self._kh_paths.items() if p == path), "")
+                cur = self._split_parts().get(key) or {"danh_muc": {}, "data_tong": [], "ho_so": [], "ten_goi": []}
+                body = self._merge_part(None, cur, self._part_body(data))
+                parts = self._split_parts()
+                parts[key] = body
+                self._join_parts(parts)
+                self._save_theo_khach()
+                dst = os.path.join(self.backup_root(), "xung_dot")
+                os.makedirs(dst, exist_ok=True)
+                try:
+                    shutil.move(cp, os.path.join(dst, f"{datetime.datetime.now():%Y-%m-%d_%H%M%S}_{os.path.basename(cp)}"))
+                    n += 1
+                except OSError:
+                    pass
+        if n:
+            self.last_conflicts = n
+        return n
+
+    # ---- chuyển dữ liệu cũ (3 file chung) sang mỗi khách một file ----------------------------------------------
+    def old_data_files(self):
+        return [p for p in (self.catalog_file, self.records_file, self.dt_path()) if os.path.isfile(p)]
+
+    def chuyen_doi_xem_truoc(self):
+        """Xem trước việc chuyển sang mỗi khách một file (KHÔNG ghi gì). Trả dict để hiện cho người dùng."""
+        self._rec_rel, self._rec_inline = dict(getattr(self, "_rec_rel", {})), set(getattr(self, "_rec_inline", set()))
+        parts = self._split_parts()
+        rows = []
+        for key, p in sorted(parts.items(), key=lambda kv: (kv[0] != "", self._khach_dir_name(kv[0]).lower() if kv[0] else "")):
+            dm = p["danh_muc"]
+            n_items = sum(len(v or []) for v in (dm.get("custom_items") or {}).values()) + len(dm.get("kodi_items") or []) + len(dm.get("tesa_items") or [])
+            rows.append({"khach": key, "ten": "Dữ liệu chung (_HE_THONG)" if not key else ((PROFILES.get(key) or {}).get("label") or self._kh_names.get(key, key)),
+                         "file": os.path.relpath(self._khach_path(key), self.customs_root()),
+                         "ma_hang": n_items, "data_tong": len(p["data_tong"]), "ho_so": len(p["ho_so"]),
+                         "ten_goi": p["ten_goi"] if len(p["ten_goi"]) > 1 else []})
+        pxk = {}
+        for r in self.records:
+            m = re.fullmatch(r"\s*0*(\d{1,9})\s*", str(r.get("pxkNo") or ""))
+            if m and r.get("id") not in DEMO_RECORD_IDS:
+                pxk.setdefault(int(m.group(1)), []).append(r)
+        pxk_trung = []
+        for n, rs in sorted(pxk.items()):
+            if len({(r.get("customer"), str(r.get("docDate") or "")[:10]) for r in rs}) > 1:
+                pxk_trung.append({"pxk": str(rs[0].get("pxkNo")), "ho_so": [f"{r.get('id')} ({r.get('customer')}, {str(r.get('docDate') or '')[:10]})" for r in rs]})
+        lech = []
+        for key, p in parts.items():
+            by = {}
+            for row in p["data_tong"]:
+                code = str(row.get("ma_hang") or row.get("ma_erp") or "").strip()
+                if code:
+                    by.setdefault(code, []).append(row)
+            for code, rs in sorted(by.items()):
+                kgs = {str(r.get("kg")) for r in rs if r.get("kg") not in (None, "")}
+                if len(rs) > 1 and len(kgs) > 1:
+                    lech.append({"khach": key, "ma": code, "kg": sorted(kgs)})
+        no_folder = 0
+        for r in self.records:
+            try:
+                if not os.path.isdir(self.get_record_folder_path(r)):
+                    no_folder += 1
+            except Exception:  # noqa: BLE001
+                no_folder += 1
+        conflicts = [os.path.basename(c) for p in (self.catalog_file, self.records_file, self.dt_path()) for c in self.conflict_copies(p)]
+        return {"files": rows, "pxk_trung": pxk_trung, "kg_lech": lech, "ho_so": len(self.records), "ho_so_khong_thu_muc": no_folder,
+                "file_cu": [os.path.basename(p) for p in self.old_data_files()], "ban_xung_dot": conflicts, "da_chuyen": self.theo_khach()}
+
+    def chuyen_doi_thuc_hien(self):
+        """Chuyển sang mỗi khách một file: (1) sao lưu nguyên vẹn file cũ + bản xung đột vào _SAO_LUU/truoc_chuyen_doi_<giờ>,
+        (2) ghi thẻ hồ sơ + từng file khách, (3) ghi _HE_THONG/he_thong.json SAU CÙNG (dấu đã chuyển), (4) đọc lại và đếm khớp,
+        không khớp thì bỏ dấu và báo lỗi, (5) đổi tên file cũ thành *.DA_CHUYEN.json (không xóa). Số liệu chép nguyên, không tính lại.
+        Trả {"sao_luu": thư mục sao lưu, "files": số file khách, "ho_so": n, "data_tong": n}."""
+        if self.theo_khach():
+            raise ValueError("Thư mục dữ liệu này đã chuyển sang mỗi khách một file rồi.")
+        stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        bdir = os.path.join(self.backup_root(), f"truoc_chuyen_doi_{stamp}")
+        os.makedirs(bdir, exist_ok=True)
+        saved = {}
+        for p in self.old_data_files() + [self.sqlite_file]:
+            if os.path.isfile(p):
+                shutil.copy2(p, os.path.join(bdir, os.path.basename(p)))
+                saved[os.path.basename(p)] = p
+        for p in (self.catalog_file, self.records_file, self.dt_path()):
+            for c in self.conflict_copies(p):
+                shutil.copy2(c, os.path.join(bdir, os.path.basename(c)))
+        with open(os.path.join(bdir, "vi_tri_goc.json"), "w", encoding="utf-8") as f:
+            json.dump(saved, f, ensure_ascii=False, indent=2)
+        want = {"ho_so": len(self.records), "data_tong": len(self.data_tong),
+                "ma_hang": sum(len(v or []) for v in self.custom_items.values()) + len(self.kodi_items) + len(self.tesa_items)}
+        self._kbase, self._kh_paths = {}, {}
+        self._rec_rel, self._rec_inline, self._rec_hashes = {}, set(), {}
+        self._write_rec_cards(force=True)
+        parts = self._split_parts()
+        written = 0
+        for key, body in parts.items():
+            if key:
+                self._write_part(key, body)
+                written += 1
+        self._write_part("", parts.get("") or {"danh_muc": {}, "data_tong": [], "ho_so": [], "ten_goi": []})
+        got = {}
+        try:
+            parts2 = {"": self._part_body(self._read_json(self.he_thong_path(), {}))}
+            for key, path in self._scan_khach_files().items():
+                parts2[key] = self._part_body(self._read_json(path, {}))
+            got = {"ho_so": sum(len(p["ho_so"]) for p in parts2.values()), "data_tong": sum(len(p["data_tong"]) for p in parts2.values()),
+                   "ma_hang": sum(sum(len(v or []) for v in (p["danh_muc"].get("custom_items") or {}).values()) + len(p["danh_muc"].get("kodi_items") or [])
+                                  + len(p["danh_muc"].get("tesa_items") or []) for p in parts2.values())}
+        except Exception as e:  # noqa: BLE001
+            got = {"loi": str(e)}
+        shared_extra = sum(len(v or []) for k, v in self.custom_items.items() if any(v is w for k2, w in self.custom_items.items() if k2 < k))
+        if got.get("ho_so") != want["ho_so"] or got.get("data_tong") != want["data_tong"] or got.get("ma_hang", -1) < want["ma_hang"] - shared_extra:
+            os.replace(self.he_thong_path(), os.path.join(bdir, "he_thong_KHONG_KHOP.json"))
+            raise ValueError(f"Đọc lại không khớp số liệu (cần {want}, đọc được {got}). Chưa chuyển; dữ liệu cũ giữ nguyên. Bản sao lưu: {bdir}")
+        for p in (self.catalog_file, self.records_file, self.dt_path()):
+            if os.path.isfile(p):
+                os.replace(p, os.path.splitext(p)[0] + ".DA_CHUYEN.json")
+        with open(os.path.join(bdir, "KET_QUA.txt"), "w", encoding="utf-8") as f:
+            f.write(f"Chuyển lúc {stamp} trên máy {self._machine_tag()}: {written} file khách, {want['ho_so']} hồ sơ, {want['data_tong']} dòng Data tổng.\n")
+        self._sigs = {}
+        self.load_all()
+        return {"sao_luu": bdir, "files": written, "ho_so": want["ho_so"], "data_tong": want["data_tong"]}
+
+    def chuyen_doi_hoan_tac(self):
+        """Quay về cách lưu cũ: chép lại 3 file cũ từ bản sao lưu trước khi chuyển gần nhất, cất he_thong.json vào thư mục đó.
+        Thay đổi làm SAU khi chuyển sẽ không có trong file cũ. File khách giữ nguyên (cách cũ không đọc)."""
+        if not self.theo_khach():
+            raise ValueError("Thư mục dữ liệu này đang dùng cách lưu cũ, không có gì để hoàn tác.")
+        root = self.backup_root()
+        cands = sorted(d for d in (os.listdir(root) if os.path.isdir(root) else []) if d.startswith("truoc_chuyen_doi_"))
+        if not cands:
+            raise ValueError("Không tìm thấy bản sao lưu trước khi chuyển trong _SAO_LUU.")
+        bdir = os.path.join(root, cands[-1])
+        where = self._read_json(os.path.join(bdir, "vi_tri_goc.json"), {}) or {}
+        targets = {os.path.basename(p): p for p in (self.catalog_file, self.records_file, self.dt_path(), self.sqlite_file)}
+        for name, p in targets.items():
+            src = os.path.join(bdir, name)
+            if os.path.isfile(src):
+                dst = where.get(name) if where.get(name) and os.path.isdir(os.path.dirname(where[name])) else p
+                shutil.copy2(src, dst)
+                done = os.path.splitext(dst)[0] + ".DA_CHUYEN.json"
+                if os.path.isfile(done):
+                    os.remove(done)
+        os.replace(self.he_thong_path(), os.path.join(bdir, f"he_thong_hoan_tac_{datetime.datetime.now():%Y%m%d_%H%M%S}.json"))
+        self._sigs, self._kbase, self._kh_paths = {}, {}, {}
+        self.load_all()
+        return bdir
+
     @contextlib.contextmanager
     def _lock(self):
         path = os.path.join(self.base_dir, ".khoa_ghi")
@@ -2650,6 +3104,12 @@ class DedicatedDataStore:
         self._apply_catalog_side_effects()
 
     def save_catalog(self):
+        if self.theo_khach():
+            try:
+                self._save_theo_khach()
+            except Exception as e:  # noqa: BLE001
+                print("Warning saving customer files:", e)
+            return
         try:
             with self._lock():
                 payload = copy.deepcopy(self._catalog_payload())
@@ -2721,6 +3181,12 @@ class DedicatedDataStore:
         self.save_catalog()
 
     def save_records(self):
+        if self.theo_khach():
+            try:
+                self._save_theo_khach()
+            except Exception as e:  # noqa: BLE001
+                print("Warning saving customer files:", e)
+            return
         try:
             with self._lock():
                 if self._sig(self.records_file) != self._sigs.get(self.records_file):
@@ -2985,6 +3451,11 @@ class DedicatedDataStore:
         made_pre = tuple(p.lower() for p, _l in self.MADE_PREFIXES)
         files = [n for n in listing[0] if n.lower().startswith(made_pre)]
         cust = rec.get("customer") or ""
+        recs = dict(old.get("records") or {}) if isinstance(old.get("records"), dict) else {}
+        if not recs and isinstance(old.get("record"), dict) and old["record"].get("id"):
+            recs[str(old["record"]["id"])] = old["record"]
+        if rid:  # mọi hồ sơ của lô (một PXK gom nhiều PO): mỗi mã hồ sơ một bản đầy đủ
+            recs[rid] = {k: v for k, v in rec.items() if not str(k).startswith("_")}
         return {
             "loai": "HO_SO_LO_HANG", "phienBan": 1,
             "id": rid or old.get("id", ""), "ids": list(dict.fromkeys(ids)),
@@ -2994,6 +3465,7 @@ class DedicatedDataStore:
             "pxkNo": rec.get("pxkNo", ""), "hdNo": rec.get("hdNo", ""), "tkNo": rec.get("tkNo", ""),
             "files": files, "createdAt": old.get("createdAt") or now, "updatedAt": now, "machine": self.user_name(),
             "record": {k: v for k, v in rec.items() if not str(k).startswith("_")},
+            "records": recs,
         }
 
     def write_lot_card(self, rec, folder):
@@ -3072,8 +3544,8 @@ class DedicatedDataStore:
             roots.append(nested)
         def listing(d):
             return self._dir_listing(d) or ((), ())
-        def has_files(d):
-            return any(not n.startswith((".", "~$")) for n in listing(d)[0])
+        def has_files(d):  # file dữ liệu khách DU_LIEU_*.json không làm thư mục khách thành thư mục tờ khai
+            return any(not n.startswith((".", "~$")) and not self.is_khach_file(n) for n in listing(d)[0])
         guess_keys = []
         for r in self.records:
             for key in (r.get("tkNo"), str(r.get("poNumber") or "").split()[0].split("..")[0] if str(r.get("poNumber") or "").split() else ""):

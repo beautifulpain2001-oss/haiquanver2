@@ -79,6 +79,22 @@ def test_settings_change_dir_brings_data_to_shared_folder(win, store, tmp_path, 
     assert "Sao lưu tự động" in win.settings.sync_info.text()
 
 
+def test_settings_migrate_to_one_file_per_customer_and_undo(win, store, monkeypatch):
+    """Cài đặt: xem trước rồi bấm "Chuyển ngay" thì thư mục dữ liệu chuyển sang mỗi khách một file; hoàn tác thì về cách cũ."""
+    from ui_qt.pages import settings as st
+    seen = []
+    monkeypatch.setattr(st.QMessageBox, "exec", lambda self: seen.append(self.text()) or 0)
+    monkeypatch.setattr(st.QMessageBox, "clickedButton", lambda self: next(b for b in self.buttons() if b.text().startswith("Chuyển")))
+    monkeypatch.setattr(st.widgets, "info", lambda *a: None)
+    monkeypatch.setattr(st.widgets, "ask", lambda *a: True)
+    assert win.settings.kh_btn.isEnabled() and not win.settings.kh_undo.isEnabled()
+    win.settings.chuyen_doi()
+    assert "DU_LIEU_KODI.json" in seen[0] and store.theo_khach()
+    assert not win.settings.kh_btn.isEnabled() and win.settings.kh_undo.isEnabled()
+    win.settings.hoan_tac()
+    assert not store.theo_khach() and os.path.isfile(store.catalog_file)
+
+
 def test_step_bar_and_buttons(win):
     lot = win.lot
     assert len(lot.bar.labels) == 4 and lot.bar.current == 0 and not lot.back.isEnabled()
