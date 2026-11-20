@@ -91,8 +91,13 @@ def test_settings_migrate_to_one_file_per_customer_and_undo(win, store, monkeypa
     win.settings.chuyen_doi()
     assert "DU_LIEU_KODI.json" in seen[0] and store.theo_khach()
     assert not win.settings.kh_btn.isEnabled() and win.settings.kh_undo.isEnabled()
+    monkeypatch.setattr(st.QMessageBox, "clickedButton", lambda self: next(b for b in self.buttons() if b.text().startswith("Sắp xếp")))
+    win.settings.sap_xep()
+    assert "Sẽ làm" in seen[-1] and any(d.startswith("truoc_sap_xep_") for d in os.listdir(store.backup_root()))
+    win.settings.sap_xep_hoan_tac()
     win.settings.hoan_tac()
     assert not store.theo_khach() and os.path.isfile(store.catalog_file)
+    assert not win.settings.sx_btn.isEnabled()
 
 
 def test_step_bar_and_buttons(win):
