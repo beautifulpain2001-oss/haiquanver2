@@ -227,3 +227,20 @@ def test_sap_xep_moves_files_of_customers_not_in_app_back_to_shared_data(data_di
     c.sap_xep_hoan_tac()
     assert os.path.isfile(os.path.join(root, "Fujidan", "DU_LIEU_FUJIDAN.json"))
     assert len(make_store(data_dir, tmp_path, "d").data_tong) == n
+
+
+def test_choosing_customs_folder_itself_still_finds_customers_in_parent(tmp_path):
+    """Chọn thư mục HAI_QUAN làm thư mục chung trong khi master_catalog.json nằm ở thư mục cha: vẫn thấy khách đã thêm."""
+    shared = tmp_path / "chung"
+    a = make_store(shared, tmp_path, "a")
+    a.save_learned_customer("minhanh", {"name": "CÔNG TY MINH ANH", "label": "Minh Anh"}, [{"name": "Ống A", "code": "A1"}])
+    assert (shared / "master_catalog.json").is_file()
+    b = make_store(shared / "HAI_QUAN", tmp_path, "b")
+    assert "minhanh" in b.custom_profiles and os.path.normcase(b.base_dir) == os.path.normcase(str(shared))
+    a.chuyen_doi_thuc_hien()  # đã chuyển sang mỗi khách một file: chọn HAI_QUAN vẫn đọc đúng
+    c = make_store(shared / "HAI_QUAN", tmp_path, "c")
+    assert c.theo_khach() and "minhanh" in c.custom_profiles
+    # HAI_QUAN tự có danh mục khách riêng thì giữ nguyên
+    own = tmp_path / "rieng" / "HAI_QUAN"
+    d = make_store(own, tmp_path, "d")
+    assert os.path.normcase(d.base_dir) == os.path.normcase(str(own))
