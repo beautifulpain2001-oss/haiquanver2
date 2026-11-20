@@ -130,3 +130,28 @@ def test_partial_cartons_round_up_and_do_not_warn(store):
         assert item["kien"] == want, (qty, div, item["kien"])
         warns = app.check_lot({"customer": "kodi", "items": [item]})
         assert not any("kiện lẻ" in w or "chia hết" in w for w in warns)
+
+
+def test_pxk_used_by_other_customer_blocks_save_and_export(store, seed):
+    """Số PXK là dãy chung của công ty: hồ sơ khách khác đã giữ số (VD 00000334 cho cả Able và Tesa) thì không lưu/xuất được."""
+    src = seed["kodi"]
+    store.records.insert(0, {"id": "HS-X-TESA-17", "customer": "tesa", "docDate": "2026-11-11", "pxkNo": "00000334", "poNumber": "P1"})
+    rec = app.lot_build_record(store, form_of(src) | {"pxk": "334", "doc_date": "2026-11-11"}, src["items"])
+    assert store.pxk_conflict(rec)["id"] == "HS-X-TESA-17"
+    store.sync = lambda: False  # không đọc lại đĩa: giữ hồ sơ vừa chèn
+    with pytest.raises(ValueError, match="00000334|334"):
+        app.lot_save_new(store, rec, {})
+    with pytest.raises(ValueError, match="số trống kế tiếp"):
+        app.lot_export(store, rec, "ALL")
+    with pytest.raises(ValueError):
+        app.lot_export_each(store, rec)
+
+
+def test_pxk_same_lot_or_same_record_is_not_conflict(store, seed):
+    src = seed["kodi"]
+    store.records.insert(0, {"id": "HS-A", "customer": "kodi", "docDate": "2026-11-11", "pxkNo": "00000400", "poNumber": "P1"})
+    same_lot = app.lot_build_record(store, form_of(src) | {"pxk": "00000400", "doc_date": "2026-11-11", "po": "P2"}, src["items"])
+    assert store.pxk_conflict(same_lot) is None  # cùng khách, cùng ngày, cùng PXK: một lô gom nhiều PO
+    assert store.pxk_conflict({"id": "HS-A", "customer": "kodi", "docDate": "2026-11-12", "pxkNo": "400"}) is None  # chính nó
+    assert store.pxk_conflict({"customer": "kodi", "docDate": "2026-11-12", "pxkNo": "400"})["id"] == "HS-A"  # cùng khách khác ngày: trùng
+    assert store.pxk_conflict({"customer": "tesa", "docDate": "2026-11-11", "pxkNo": ""}) is None

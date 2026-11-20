@@ -129,6 +129,9 @@ def log_soft_error(msg):
         pass
 
 
+DEMO_RECORD_IDS = frozenset({"HS-20261030-TESA-01", "HS-20261028-KODI-01", "HS-20261030-SHIRAI-01"})  # hồ sơ mẫu có sẵn: số PXK không tính
+
+
 def _same_pxk(a, b):
     """Hai số PXK là một: '318' = '000318'; số có chữ thì so không phân biệt hoa thường."""
     a, b = str(a or "").strip(), str(b or "").strip()
@@ -2871,9 +2874,8 @@ class DedicatedDataStore:
         """Mọi số phiếu xuất kho đã dùng: từ hồ sơ đã lưu, từ tên file 'PXK 247.pdf' / tờ khai '<số PXK>_<số tờ khai>' trong thư mục hồ sơ.
         Trả [(số nguyên, chuỗi gốc)]. Số phiếu xuất kho là dãy số chung của công ty (không riêng từng khách)."""
         found = []
-        demo = {"HS-20261030-TESA-01", "HS-20261028-KODI-01", "HS-20261030-SHIRAI-01"}  # hồ sơ mẫu có sẵn của phần mềm: số PXK của chúng không tính
         for r in self.records:
-            if r.get("id") in demo:
+            if r.get("id") in DEMO_RECORD_IDS:
                 continue
             m = re.fullmatch(r"\s*0*(\d{1,9})\s*", str(r.get("pxkNo") or ""))
             if m:
@@ -2887,6 +2889,35 @@ class DedicatedDataStore:
         except OSError:
             pass
         return found
+
+    def pxk_conflict(self, rec):
+        """Hồ sơ KHÁC đang giữ cùng số PXK với `rec` (None nếu không có). Số PXK là dãy chung của công ty: khác khách, hoặc cùng khách
+        nhưng khác ngày khai, mà trùng số là trùng thật (VD 00000334 cho cả Able và Tesa). Cùng khách + cùng ngày + cùng số là cùng một lô
+        (một PXK gom nhiều PO) nên không tính. Hồ sơ mẫu có sẵn của phần mềm không tính."""
+        pxk = str(rec.get("pxkNo") or "").strip()
+        if not pxk:
+            return None
+        rid, cust, day = str(rec.get("id") or ""), rec.get("customer") or "", str(rec.get("docDate") or "")[:10]
+        for r in self.records:
+            if r.get("id") in DEMO_RECORD_IDS or (rid and str(r.get("id") or "") == rid) or not _same_pxk(r.get("pxkNo"), pxk):
+                continue
+            if (r.get("customer") or "") == cust and str(r.get("docDate") or "")[:10] == day:
+                continue
+            return r
+        return None
+
+    def check_pxk_free(self, rec):
+        """Ném ValueError (tiếng Việt) nếu số PXK của `rec` đã thuộc hồ sơ khác, kèm số trống kế tiếp để người dùng đổi."""
+        other = self.pxk_conflict(rec)
+        if not other:
+            return
+        lab = PROFILES.get(other.get("customer") or "", {}).get("label") or other.get("customer") or "?"
+        day = str(other.get("docDate") or "")[:10]
+        po = f", PO {other['poNumber']}" if other.get("poNumber") else ""
+        nxt = self.next_pxk()
+        raise ValueError(f"Số PXK {rec.get('pxkNo')} đã dùng cho hồ sơ {lab} ngày {day}{po} (mã {other.get('id') or '?'}).\n"
+                         f"Hai bộ hồ sơ không được chung một số PXK. Đổi số PXK theo số Bkav đã cấp"
+                         + (f" (số trống kế tiếp: {nxt})" if nxt else "") + " rồi làm lại.")
 
     def next_pxk(self):
         """Số phiếu xuất kho kế tiếp = số lớn nhất đã có + 1, giữ cách viết (số 0 đầu) của số hồ sơ gần nhất. Chưa có số nào thì ''."""
@@ -8396,6 +8427,8 @@ def lot_export(store, rec, mode="ALL", skip_h=False):
     chéo (chỉ mode ALL), `dsh` là tên file danh sách hàng ECUS đi kèm (nếu có).
     Ném ValueError(thông báo tiếng Việt) khi không xuất được.
     """
+    store.sync()  # máy khác có thể vừa lưu hồ sơ dùng số PXK này
+    store.check_pxk_free(rec)
     res = _lot_export_one(store, rec, mode, skip_h)
     store.write_lot_card(rec, os.path.dirname(res["path"]))
     store.latest_set_save(rec, [(mode, res["path"])])  # bản sao vào Kho mẫu: bộ chứng từ mới nhất của khách
@@ -8570,6 +8603,8 @@ def lot_export_each(store, rec, skip_h=False):
     """Xuất trọn bộ nhưng MỖI CHỨNG TỪ MỘT FILE Excel riêng (cùng thư mục hồ sơ).
     Trả {"files": [{"mode", "label", "name", "path"}], "problems": [điểm lệch khi kiểm tra chéo]}."""
     files, extra = [], []
+    store.sync()
+    store.check_pxk_free(rec)
     for mode in lot_bundle_modes(rec):
         res = _lot_export_one(store, rec, mode, skip_h=skip_h)
         files.append({"mode": mode, "label": lot_mode_label(mode), "name": res["fname"], "path": res["path"]})
@@ -8728,6 +8763,7 @@ def form_from_builtin(store, key, mode, tokenize=True):
 def lot_save_new(store, rec, exported_files):
     """Lưu hồ sơ vừa làm ở Bước 1: gắn các file đã xuất, ghi đè hồ sơ cùng khách + cùng số PO."""
     store.sync()  # máy khác có thể vừa lưu hồ sơ vào thư mục dùng chung
+    store.check_pxk_free(rec)
     store.sync_folder_with_pxk(rec)
     for k, v in exported_files.items():
         rec["files"][k] = v

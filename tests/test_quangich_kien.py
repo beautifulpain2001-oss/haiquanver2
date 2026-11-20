@@ -378,7 +378,7 @@ def test_able_dccn_is_a_monthly_statement_of_all_lots(store):
     def lot(po, day, rows):
         items = [{"stt": i + 1, "po": po, "ma_sp": "", "ten_sp": n, "unit": "chiếc", "qty": q, "price": p, "amount": q * p,
                   "div": 1, "kg": 0.1, "kien": 1, "net": 1, "gross": 2, "tare": 1, "read": "ok"} for i, (n, q, p) in enumerate(rows)]
-        return app.lot_build_record(store, {"customer": "able4", "po": po, "pxk": "1", "doc_date": f"2026-10-{day:02d}"}, items)
+        return app.lot_build_record(store, {"customer": "able4", "po": po, "pxk": str(day), "doc_date": f"2026-10-{day:02d}"}, items)  # mỗi lô một số PXK
 
     first = lot("00003872", 6, [("Ống giấy phi 38 x 5 x 315mm x150g in", 4320, 2807), ("Ống giấy phi 38 x 5 x 315mm x170g in", 4320, 3181)])
     store.records.append(first)
