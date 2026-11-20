@@ -61,8 +61,8 @@ def test_defaults_po_sequence_per_day_and_latest_price(store, cust):
     d = app.lot_fixed_order_defaults(store, cust, "2026-09-19")
     assert (d["prefix"], d["date"], d["seq"], d["po"]) == ("ABCDE", "260919", "0001", "ABCDE2609190001")
     assert d["item"]["code"] == "90000001" and d["price"] == 1000 and d["qty"] == 0  # mã cố định, giá danh mục khi chưa có hồ sơ
-    app.lot_save_new(store, make_rec(store, cust, "ABCDE2609190001", 20000, 1060, "2026-09-25"), {})
-    app.lot_save_new(store, make_rec(store, cust, "ABCDE2609190002", 15000, 1080, "2026-10-02"), {})
+    app.lot_save_new(store, make_rec(store, cust, "ABCDE2609190001", 20000, 1060, "2026-09-25", pxk="00000277"), {})
+    app.lot_save_new(store, make_rec(store, cust, "ABCDE2609190002", 15000, 1080, "2026-10-02", pxk="00000278"), {})
     d = app.lot_fixed_order_defaults(store, cust, "2026-09-19")
     assert d["seq"] == "0003" and d["price"] == 1080 and d["qty"] == 15000 and "02/10/2026" in d["price_from"]
     assert store.next_po_number(cust, "2026-09-20") == "ABCDE2609200001"  # ngày mới: số thứ tự bắt đầu lại
@@ -78,7 +78,7 @@ def test_fixed_items_validation(store, cust):
 
 
 def test_export_each_documents(store, cust):
-    app.lot_save_new(store, make_rec(store, cust, "ABCDE2609190001", 10000, 1000, "2026-10-02"), {})
+    app.lot_save_new(store, make_rec(store, cust, "ABCDE2609190001", 10000, 1000, "2026-10-02", pxk="00000278"), {})
     rec = make_rec(store, cust, "ABCDE2609190002", 20000, 1060)
     res = app.lot_export_each(store, rec)
     assert [f["mode"] for f in res["files"]] == ["PKL", "VAT", "PXK", "PO", "BBGH", "BDC", "PLX"] and res["problems"] == []

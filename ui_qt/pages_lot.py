@@ -1346,7 +1346,11 @@ class ExportStep(QWidget):
         widgets.open_folder(self.lot.folder())
 
     def do_save(self):
-        rec = self.lot.save()
+        try:
+            rec = self.lot.save()
+        except ValueError as e:
+            widgets.warn(self, "Chưa lưu được", str(e))
+            return
         self.refresh(keep_msg=True)
         self.msg.setText(f"Đã lưu hồ sơ PO {rec['poNumber'] or '(chưa có số)'}. Xem lại ở mục “Hồ sơ đã lưu”.")
         self.show_result()
