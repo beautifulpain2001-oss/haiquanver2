@@ -244,3 +244,44 @@ def test_choosing_customs_folder_itself_still_finds_customers_in_parent(tmp_path
     own = tmp_path / "rieng" / "HAI_QUAN"
     d = make_store(own, tmp_path, "d")
     assert os.path.normcase(d.base_dir) == os.path.normcase(str(own))
+
+
+def test_orphan_customer_files_without_he_thong_are_read_not_lost(data_dir, tmp_path):
+    """Chuyển dở dang / đã hoàn tác mà file khách còn lại (không có he_thong.json): khách vẫn hiện, không ghi/xóa gì."""
+    a = make_store(data_dir, tmp_path, "a")
+    a.save_learned_customer("minhanh", {"name": "CÔNG TY MINH ANH", "label": "Minh Anh"}, [{"name": "Ống A", "code": "A1"}])
+    a.data_tong += [{"khach": "Minh Anh", "ten": "Ống A", "ma_hang": "A1", "kg": 0.5, "ts": "1"}]
+    a.dt_save()
+    a.records.insert(0, {"id": "HS-ORPHAN-1", "customer": "minhanh", "docDate": "2026-11-10", "pxkNo": "00000777", "updatedAt": "5"})
+    a.save_records()
+    a.chuyen_doi_thuc_hien()
+    ht = a.he_thong_path()
+    os.remove(ht)  # mô phỏng: he_thong.json biến mất (hoàn tác / đồng bộ lỗi)
+    # file cũ trong thư mục chung chỉ có Shirai/Tesa/Kodi
+    for n in ("master_catalog", "hongthien_records"):
+        old = os.path.join(str(data_dir), n + ".DA_CHUYEN.json")
+        if os.path.isfile(old):
+            os.remove(old)
+    du = a._khach_path("minhanh")
+    before = open(du, "rb").read()
+    b = make_store(data_dir, tmp_path, "b")
+    assert not b.theo_khach() and b.orphan_files >= 1
+    assert "minhanh" in b.custom_profiles and "minhanh" in app.PROFILES
+    assert any(r["id"] == "HS-ORPHAN-1" for r in b.records)
+    assert any(r.get("ma_hang") == "A1" for r in b.data_tong) and sum(1 for r in b.data_tong if r.get("ma_hang") == "A1") == 1
+    assert open(du, "rb").read() == before  # chỉ đọc, file khách nguyên vẹn
+    res = b.chuyen_doi_thuc_hien()  # bấm chuyển để hoàn tất: file khách có sẵn được sao lưu trước
+    assert b.theo_khach() and os.path.isfile(os.path.join(res["sao_luu"], "file_khach_co_san", os.path.basename(du)))
+    c = make_store(data_dir, tmp_path, "c")
+    assert "minhanh" in c.custom_profiles and any(r["id"] == "HS-ORPHAN-1" for r in c.records)
+
+
+def test_customs_folder_with_own_records_is_not_redirected_to_parent(tmp_path):
+    shared = tmp_path / "chung"
+    a = make_store(shared, tmp_path, "a")
+    a.save_records()
+    own = shared / "HAI_QUAN"
+    (own).mkdir(exist_ok=True)
+    (own / "hongthien_records.json").write_text("[]", encoding="utf-8")
+    b = make_store(own, tmp_path, "b")
+    assert os.path.normcase(b.base_dir) == os.path.normcase(str(own))
