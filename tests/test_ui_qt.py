@@ -1,5 +1,6 @@
 """Kiểm thử giao diện mới (PySide6) ở chế độ offscreen, không cần màn hình."""
 
+import json
 import os
 import time
 
@@ -59,6 +60,23 @@ def test_nav_switches_pages(win):
 def test_settings_page_shows_data_folder(win, store):
     page = win.pages.widget(len(mw.NAV) - 1)
     assert any(str(store.base_dir) in lb.text() for lb in page.findChildren(mw.QLabel))
+
+
+def test_settings_change_dir_brings_data_to_shared_folder(win, store, tmp_path, monkeypatch):
+    """Đổi sang thư mục chung còn trống: chọn "Chép dữ liệu sang" thì dữ liệu máy này có ngay ở thư mục chung; trang hiện số bản sao lưu."""
+    from ui_qt.pages import settings as st
+    shared = tmp_path / "OneDrive_chung"
+    shared.mkdir()
+    store.item_mem["Hàng thử đồng bộ"] = {"div": 300, "kg": 1, "hs": ""}
+    store.save_catalog()
+    monkeypatch.setattr(st.QFileDialog, "getExistingDirectory", lambda *a, **k: str(shared))
+    monkeypatch.setattr(st.QMessageBox, "exec", lambda self: 0)
+    monkeypatch.setattr(st.QMessageBox, "clickedButton", lambda self: next(b for b in self.buttons() if b.text().startswith("Chép")))
+    monkeypatch.setattr(st.widgets, "info", lambda *a: None)
+    win.settings.change_dir()
+    assert os.path.normcase(store.base_dir) == os.path.normcase(str(shared))
+    assert "Hàng thử đồng bộ" in json.loads((shared / "master_catalog.json").read_text(encoding="utf-8"))["item_mem"]
+    assert "Sao lưu tự động" in win.settings.sync_info.text()
 
 
 def test_step_bar_and_buttons(win):
