@@ -42,5 +42,17 @@ Không cần mạng LAN hay máy chủ. Mỗi máy: **Cài đặt → Nơi lưu 
 (ổ chung, OneDrive, Google Drive…). Hồ sơ và khách hàng lưu trong thư mục đó; máy nào lưu thì máy khác tự đọc lại (tối đa 15 giây,
 hoặc ngay khi chuyển trang). Danh sách chỉ hiện thông tin cơ bản; muốn xem chi tiết thì bấm **Mở thư mục hồ sơ**.
 
-Lưu cùng lúc từ hai máy không đè mất dữ liệu của nhau (khóa ngắn `.khoa_ghi`, gộp với bản mới nhất, ghi qua file tạm).
-Lưu ý: xóa một mặt hàng/khách ở máy này có thể bị máy khác lưu lại; xóa hồ sơ thì không bị khôi phục.
+Khi đổi thư mục, phần mềm hỏi có **mang dữ liệu máy này sang** không: thư mục chung còn trống thì chép nguyên (khách, bảng Kg & kiện,
+Data tổng, cài đặt lái xe/công ty, hồ sơ, file hồ sơ, mẫu chứng từ); đã có dữ liệu máy khác thì **gộp**: chỉ thêm phần còn thiếu,
+chỗ trùng giữ bản trong thư mục chung, dòng 🔒 sửa tay được ưu tiên. Thư mục cũ trên máy giữ nguyên.
+
+Lưu cùng lúc từ hai máy không đè mất dữ liệu của nhau (khóa ngắn `.khoa_ghi`, ghi qua file tạm, **gộp 3 bên**): mỗi máy chỉ ghi phần
+nó thực sự sửa, nên máy mở từ sáng không ghi đè số mới của máy khác; bảng Kg & kiện gộp theo mã hàng, dòng 🔒 thắng dòng chưa khóa;
+xóa ở một máy thì máy khác không khôi phục lại (trừ khi máy kia cũng vừa sửa đúng mục đó).
+
+**Sao lưu tự động**: trước khi ghi `master_catalog.json`, `hongthien_records.json`, `DATA_TONG.json` phần mềm chép bản cũ vào
+`_SAO_LUU/<tên file>/` (tối đa 1 bản / 30 phút, giữ 40 bản). Nút **Mở thư mục sao lưu** ở Cài đặt. Muốn quay lại bản cũ: đóng phần mềm
+ở mọi máy, chép bản sao lưu đè lên file chính (đổi lại đúng tên).
+
+**Bản xung đột OneDrive / Google Drive / Dropbox** (VD `master_catalog-TEN-MAY.json`, `master_catalog (1).json`): phần mềm tự gộp
+phần còn thiếu vào file chính rồi chuyển bản xung đột vào `_SAO_LUU/xung_dot/`.
