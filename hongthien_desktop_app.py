@@ -9158,6 +9158,71 @@ def parse_able_po_rows(text, catalog_items):
     return rows
 
 
+_BEST_SPEC = re.compile(r"(?<![\d.])(\d{2,3}(?:\.\d+)?)\s*[*xX×]\s*(\d{1,2}(?:\.\d+)?)\s*[*xX×]\s*(\d{3,4})\s*MM", re.I)
+_BEST_MONEY = re.compile(r"(?<![\d.,])\d{1,3}(?:,\d{3})*\.\d{2}(?!\d)")
+_BEST_NO_CODE = re.compile(r"^\s*(\d{1,3})\s+([A-Z]{2,5}\d{4,8})(?![A-Za-z0-9])")
+
+
+def parse_best_po_rows(text):
+    """PO kiểu Best in từ ERP, PDF có lớp chữ: mỗi dòng hàng 'STT  Mã  Ống giấy ...  KT:ø40*4*1800MM  SL  ĐVT  Đơn giá  Thành tiền  QS...  PRS...  PackingF...'.
+    Lớp chữ trộn thứ tự cột (SL có thể đứng trước tên, thành tiền dính sau 'MM') và ký hiệu phi bị hỏng font ('￠', 'ꬾ'),
+    nên không dựa vào thứ tự: lấy mã sau STT, quy cách 'a*b*cMM', rồi chọn bộ ba số tiền SL x đơn giá = thành tiền.
+    ĐVT trên PO ('根' hoặc 'PCS') chỉ là cách ghi của khách, chứng từ dùng ĐVT đã học. Trả [] nếu không có dòng nào chắc chắn."""
+    rows = []
+    for line in (text or "").splitlines():
+        m = _BEST_NO_CODE.match(line)
+        spec = _BEST_SPEC.search(line)
+        if not m or not spec:
+            continue
+        rest = line[:spec.start()] + " " * (spec.end() - spec.start()) + line[spec.end():]
+        rest = re.sub(r"(?<!\d)20\d{2}/\d{1,2}/\d{1,2}(?!\d)", " ", rest)
+        vals = [float(x.replace(",", "")) for x in _BEST_MONEY.findall(rest)]
+        trio = None
+        for i, a in enumerate(vals):  # thành tiền = số lớn nhất khớp SL x giá; SL là số nguyên
+            for j, q in enumerate(vals):
+                for k, p in enumerate(vals):
+                    if len({i, j, k}) == 3 and q >= 1 and q.is_integer() and p > 0 and abs(q * p - a) <= 1 and (trio is None or a > trio[2]):
+                        trio = (q, p, a)
+        if not trio:
+            continue
+        desc = re.search(r"[OÔỐoôố]ng\s+gi[aấ]y(?:\s+(?!KT\b)[^\W\d_]+)*", line)
+        refs = {k: (re.search(p, line) or [""])[0] for k, p in (("inquiry", r"QS\d{8,12}"), ("pr", r"PRS\d{8,13}"), ("customsNo", r"Packing\s?[A-Z]?\d{2,4}"))}
+        d, t, ln = spec.groups()
+        rows.append({"no": int(m.group(1)), "code": m.group(2), "desc": desc.group(0).strip() if desc else "Ống giấy",
+                     "dims": [d, t, ln], "qty": trio[0], "price": trio[1], "amount": trio[2],
+                     "unit_po": "根" if "根" in line else ("PCS" if re.search(r"\bPCS\b", line) else ""), **refs})
+    return rows
+
+
+def lines_from_best_rows(rows, po_no, profile, catalog_items, data_store=None, tare_val=0.0):
+    """Dòng hàng từ parse_best_po_rows. Nhận mặt hàng đã học theo mã khách, rồi theo đủ 3 số quy cách (phi x dày x dài);
+    quy cách chưa học thì đặt tên theo PO 'Ống giấy chống bụi 40 x 4 x 1800mm' (cùng kiểu tên trên Invoice), kg/ống để người dùng điền.
+    Số kiện theo định mức SL/kiện của mặt hàng (mặc định 20 ống/kiện của khách), không chia ngược từ số khác."""
+    by_code = {str(it.get("code") or "").strip(): it for it in catalog_items if it.get("code")}
+    rows2 = []
+    for r in rows:
+        known = by_code.get(r["code"])
+        if known and len(_name_dims(known.get("name"))[0]) >= 3 and _name_dims(known.get("name"))[0] != r["dims"]:
+            known = None  # mã đã học gắn với quy cách khác (học nhầm): nhận lại theo quy cách
+        if not known:
+            known = next((it for it in catalog_items if _name_dims(it.get("name"))[0] == r["dims"]), None)
+        name = (known or {}).get("name") or f"{r['desc']} {r['dims'][0]} x {r['dims'][1]} x {r['dims'][2]}mm"
+        rows2.append({"code": r["code"], "desc": name, "qty": r["qty"], "price": r["price"], "_known": known or {}})
+    lines = lines_from_erp_rows(rows2, po_no, profile, catalog_items, data_store=data_store, tare_val=tare_val)
+    for ln, r, r2 in zip(lines, rows, rows2):
+        ln["ma_sp"] = r["code"]  # mã trên PO là mã khách dùng (Phiếu giao hàng, ĐCCN)
+        for k in ("inquiry", "customsNo"):
+            if r.get(k):
+                ln[k] = r[k]
+        if profile.get("dept"):
+            ln["dept"] = profile["dept"]
+        if r2["_known"]:
+            ln["read"], ln["read_note"] = "ok", ""
+        else:
+            ln["read"], ln["read_note"] = "suy_ra", "Quy cách mới, chưa học: điền kg/ống (SL x đơn giá đã khớp thành tiền trên PO)"
+    return lines
+
+
 def lines_from_erp_rows(rows, po_no, profile, catalog_items, data_store=None, tare_val=0.0):
     """Dòng hàng từ parse_erp_po_rows: mặt hàng đã học (theo mã) lấy tên, kg, định mức đã nhớ; mặt hàng mới lấy tên/giá theo PO
     (kg, định mức để trống cho người dùng điền ở Bước 3, rồi được nhớ cho lần sau)."""
@@ -10188,7 +10253,15 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
         erp_rows = [] if (table_rows or dated_rows) else (pcs_rows or able_rows or erp_rows_repaired(raw_text, store.items_for_customer(customer)))
         if pcs_rows:  # PO kiểu Quang Ích: dòng hàng kèm ngày giao và đơn giá ở cột ghi chú
             pass
-        if scan_rep and scan_rep["rows"]:
+        best_rows = []
+        if (is_best_docset(prof) or "inquiry" in (prof.get("lineRefs") or {})) and not table_rows and not (scan_rep and scan_rep["rows"]) \
+                and ext == ".pdf" and _pdf_has_text(path):
+            best_rows = parse_best_po_rows(raw_text)  # PO Best có lớp chữ: đọc đủ mọi dòng, cả quy cách chưa học
+            if len(best_rows) < len(lines):
+                best_rows = []
+        if best_rows:
+            lines = lines_from_best_rows(best_rows, po_no, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
+        elif scan_rep and scan_rep["rows"]:
             lines = lines_from_able_scan(scan_rep["rows"], prof, store.items_for_customer(customer), store, tare_v)
             po_no = lines[0].get("po") or po_no
             res["read_report"] = read_report(lines, scan_rep.get("check", ""))
