@@ -808,7 +808,7 @@ class DedicatedDataStore:
         self._cat_base, self._rec_base = None, {}  # bản đọc/ghi gần nhất: gốc để gộp 3 bên với máy khác
         self._kbase, self._kh_paths, self._kh_names = {}, {}, {}  # cách lưu mỗi khách một file: bản gốc từng file, đường dẫn, tên khách
         self._rec_rel, self._rec_inline, self._rec_hashes = {}, set(), {}  # hồ sơ: thư mục lô (tương đối), hồ sơ giữ trong file khách, dấu nội dung
-        self.last_sync, self.last_conflicts = "", 0
+        self.last_sync, self.last_conflicts, self.orphan_files = "", 0, 0
         # chỉ mục quét thư mục: chỉ đọc lại thư mục có giờ sửa đổi (xem _dir_listing, _activity, read_lot_card)
         self._ls_cache, self._act_cache, self._card_cache, self._card_paths = {}, {}, {}, {}
         self._scan_ls = None
@@ -882,8 +882,9 @@ class DedicatedDataStore:
     @classmethod
     def resolve_data_dir(cls, d):
         """Chọn chính thư mục HAI_QUAN trong khi file dữ liệu chung (master_catalog.json, hongthien_records.json) nằm ở thư mục
-        CHA của nó (cách xếp cũ: <thư mục chung>/master_catalog.json + <thư mục chung>/HAI_QUAN/...): dùng thư mục cha, nếu không
-        phần mềm không thấy danh mục khách đã thêm (chỉ còn Shirai, Tesa, Kodi). HAI_QUAN tự có danh mục khách riêng thì giữ nguyên."""
+        CHA của nó (cách xếp cũ: <thư mục chung>/master_catalog.json + <thư mục chung>/HAI_QUAN/...) và HAI_QUAN CHƯA có dữ liệu riêng
+        (hồ sơ, he_thong.json, danh mục có khách): dùng thư mục cha, nếu không phần mềm không thấy khách đã thêm.
+        HAI_QUAN đã có dữ liệu riêng thì giữ nguyên."""
         if not d:
             return d
         d0 = os.path.normpath(os.path.abspath(d))
@@ -895,6 +896,9 @@ class DedicatedDataStore:
         names = ("master_catalog.json", "hongthien_records.json", "master_catalog.DA_CHUYEN.json", "hongthien_records.DA_CHUYEN.json")
         if not any(os.path.isfile(os.path.join(parent, n)) for n in names):
             return d
+        own_files = ("hongthien_records.json", os.path.join(cls.HE_THONG_DIR, cls.HE_THONG_FILE))
+        if any(os.path.isfile(os.path.join(d0, n)) for n in own_files):
+            return d  # HAI_QUAN đã có hồ sơ / dấu đã chuyển của riêng nó: đó là thư mục dữ liệu thật
         own = os.path.join(d0, "master_catalog.json")
         if os.path.isfile(own):
             try:
@@ -1031,11 +1035,43 @@ class DedicatedDataStore:
         if self.apply_tesa_dinh_muc_dt():
             self.dt_save()
             self.save_catalog()
+        self.absorb_orphan_khach_files()
         self._note_sigs()
         if not self.records:
             self.records = self.default_seed_records()
             self.save_records()
         self.absorb_conflict_copies()
+
+    def orphan_khach_files(self):
+        """File DU_LIEU_*.json nằm trong thư mục khách trong khi chưa có _HE_THONG/he_thong.json (chuyển dở dang, hoặc đã hoàn tác
+        nhưng file khách còn lại): cách lưu cũ không đọc chúng nên khách trong đó biến mất khỏi phần mềm."""
+        return {} if self.theo_khach() else self._scan_khach_files()
+
+    def absorb_orphan_khach_files(self):
+        """Đọc (KHÔNG ghi, KHÔNG xóa) các file khách mồ côi vào bộ nhớ: khách, mã hàng, Kg & kiện, hồ sơ chưa có thì thêm; chỗ trùng
+        giữ bản đang có. Trả số file đã đọc. Muốn chuyển hẳn sang mỗi khách một file thì bấm 'Xem trước và chuyển' ở Cài đặt."""
+        files = self.orphan_khach_files()
+        bodies = []
+        for key, path in sorted(files.items()):
+            data = self._read_json(path, None)
+            if isinstance(data, dict):
+                bodies.append((key, self._part_body(data)))
+        self.orphan_files = len(bodies)
+        if not bodies:
+            return 0
+        dm = {}
+        for _k, b in bodies:  # 1) danh mục (khách, mã hàng, thiết lập riêng của khách): thêm cái chưa có, để khách vào PROFILES trước
+            dm = merge_catalog(None, dm, b["danh_muc"]) if dm else copy.deepcopy(b["danh_muc"])
+        self._take_merged_catalog(merge_catalog(None, copy.deepcopy(self._catalog_payload()), {k: v for k, v in dm.items() if k in
+                                  ("custom_profiles", "custom_items", "profile_overrides", "read_fixes", "weights_db", "supplier_pref", "ten_kh_tay")}))
+        parts = self._split_parts()  # 2) Kg & kiện + hồ sơ: gộp vào phần của đúng khách
+        for key, b in bodies:
+            r = self._route(key)
+            body = {"danh_muc": {}, "data_tong": b["data_tong"], "ho_so": b["ho_so"], "ten_goi": b["ten_goi"]}
+            parts[r] = self._merge_part(None, parts.get(r) or {"danh_muc": {}, "data_tong": [], "ho_so": [], "ten_goi": []}, body)
+        self._join_parts(parts)
+        self._loaded_ids = {r.get("id") for r in self.records}
+        return len(bodies)
 
     def _set_catalog_fields(self, data):
         self.weights_db = data.get("weights_db", {})
@@ -3004,7 +3040,7 @@ class DedicatedDataStore:
         conflicts = [os.path.basename(c) for p in (self.catalog_file, self.records_file, self.dt_path()) for c in self.conflict_copies(p)]
         return {"files": rows, "pxk_trung": pxk_trung, "kg_lech": lech, "ho_so": len(self.records), "ho_so_khong_thu_muc": no_folder,
                 "file_cu": [os.path.basename(p) for p in self.old_data_files()], "ban_xung_dot": conflicts, "da_chuyen": self.theo_khach(),
-                "chua_co": self.khach_chua_co()}
+                "chua_co": self.khach_chua_co(), "file_khach_co_san": [os.path.relpath(p, self.customs_root()) for p in self.orphan_khach_files().values()]}
 
     def chuyen_doi_thuc_hien(self):
         """Chuyển sang mỗi khách một file: (1) sao lưu nguyên vẹn file cũ + bản xung đột vào _SAO_LUU/truoc_chuyen_doi_<giờ>,
@@ -3024,6 +3060,9 @@ class DedicatedDataStore:
         for p in (self.catalog_file, self.records_file, self.dt_path()):
             for c in self.conflict_copies(p):
                 shutil.copy2(c, os.path.join(bdir, os.path.basename(c)))
+        for k, p in self.orphan_khach_files().items():  # file khách có sẵn (chuyển dở dang) cũng được sao lưu trước khi ghi lại
+            os.makedirs(os.path.join(bdir, "file_khach_co_san"), exist_ok=True)
+            shutil.copy2(p, os.path.join(bdir, "file_khach_co_san", os.path.basename(p)))
         with open(os.path.join(bdir, "vi_tri_goc.json"), "w", encoding="utf-8") as f:
             json.dump(saved, f, ensure_ascii=False, indent=2)
         want = {"ho_so": len(self.records), "data_tong": len(self.data_tong),

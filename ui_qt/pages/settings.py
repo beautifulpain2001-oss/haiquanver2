@@ -288,7 +288,10 @@ class SettingsPage(_Page):
 
     def show_kh_state(self):
         on = self.store.theo_khach()
-        self.kh_state.setText("✅  Đang dùng cách lưu mỗi khách một file." if on else "Đang dùng cách lưu cũ (3 file chung cho mọi khách).")
+        txt = "✅  Đang dùng cách lưu mỗi khách một file." if on else "Đang dùng cách lưu cũ (3 file chung cho mọi khách)."
+        if not on and getattr(self.store, "orphan_files", 0):
+            txt += f"  Đã đọc thêm {self.store.orphan_files} file khách có sẵn; bấm 'Xem trước và chuyển' để hoàn tất."
+        self.kh_state.setText(txt)
         self.kh_btn.setEnabled(not on)
         self.kh_undo.setEnabled(on)
         self.sx_btn.setEnabled(on)
@@ -384,6 +387,9 @@ class SettingsPage(_Page):
             ten = f"  (gộp tên: {' / '.join(r['ten_goi'])})" if r["ten_goi"] else ""
             lines.append(f"• {r['ten']}: {r['file']} | {r['ma_hang']} mã, {r['data_tong']} dòng Kg & kiện, {r['ho_so']} hồ sơ{ten}")
         lines += self._chua_co_lines(pv.get("chua_co"))
+        if pv.get("file_khach_co_san"):
+            lines += ["", f"ℹ Đã có sẵn {len(pv['file_khach_co_san'])} file khách (chuyển dở dang trước đó). Dữ liệu trong đó đã được đọc vào phần mềm; "
+                          "trước khi ghi lại, các file này được sao lưu vào _SAO_LUU."]
         if pv["pxk_trung"]:
             lines += ["", "⚠ Số PXK trùng giữa các bộ (cần đổi một bộ theo số Bkav, phần mềm KHÔNG tự đổi):"]
             lines += [f"   {x['pxk']}: {', '.join(x['ho_so'])}" for x in pv["pxk_trung"]]
