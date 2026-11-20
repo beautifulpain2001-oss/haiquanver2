@@ -304,13 +304,20 @@ class SettingsPage(_Page):
         lines.append(f"• Gộp {len(pv['file_cu'])} file kiểu cũ: {', '.join(pv['file_cu'])}" if pv["file_cu"] else "• Không có file kiểu cũ.")
         if pv["nhan_doi"]:
             lines.append(f"• Gộp {len(pv['nhan_doi'])} file khách bị nhân đôi: {', '.join(pv['nhan_doi'])}")
+        if pv.get("file_la"):
+            lines.append(f"• Cất {len(pv['file_la'])} file DU_LIEU của khách CHƯA có trong app (bản trước lỡ tạo) vào bản sao lưu; "
+                         f"dữ liệu chuyển về dữ liệu chung, không mất.")
+            if pv.get("thu_muc_trong"):
+                lines.append(f"   Thư mục chỉ còn trống sau đó sẽ bỏ ({len(pv['thu_muc_trong'])}): {', '.join(pv['thu_muc_trong'][:20])}"
+                             + (" …" if len(pv["thu_muc_trong"]) > 20 else ""))
+            lines.append("   Thư mục khách có file khác (hồ sơ, chứng từ) giữ nguyên.")
         lines += [f"• Chuyển {a} → {b}" for a, b in pv["sai_cho"]]
         if pv["ten_goi"]:
             lines.append(f"• Một khách một tên ({pv['doi_ten']} dòng Kg & kiện đổi tên):")
             lines += [f"   {k}: {' / '.join(v)}" for k, v in list(pv["ten_goi"].items())[:15]]
         lines.append(f"• Bỏ {pv['dong_trung']} dòng Kg & kiện trùng (giữ dòng 🔒 / sửa tay / mới nhất, ô trống lấy từ dòng bỏ)." if pv["dong_trung"]
                      else "• Không có dòng Kg & kiện trùng.")
-        bao = []
+        bao = self._chua_co_lines(pv.get("chua_co"))
         if pv["pxk_trung"]:
             bao.append("Số PXK trùng giữa các bộ (đổi một bộ theo số Bkav):")
             bao += [f"   {x['pxk']}: {', '.join(x['ho_so'])}" for x in pv["pxk_trung"]]
@@ -338,8 +345,21 @@ class SettingsPage(_Page):
             return
         self.refresh()
         self.data_changed.emit()
-        widgets.info(self, "Đã sắp xếp", f"Gộp {st['file_cu']} file cũ, {st['nhan_doi']} file nhân đôi; chuyển {st['sai_cho']} file về đúng thư mục; "
+        widgets.info(self, "Đã sắp xếp", f"Gộp {st['file_cu']} file cũ, {st['nhan_doi']} file nhân đôi; cất {st['file_la']} file khách chưa có trong app, bỏ {st['thu_muc_xoa']} thư mục trống; chuyển {st['sai_cho']} file về đúng thư mục; "
                                          f"đổi tên khách {st['doi_ten']} dòng; bỏ {st['dong_trung']} dòng trùng.\nBản sao lưu: {st['sao_luu']}")
+
+    @staticmethod
+    def _chua_co_lines(chua_co):
+        """Tên khách có trong dữ liệu mà app chưa có: liệt kê để người dùng chọn thêm khách ở trang Khách hàng hoặc bỏ qua."""
+        if not chua_co:
+            return []
+        items = sorted(chua_co.values(), key=lambda o: -(o["dong"] + o["ho_so"]))
+        out = ["", f"ℹ {len(items)} tên khách có trong dữ liệu nhưng CHƯA có trong app: giữ ở dữ liệu chung (_HE_THONG), "
+                   "không tạo thư mục. Muốn tách riêng thì thêm khách ở trang Khách hàng; không thì bỏ qua:"]
+        out += [f"   {' / '.join(o['ten'][:3])}: {o['dong']} dòng Kg & kiện" + (f", {o['ho_so']} hồ sơ" if o["ho_so"] else "") for o in items[:25]]
+        if len(items) > 25:
+            out.append(f"   … và {len(items) - 25} tên khác")
+        return out
 
     def sap_xep_hoan_tac(self):
         if not widgets.ask(self, "Hoàn tác sắp xếp", "Trả dữ liệu về như ngay trước lần sắp xếp gần nhất?\n\nThay đổi làm sau lần sắp xếp đó sẽ mất."):
@@ -363,6 +383,7 @@ class SettingsPage(_Page):
         for r in pv["files"]:
             ten = f"  (gộp tên: {' / '.join(r['ten_goi'])})" if r["ten_goi"] else ""
             lines.append(f"• {r['ten']}: {r['file']} | {r['ma_hang']} mã, {r['data_tong']} dòng Kg & kiện, {r['ho_so']} hồ sơ{ten}")
+        lines += self._chua_co_lines(pv.get("chua_co"))
         if pv["pxk_trung"]:
             lines += ["", "⚠ Số PXK trùng giữa các bộ (cần đổi một bộ theo số Bkav, phần mềm KHÔNG tự đổi):"]
             lines += [f"   {x['pxk']}: {', '.join(x['ho_so'])}" for x in pv["pxk_trung"]]

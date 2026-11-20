@@ -2680,6 +2680,35 @@ class DedicatedDataStore:
                 return k
         return ten_khach_chuan(row.get("khach") or row.get("khach_day_du") or "") or "khac"
 
+    def _route(self, key):
+        """File nhận dữ liệu của mã khách `key`: chỉ khách CÓ TRONG APP (trang Khách hàng) mới có file riêng trong thư mục khách.
+        Tên khách chỉ có trong dữ liệu (Kg & kiện, hồ sơ cũ) mà app chưa có thì giữ ở phần dùng chung (_HE_THONG), không tạo
+        thư mục; thêm khách đó vào app thì lần lưu sau tự tách sang file riêng. File khách lạ do bản trước lỡ tạo vẫn được đọc/ghi
+        cho đến khi bấm 'Sắp xếp lại dữ liệu'."""
+        key = str(key or "")
+        if not key or key in PROFILES:
+            return key
+        return key if key in getattr(self, "_kh_paths", {}) else ""
+
+    def khach_chua_co(self):
+        """Tên khách có trong dữ liệu nhưng CHƯA có trong app: {mã chuẩn hóa: {"ten": [cách ghi], "dong": số dòng Kg & kiện, "ho_so": n}}."""
+        out = {}
+        for row in self.data_tong:
+            key = self.dt_khach_key(row)
+            if key in PROFILES:
+                continue
+            o = out.setdefault(key, {"ten": [], "dong": 0, "ho_so": 0})
+            o["dong"] += 1
+            name = str(row.get("khach") or "").strip()
+            if name and name not in o["ten"]:
+                o["ten"].append(name)
+        for r in self.records:
+            key = str(r.get("customer") or "")
+            if key and key not in PROFILES:
+                o = out.setdefault(key, {"ten": [key], "dong": 0, "ho_so": 0})
+                o["ho_so"] += 1
+        return out
+
     def _split_parts(self):
         """Chia dữ liệu trong bộ nhớ thành {mã khách: phần của khách}; mã '' là phần dùng chung (_HE_THONG)."""
         cat = copy.deepcopy(self._catalog_payload())
@@ -2695,12 +2724,12 @@ class DedicatedDataStore:
         part("tesa")["danh_muc"]["tesa_items"] = cat.get("tesa_items") or []
         for field in ("custom_profiles", "custom_items", "profile_overrides"):
             for key, v in (cat.get(field) or {}).items():
-                part(key)["danh_muc"].setdefault(field, {})[key] = v
+                part(self._route(key))["danh_muc"].setdefault(field, {})[key] = v
         for x in cat.get("read_fixes") or []:
-            part(str(x.get("customer") or "") if isinstance(x, dict) else "")["danh_muc"].setdefault("read_fixes", []).append(x)
+            part(self._route(x.get("customer")) if isinstance(x, dict) else "")["danh_muc"].setdefault("read_fixes", []).append(x)
         self._kh_names = getattr(self, "_kh_names", {})
         for row in self.data_tong:
-            key = self.dt_khach_key(row)
+            key = self._route(self.dt_khach_key(row))
             p = part(key)
             p["data_tong"].append(row)
             name = str(row.get("khach") or "").strip()
@@ -2709,7 +2738,7 @@ class DedicatedDataStore:
                 if key not in PROFILES:
                     self._kh_names.setdefault(key, name)
         for r in self.records:
-            part(str(r.get("customer") or ""))["ho_so"].append(self._ho_so_entry(r))
+            part(self._route(r.get("customer")))["ho_so"].append(self._ho_so_entry(r))
         return parts
 
     def _ho_so_entry(self, r):
@@ -2947,7 +2976,8 @@ class DedicatedDataStore:
                 no_folder += 1
         conflicts = [os.path.basename(c) for p in (self.catalog_file, self.records_file, self.dt_path()) for c in self.conflict_copies(p)]
         return {"files": rows, "pxk_trung": pxk_trung, "kg_lech": lech, "ho_so": len(self.records), "ho_so_khong_thu_muc": no_folder,
-                "file_cu": [os.path.basename(p) for p in self.old_data_files()], "ban_xung_dot": conflicts, "da_chuyen": self.theo_khach()}
+                "file_cu": [os.path.basename(p) for p in self.old_data_files()], "ban_xung_dot": conflicts, "da_chuyen": self.theo_khach(),
+                "chua_co": self.khach_chua_co()}
 
     def chuyen_doi_thuc_hien(self):
         """Chuyển sang mỗi khách một file: (1) sao lưu nguyên vẹn file cũ + bản xung đột vào _SAO_LUU/truoc_chuyen_doi_<giờ>,
@@ -3051,8 +3081,11 @@ class DedicatedDataStore:
             for n in (os.listdir(os.path.join(root, d)) if os.path.isdir(os.path.join(root, d)) else []):
                 if re.fullmatch(re.escape(self.KHACH_FILE_PRE) + r"[A-Za-z0-9_]+\.json", n):
                     found.setdefault(n[len(self.KHACH_FILE_PRE):-5].lower(), []).append(os.path.join(root, d, n))
-        nhan_doi, sai_cho = [], []
+        nhan_doi, sai_cho, la = [], [], []
         for key, paths in found.items():
+            if key not in PROFILES:  # file của tên khách app chưa có (bản trước lỡ tạo): gom về dữ liệu chung, không giữ thư mục riêng
+                la += paths
+                continue
             main = self._kh_paths.get(key) or paths[0]
             nhan_doi += [p for p in paths if os.path.normcase(p) != os.path.normcase(main)]
             want = os.path.join(root, self._khach_dir_name(key), os.path.basename(main))
@@ -3062,18 +3095,15 @@ class DedicatedDataStore:
         groups, names = {}, {}
         for i, row in enumerate(self.data_tong):
             key = self.dt_khach_key(row)
+            if key not in PROFILES:  # chỉ sắp xếp khách có trong app; tên lạ để nguyên, liệt kê cho người dùng chọn
+                continue
             names.setdefault(key, {}).setdefault(str(row.get("khach") or "").strip(), 0)
             names[key][str(row.get("khach") or "").strip()] += 1
             groups.setdefault((key, clean_str(row.get("ten"))), []).append(i)
-        chuan = {}
-        for key, cnt in names.items():
-            if key in PROFILES:
-                chuan[key] = str(PROFILES[key].get("label") or key)
-            else:
-                chuan[key] = max(cnt.items(), key=lambda kv: (kv[1], -len(kv[0])))[0]
-        doi_ten = sum(1 for row in self.data_tong if str(row.get("khach") or "").strip() != chuan.get(self.dt_khach_key(row), ""))
+        chuan = {key: str(PROFILES[key].get("label") or key) for key in names}
+        doi_ten = sum(1 for row in self.data_tong if self.dt_khach_key(row) in chuan and str(row.get("khach") or "").strip() != chuan[self.dt_khach_key(row)])
         trung = {g: ix for g, ix in groups.items() if len(ix) > 1 and g[1]}
-        return {"cu": cu, "nhan_doi": nhan_doi, "sai_cho": sai_cho, "chuan": chuan, "doi_ten": doi_ten, "trung": trung,
+        return {"cu": cu, "nhan_doi": nhan_doi, "sai_cho": sai_cho, "la": la, "chuan": chuan, "doi_ten": doi_ten, "trung": trung,
                 "ten_goi": {k: sorted(v) for k, v in names.items() if len(v) > 1}}
 
     def _bao_lech(self):
@@ -3109,7 +3139,9 @@ class DedicatedDataStore:
         k = self._sap_xep_ke_hoach()
         root = self.customs_root()
         rel = lambda p: os.path.relpath(p, root) if not os.path.relpath(p, root).startswith("..") else p
+        trong = sorted({rel(os.path.dirname(p)) for p in k["la"] if not [n for n in os.listdir(os.path.dirname(p)) if n != os.path.basename(p)]})
         return {"file_cu": [rel(p) for p in k["cu"]], "nhan_doi": [rel(p) for p in k["nhan_doi"]],
+                "file_la": [rel(p) for p in k["la"]], "thu_muc_trong": trong, "chua_co": self.khach_chua_co(),
                 "sai_cho": [(rel(a), rel(b)) for _k, a, b in k["sai_cho"]], "ten_goi": k["ten_goi"],
                 "doi_ten": k["doi_ten"], "dong_trung": sum(len(ix) - 1 for ix in k["trung"].values()), **self._bao_lech()}
 
@@ -3125,13 +3157,39 @@ class DedicatedDataStore:
         bdir = os.path.join(self.backup_root(), f"truoc_sap_xep_{stamp}")
         os.makedirs(bdir, exist_ok=True)
         man = {"chep": [], "tao_moi": [], "doi_ten": []}
-        for p in self._theo_khach_files() + k["nhan_doi"] + k["cu"]:
+        for p in self._theo_khach_files() + k["nhan_doi"] + k["cu"] + k["la"]:
             if os.path.isfile(p):
                 dst = os.path.join(bdir, "files", f"{len(man['chep']):03d}_{os.path.basename(p)}")
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.copy2(p, dst)
                 man["chep"].append({"goc": p, "ban": dst})
-        st = {"sao_luu": bdir, "file_cu": 0, "nhan_doi": 0, "sai_cho": 0, "doi_ten": 0, "dong_trung": 0}
+        st = {"sao_luu": bdir, "file_cu": 0, "nhan_doi": 0, "sai_cho": 0, "doi_ten": 0, "dong_trung": 0, "file_la": 0, "thu_muc_xoa": 0}
+        # 0) file của tên khách app chưa có (bản trước lỡ tạo trong thư mục riêng): dữ liệu đã nạp trong bộ nhớ chuyển về phần dùng
+        #    chung; file cất vào bản sao lưu; thư mục chỉ còn trống (do bản trước tạo) thì bỏ. Thư mục có file khác giữ nguyên.
+        for p in k["la"]:
+            key = os.path.basename(p)[len(self.KHACH_FILE_PRE):-5].lower()
+            if key not in self._kh_paths:  # file nhân đôi chưa nạp: đọc vào trước khi cất
+                data = self._read_json(p, None)
+                if isinstance(data, dict):
+                    parts = self._split_parts()
+                    parts[""] = self._merge_part(None, parts.get("") or self._part_body({}), self._part_body(data))
+                    self._join_parts(parts)
+            else:
+                self._kh_paths.pop(key, None)
+            self._kbase.pop(p, None)
+            self._sigs.pop(p, None)
+            new = os.path.join(bdir, "file_khach_chua_co", f"{st['file_la']:03d}_{os.path.basename(p)}")
+            os.makedirs(os.path.dirname(new), exist_ok=True)
+            shutil.move(p, new)
+            man["doi_ten"].append({"goc": p, "moi": new})
+            st["file_la"] += 1
+            d = os.path.dirname(p)
+            try:
+                if not os.listdir(d):
+                    os.rmdir(d)
+                    st["thu_muc_xoa"] += 1
+            except OSError:
+                pass
         # 1) file kiểu cũ (bản phần mềm cũ ghi lại) và bản xung đột của chúng: gộp vào, rồi cất đi
         for p in k["cu"]:
             data = self._read_json(p, None)
@@ -3218,7 +3276,7 @@ class DedicatedDataStore:
         for x in reversed(man.get("doi_ten") or []):
             if os.path.isfile(x["moi"]) and not os.path.exists(x["goc"]):
                 os.makedirs(os.path.dirname(x["goc"]), exist_ok=True)
-                os.replace(x["moi"], x["goc"])
+                shutil.move(x["moi"], x["goc"])
         for p in man.get("tao_moi") or []:
             if os.path.isfile(p):
                 os.remove(p)

@@ -37,9 +37,10 @@ def test_preview_does_not_write_and_lists_problems(store):
     pv = store.chuyen_doi_xem_truoc()
     assert sorted(os.listdir(store.customs_root())) == before and not store.theo_khach()
     keys = {r["khach"] for r in pv["files"]}
-    assert {"", "kodi", "tesa", "shirai", "fujidan"} <= keys
-    fuji = next(r for r in pv["files"] if r["khach"] == "fujidan")
-    assert fuji["data_tong"] == 2 and len(fuji["ten_goi"]) == 2  # hai cách ghi tên gộp về một khách
+    assert {"", "kodi", "tesa", "shirai"} <= keys
+    assert "fujidan" not in keys and "arizon" not in keys  # khách chưa có trong app: không có file riêng
+    fuji = pv["chua_co"]["fujidan"]
+    assert fuji["dong"] == 2 and len(fuji["ten"]) == 2  # liệt kê để người dùng chọn thêm vào app
     assert any(x["pxk"] == "00000334" for x in pv["pxk_trung"])
     assert any(x["ma"] == "FG10496-004-00000" for x in pv["kg_lech"])  # chỉ báo, không tự sửa
 
@@ -62,8 +63,11 @@ def test_migrate_then_reload_same_data_and_old_files_kept(data_dir, tmp_path):
     assert {r["id"] for r in b.records} == {r["id"] for r in a.records}
     data = json.load(open(a._khach_path("kodi"), encoding="utf-8"))
     assert data["loai"] == "DU_LIEU_KHACH" and all("items" not in e for e in data["ho_so"])  # chi tiết hồ sơ nằm ở thẻ lô
-    # thư mục khách chỉ có file dữ liệu không bị coi là thư mục tờ khai
-    assert all(not o["path"].endswith(os.sep + "Fujidan") for o in b.declaration_folders())
+    # khách chưa có trong app: không tạo thư mục, dòng Kg & kiện nằm ở phần dùng chung
+    made = set(os.listdir(root))
+    assert not any("fujidan" in d.lower() or "arizon" in d.lower() for d in made)
+    ht = json.load(open(os.path.join(root, "_HE_THONG", "he_thong.json"), encoding="utf-8"))
+    assert sum(1 for r in ht["data_tong"] if "ujidan" in r["khach"].lower()) == 2
 
 
 def test_saving_one_customer_only_writes_that_customer_file(data_dir, tmp_path):
@@ -97,11 +101,11 @@ def test_new_customer_file_from_other_machine_is_seen(data_dir, tmp_path):
     a = make_store(data_dir, tmp_path, "a")
     a.chuyen_doi_thuc_hien()
     b = make_store(data_dir, tmp_path, "b")
-    a.data_tong.append({"khach": "Minh Anh", "ten": "Ống X", "kg": 0.5, "ts": "2"})
-    a.dt_save()
-    assert os.path.isfile(a._khach_path("minh_anh"))
+    a.save_learned_customer("minhanh", {"name": "CÔNG TY MINH ANH", "label": "Minh Anh", "mst": "0100000001", "addr": "HN", "unit": "chiếc"},
+                            [{"name": "Ống X", "code": "MA-1", "price": 1, "div": 10, "kg": 0.5}])
+    assert os.path.isfile(a._khach_path("minhanh")) and os.path.basename(os.path.dirname(a._khach_path("minhanh"))) == "Minh Anh"
     assert b.changed_on_disk() and b.sync()
-    assert any(r.get("ten") == "Ống X" for r in b.data_tong)
+    assert any(x.get("code") == "MA-1" for x in b.custom_items.get("minhanh", []))
 
 
 def test_undo_restores_old_files(data_dir, tmp_path):
@@ -130,8 +134,9 @@ def test_conflict_copy_of_customer_file_is_merged(data_dir, tmp_path):
 def migrated_with_dt(data_dir, tmp_path):
     a = make_store(data_dir, tmp_path, "a")
     add_dt(a)
-    a.data_tong += [{"khach": "FUJIDAN", "ten": "Lõi A", "kg": 0.15, "kg_nguon": "tay", "ts": "2"},  # trùng tên hàng với dòng Fujidan cũ
-                    {"khach": "Fujidan", "ten": "Lõi A", "kien": 50, "ts": "0"}]
+    a.data_tong += [{"khach": "TESA", "ten": "Ống tesa 1", "kg": 0.9, "kg_nguon": "tay", "ts": "2"},  # trùng tên hàng với dòng Tesa cũ
+                    {"khach": "tesa", "ten": "Ống tesa 1", "kien": 50, "ts": "0"},
+                    {"khach": "FUJIDAN", "ten": "Lõi A", "kg": 0.15, "ts": "2"}]  # khách chưa có trong app: không đụng
     a.dt_save()
     a.chuyen_doi_thuc_hien()
     return a
@@ -140,15 +145,18 @@ def migrated_with_dt(data_dir, tmp_path):
 def test_sap_xep_preview_then_apply_unifies_names_and_drops_duplicate_rows(data_dir, tmp_path):
     a = migrated_with_dt(data_dir, tmp_path)
     pv = a.sap_xep_xem_truoc()
-    assert pv["dong_trung"] == 2 and pv["doi_ten"] >= 2 and "fujidan" in pv["ten_goi"]
+    assert pv["dong_trung"] == 2 and pv["doi_ten"] >= 2 and "tesa" in pv["ten_goi"] and "fujidan" not in pv["ten_goi"]
+    assert "fujidan" in pv["chua_co"]  # liệt kê, không sắp xếp
     assert any(x["ma"] == "FG10496-004-00000" for x in pv["kg_lech"])  # chỉ báo
     n = len(a.data_tong)
     st = a.sap_xep_thuc_hien()
     assert st["dong_trung"] == 2 and len(a.data_tong) == n - 2
+    tesa = [r for r in a.data_tong if a.dt_khach_key(r) == "tesa"]
+    assert len({r["khach"] for r in tesa}) == 1  # một tên khách
+    ong = next(r for r in tesa if r["ten"] == "Ống tesa 1")
+    assert ong["kg"] == 0.9 and ong["kien"] == 50  # giữ dòng sửa tay, ô trống lấy từ dòng bỏ
     fuji = [r for r in a.data_tong if a.dt_khach_key(r) == "fujidan"]
-    assert len({r["khach"] for r in fuji}) == 1  # một tên khách
-    loi_a = next(r for r in fuji if r["ten"] == "Lõi A")
-    assert loi_a["kg"] == 0.15 and loi_a["kien"] == 50  # giữ dòng sửa tay, ô trống lấy từ dòng bỏ
+    assert len(fuji) == 3 and len({r["khach"] for r in fuji}) == 3  # khách chưa có trong app: để nguyên
     assert {x["ma"] for x in a.sap_xep_xem_truoc()["kg_lech"]} >= {"FG10496-004-00000"}  # cùng mã khác kg: không tự chọn
     b = make_store(data_dir, tmp_path, "b")
     assert len(b.data_tong) == n - 2
@@ -187,3 +195,35 @@ def test_sap_xep_needs_migration_first(store):
     import pytest
     with pytest.raises(ValueError, match="chưa chuyển"):
         store.sap_xep_xem_truoc()
+
+
+def test_sap_xep_moves_files_of_customers_not_in_app_back_to_shared_data(data_dir, tmp_path):
+    """Bản trước lỡ tạo DU_LIEU_<tên>.json (và thư mục) cho tên khách chỉ có trong dữ liệu: Sắp xếp cất file đó, dữ liệu về
+    phần dùng chung, thư mục chỉ còn trống thì bỏ; thư mục khách có file khác của người dùng giữ nguyên."""
+    a = migrated_with_dt(data_dir, tmp_path)
+    root = a.customs_root()
+    ht = os.path.join(root, "_HE_THONG", "he_thong.json")
+    data = json.load(open(ht, encoding="utf-8"))
+    fuji_rows = [r for r in data["data_tong"] if "ujidan" in r["khach"].lower()]
+    data["data_tong"] = [r for r in data["data_tong"] if r not in fuji_rows]
+    json.dump(data, open(ht, "w", encoding="utf-8"), ensure_ascii=False)
+    os.makedirs(os.path.join(root, "Fujidan"))
+    json.dump({"loai": "DU_LIEU_KHACH", "khach": "fujidan", "data_tong": fuji_rows}, open(os.path.join(root, "Fujidan", "DU_LIEU_FUJIDAN.json"), "w", encoding="utf-8"))
+    os.makedirs(os.path.join(root, "CN Mr.Tuan", "2026_Thang_11"))  # thư mục khách của người dùng, có hồ sơ
+    json.dump({"loai": "DU_LIEU_KHACH", "khach": "cn_mr_tuan", "data_tong": [{"khach": "CN Mr.Tuan", "ten": "Ống T", "kg": 1, "ts": "1"}]},
+              open(os.path.join(root, "CN Mr.Tuan", "DU_LIEU_CN_MR_TUAN.json"), "w", encoding="utf-8"))
+    b = make_store(data_dir, tmp_path, "b")
+    n = len(b.data_tong)
+    assert sum(1 for r in b.data_tong if "ujidan" in r["khach"].lower()) == 3  # bản cũ vẫn đọc được
+    pv = b.sap_xep_xem_truoc()
+    assert len(pv["file_la"]) == 2 and pv["thu_muc_trong"] == ["Fujidan"]
+    st = b.sap_xep_thuc_hien()
+    assert st["file_la"] == 2 and st["thu_muc_xoa"] == 1
+    assert not os.path.exists(os.path.join(root, "Fujidan"))
+    assert os.path.isdir(os.path.join(root, "CN Mr.Tuan", "2026_Thang_11")) and not os.path.exists(os.path.join(root, "CN Mr.Tuan", "DU_LIEU_CN_MR_TUAN.json"))
+    c = make_store(data_dir, tmp_path, "c")
+    assert len(c.data_tong) == n - st["dong_trung"]  # không mất dòng nào (ngoài các dòng Tesa trùng đã gộp)
+    assert sum(1 for r in json.load(open(ht, encoding="utf-8"))["data_tong"] if "ujidan" in r["khach"].lower()) == 3
+    c.sap_xep_hoan_tac()
+    assert os.path.isfile(os.path.join(root, "Fujidan", "DU_LIEU_FUJIDAN.json"))
+    assert len(make_store(data_dir, tmp_path, "d").data_tong) == n
