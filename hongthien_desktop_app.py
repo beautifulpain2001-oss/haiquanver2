@@ -649,6 +649,111 @@ def num_to_vn_words(num):
 # ==============================================================================
 # 2. TẬP LƯU TRỮ DỮ LIỆU RIÊNG TRÊN DESKTOP / MÁY CHỦ HOST (DATA REPOSITORY)
 # ==============================================================================
+# ---- Gộp dữ liệu khi nhiều máy dùng chung một thư mục ------------------------------------------------------------
+# "Gộp 3 bên": base = bản máy này đọc/ghi lần trước, mine = bản máy này đang có, disk = bản đang nằm trong thư mục chung
+# (máy khác có thể vừa ghi). Chỗ chỉ một bên đổi thì lấy bên đổi (kể cả xóa); cả hai cùng đổi một chỗ thì máy này thắng,
+# riêng dòng mã hàng: dòng đã 🔒 khóa (sửa tay) thắng dòng chưa khóa, và sửa thắng xóa (không làm mất dữ liệu).
+_MISSING = object()
+
+
+def merge3(base, mine, disk):
+    if mine == disk:
+        return mine
+    if mine == base:
+        return disk
+    if disk == base:
+        return mine
+    if isinstance(mine, dict) and isinstance(disk, dict):
+        b = base if isinstance(base, dict) else {}
+        out = {}
+        for k in list(disk) + [k for k in mine if k not in disk]:
+            v = merge3(b.get(k, _MISSING), mine.get(k, _MISSING), disk.get(k, _MISSING))
+            if v is not _MISSING:
+                out[k] = v
+        return out
+    if mine is _MISSING:  # máy này xóa, máy kia sửa: giữ bản sửa
+        return disk
+    return mine
+
+
+def _row_ids(rows):
+    """Khóa nhận dạng từng dòng mã hàng: mã hàng, không có mã thì tên (dòng trùng khóa thêm #2, #3…)."""
+    out, seen = [], {}
+    for r in rows or []:
+        if not isinstance(r, dict):
+            k = "x:" + json.dumps(r, sort_keys=True, ensure_ascii=False)
+        else:
+            k = str(r.get("code") or "").strip() or "ten:" + clean_str(r.get("name"))
+        seen[k] = seen.get(k, 0) + 1
+        out.append(k if seen[k] == 1 else f"{k}#{seen[k]}")
+    return out
+
+
+def merge_rows(base, mine, disk):
+    """Gộp 3 bên một danh sách dòng mã hàng (danh mục khách / bảng Kg & kiện) theo mã hàng."""
+    if mine == disk:
+        return mine
+    if mine == base:
+        return disk
+    if disk == base:
+        return mine
+    bi = dict(zip(_row_ids(base if isinstance(base, list) else []), base if isinstance(base, list) else []))
+    mi = dict(zip(_row_ids(mine or []), mine or []))
+    di = dict(zip(_row_ids(disk or []), disk or []))
+    out = []
+    for k in list(di) + [k for k in mi if k not in di]:
+        b, m, d = bi.get(k, _MISSING), mi.get(k, _MISSING), di.get(k, _MISSING)
+        if m == b:
+            v = d
+        elif d == b:
+            v = m
+        elif m is _MISSING or d is _MISSING:
+            v = d if m is _MISSING else m  # một bên xóa, bên kia sửa: giữ bản sửa
+        elif isinstance(m, dict) and isinstance(d, dict) and bool(m.get("khoa")) != bool(d.get("khoa")):
+            v = m if m.get("khoa") else d  # 🔒 dòng sửa tay thắng
+        else:
+            v = merge3(b if isinstance(b, dict) else {}, m, d)
+        if v is not _MISSING:
+            out.append(v)
+    return out
+
+
+def merge_catalog(base, mine, disk):
+    """Gộp 3 bên nội dung master_catalog.json. base=None: hai bản chưa từng chung gốc (gộp hợp nhất, trùng thì `mine` thắng trừ dòng 🔒)."""
+    base = base if isinstance(base, dict) else {}
+    out = {}
+    for k in list(disk) + [k for k in mine if k not in disk]:
+        b, m, d = base.get(k, _MISSING), mine.get(k, _MISSING), disk.get(k, _MISSING)
+        if k == "custom_items":
+            b, m, d = (x if isinstance(x, dict) else {} for x in (b, m, d))
+            ci = {}
+            for ck in list(d) + [c for c in m if c not in d]:
+                cb, cm, cd = b.get(ck, _MISSING), m.get(ck, _MISSING), d.get(ck, _MISSING)
+                if cm == cb:
+                    v = cd
+                elif cd == cb:
+                    v = cm
+                else:
+                    v = merge_rows(cb, [] if cm is _MISSING else cm, [] if cd is _MISSING else cd)
+                if v is not _MISSING:
+                    ci[ck] = v
+            out[k] = ci
+        elif k in ("kodi_items", "tesa_items"):
+            v = merge_rows(b, m, d) if m is not _MISSING and d is not _MISSING else (d if m is _MISSING else m)
+            out[k] = v
+        elif k == "read_fixes":
+            m, d = (x if isinstance(x, list) else [] for x in (m, d))
+            seen = {json.dumps(x, sort_keys=True) for x in m}
+            out[k] = [x for x in d if json.dumps(x, sort_keys=True) not in seen] + m
+        elif k in ("tesa_dinh_muc_v", "tesa_dinh_muc_dt_v"):
+            out[k] = max(int(x or 0) for x in (m, d) if x is not _MISSING)
+        else:
+            v = merge3(b, m, d)
+            if v is not _MISSING:
+                out[k] = v
+    return out
+
+
 class DedicatedDataStore:
     """Quản lý tập lưu trữ dữ liệu riêng (SQLite + JSON + Cây thư mục Host)."""
 
@@ -688,6 +793,8 @@ class DedicatedDataStore:
         self.profile_overrides = {}  # chỗ người dùng đã sửa trên 3 khách có sẵn (mục Khách hàng)
         self.records = []
         self._sigs, self._loaded_ids = {}, set()
+        self._cat_base, self._rec_base = None, {}  # bản đọc/ghi gần nhất: gốc để gộp 3 bên với máy khác
+        self.last_sync, self.last_conflicts = "", 0
         # chỉ mục quét thư mục: chỉ đọc lại thư mục có giờ sửa đổi (xem _dir_listing, _activity, read_lot_card)
         self._ls_cache, self._act_cache, self._card_cache, self._card_paths = {}, {}, {}, {}
         self._scan_ls = None
@@ -745,15 +852,102 @@ class DedicatedDataStore:
         global TEMPLATE_DIR
         TEMPLATE_DIR = os.path.join(self.base_dir, "MAU_CHUNG_TU")
 
-    def change_base_dir(self, new_dir):
-        self.base_dir = os.path.abspath(new_dir)
+    def _save_data_dir(self):
+        try:
+            with open(self.config_file, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except Exception:
+            cfg = {}
+        cfg["data_dir"] = self.base_dir  # giữ các cài đặt khác của máy (tên người dùng…)
         try:
             with open(self.config_file, "w", encoding="utf-8") as f:
-                json.dump({"data_dir": self.base_dir}, f, ensure_ascii=False, indent=2)
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
+
+    DATA_FILES = ("master_catalog.json", "hongthien_records.json", "hongthien_haiquan.db", DT_FILE)
+
+    @classmethod
+    def folder_has_data(cls, d):
+        """Thư mục đã có dữ liệu phần mềm (máy khác đã dùng làm thư mục chung)?"""
+        return any(os.path.isfile(os.path.join(d, f)) for f in ("master_catalog.json", "hongthien_records.json")) or \
+            os.path.isfile(os.path.join(d, CUSTOMS_ROOT, DT_FILE)) or (os.path.basename(os.path.normpath(d)).upper() == CUSTOMS_ROOT and os.path.isfile(os.path.join(d, DT_FILE)))
+
+    @staticmethod
+    def _copy_missing(src, dst, skip_top=()):
+        """Chép các file chưa có từ cây `src` sang `dst` (không ghi đè file đã có). Trả số file đã chép."""
+        n = 0
+        if not os.path.isdir(src):
+            return 0
+        for root, dirs, files in os.walk(src):
+            rel = os.path.relpath(root, src)
+            if rel == ".":
+                dirs[:] = [x for x in dirs if x not in skip_top and not x.startswith("_SAO_LUU")]
+                files = [f for f in files if f not in skip_top]
+            for f in files:
+                if f.endswith(".tmp") or f == ".khoa_ghi":
+                    continue
+                t = os.path.join(dst, rel, f) if rel != "." else os.path.join(dst, f)
+                if os.path.exists(t):
+                    continue
+                os.makedirs(os.path.dirname(t), exist_ok=True)
+                try:
+                    shutil.copy2(os.path.join(root, f), t)
+                    n += 1
+                except OSError:
+                    pass
+        return n
+
+    def change_base_dir(self, new_dir, mang_theo=False):
+        """Đổi thư mục dữ liệu (VD sang thư mục chung OneDrive/Google Drive/ổ mạng). `mang_theo`: mang dữ liệu đang dùng trên máy này
+        sang: thư mục mới còn trống thì chép nguyên; đã có dữ liệu (máy khác) thì GỘP — thêm phần còn thiếu, chỗ trùng giữ bản trong
+        thư mục chung, dòng 🔒 khóa (sửa tay) thắng; hồ sơ cùng mã lấy bản sửa sau. File hồ sơ/mẫu chứng từ chỉ chép file chưa có.
+        Thư mục cũ giữ nguyên. Trả thống kê {"che_do": "chep"|"gop"|"", "file": n, "ho_so": n, "sao_luu": [..]}."""
+        new_dir = os.path.abspath(new_dir)
+        old_base, old_customs = self.base_dir, self.customs_root()
+        old_mau = TEMPLATE_DIR or os.path.join(old_base, "MAU_CHUNG_TU")
+        old_cat = copy.deepcopy(self._catalog_payload())
+        old_recs, old_dt = copy.deepcopy(self.records), copy.deepcopy(self.data_tong)
+        old_files = {"cat": self.catalog_file, "rec": self.records_file, "dt": self.dt_path()}
+        stats = {"che_do": "", "file": 0, "ho_so": 0, "sao_luu": []}
+        same = os.path.normcase(os.path.abspath(old_base)) == os.path.normcase(new_dir)
+        nested = not same and (os.path.normcase(new_dir).startswith(os.path.normcase(os.path.abspath(old_base)) + os.sep)
+                               or os.path.normcase(os.path.abspath(old_base)).startswith(os.path.normcase(new_dir) + os.sep))
+        had = self.folder_has_data(new_dir)
+        self.base_dir = new_dir
+        self._save_data_dir()
         self.ensure_directories()
+        if mang_theo and not same:
+            if not had:  # thư mục chung còn trống: chép nguyên dữ liệu máy này sang
+                stats["che_do"] = "chep"
+                for k, dst in (("cat", self.catalog_file), ("rec", self.records_file), ("dt", self.dt_path())):
+                    if os.path.isfile(old_files[k]) and not os.path.exists(dst):
+                        os.makedirs(os.path.dirname(dst), exist_ok=True)
+                        shutil.copy2(old_files[k], dst)
+            else:
+                stats["che_do"] = "gop"
+                for k in ("cat", "rec", "dt"):
+                    p = {"cat": self.catalog_file, "rec": self.records_file, "dt": self.dt_path()}[k]
+                    b = self._backup(p, force=True, tag="_truoc_khi_gop")
+                    if b:
+                        stats["sao_luu"].append(b)
+            if not nested:
+                stats["file"] += self._copy_missing(old_customs, self.customs_root(), skip_top=self.DATA_FILES)
+                stats["file"] += self._copy_missing(old_mau, TEMPLATE_DIR)
+        self._sigs = {}
         self.load_all()
+        if stats["che_do"] == "gop":
+            self._take_merged_catalog(merge_catalog(None, copy.deepcopy(self._catalog_payload()), old_cat))
+            self.save_catalog()
+            before = {r.get("id") for r in self.records}
+            self.records = self._merge_records(self.records, old_recs)
+            stats["ho_so"] = len({r.get("id") for r in self.records} - before)
+            self.save_records()
+            self.data_tong = self._merge_dt_items(self.data_tong, old_dt)
+            self.dt_save()
+        elif stats["che_do"] == "chep":
+            stats["ho_so"] = len(self.records)
+        return stats
 
     def load_all(self):
         if not os.path.exists(self.catalog_file) and EMBEDDED_MASTER_CATALOG_B64:
@@ -763,41 +957,19 @@ class DedicatedDataStore:
                     f.write(raw_bytes)
             except Exception:
                 pass
+        self._cat_base = None
         if os.path.exists(self.catalog_file):
             try:
                 with open(self.catalog_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                self.weights_db = data.get("weights_db", {})
-                self.erp_catalog = data.get("erp_catalog", [])
-                if data.get("kodi_items"):
-                    self.kodi_items = data["kodi_items"]
-                if data.get("tesa_items"):
-                    self.tesa_items = data["tesa_items"]
-                if data.get("item_mem"):
-                    self.item_mem = data["item_mem"]
-                self.read_fixes = list(data.get("read_fixes") or [])
-                self.custom_profiles = data.get("custom_profiles") or {}
-                self.custom_items = data.get("custom_items") or {}
-                self.company = data.get("company_info") or {}
-                vp = data.get("vehicle_pairs")
-                self.vehicles = vp if isinstance(vp, list) else None
-                self.profile_overrides = data.get("profile_overrides") or {}
-                self.suppliers = list(data.get("suppliers") or [])
-                self.supplier_pref = dict(data.get("supplier_pref") or {})
-                self.ten_kh_tay = dict(data.get("ten_kh_tay") or {})
-                self.tesa_dinh_muc_v = int(data.get("tesa_dinh_muc_v") or 0)
-                self.tesa_dinh_muc_dt_v = int(data.get("tesa_dinh_muc_dt_v") or 0)
+                self._sigs[self.catalog_file] = self._sig(self.catalog_file)
+                self._cat_base = copy.deepcopy(data)  # bản gốc để gộp 3 bên khi lưu (xem merge_catalog)
+                self._set_catalog_fields(data)
             except Exception:
                 pass
         if self.apply_tesa_dinh_muc():
             self.save_catalog()
-        self.register_custom_profiles()
-        self._link_shared_catalogs()
-        apply_vehicle_pairs(self.vehicles)
-        apply_company(self.company)  # luôn áp lại: mỗi kho dữ liệu có thông tin công ty riêng
-        apply_profile_overrides(self.profile_overrides)
-        self.rebuild_erp_map()
-
+        self._apply_catalog_side_effects()
         if os.path.exists(self.records_file):
             try:
                 with open(self.records_file, "r", encoding="utf-8") as f:
@@ -805,6 +977,7 @@ class DedicatedDataStore:
             except Exception:
                 self.records = []
         self._loaded_ids = {r.get("id") for r in self.records}
+        self._rec_base = {r.get("id"): str(r.get("updatedAt") or "") for r in self.records}
         self.dt_load()
         if self.apply_tesa_dinh_muc_dt():
             self.dt_save()
@@ -813,6 +986,37 @@ class DedicatedDataStore:
         if not self.records:
             self.records = self.default_seed_records()
             self.save_records()
+        self.absorb_conflict_copies()
+
+    def _set_catalog_fields(self, data):
+        self.weights_db = data.get("weights_db", {})
+        self.erp_catalog = data.get("erp_catalog", [])
+        if data.get("kodi_items"):
+            self.kodi_items = data["kodi_items"]
+        if data.get("tesa_items"):
+            self.tesa_items = data["tesa_items"]
+        if data.get("item_mem"):
+            self.item_mem = data["item_mem"]
+        self.read_fixes = list(data.get("read_fixes") or [])
+        self.custom_profiles = data.get("custom_profiles") or {}
+        self.custom_items = data.get("custom_items") or {}
+        self.company = data.get("company_info") or {}
+        vp = data.get("vehicle_pairs")
+        self.vehicles = vp if isinstance(vp, list) else None
+        self.profile_overrides = data.get("profile_overrides") or {}
+        self.suppliers = list(data.get("suppliers") or [])
+        self.supplier_pref = dict(data.get("supplier_pref") or {})
+        self.ten_kh_tay = dict(data.get("ten_kh_tay") or {})
+        self.tesa_dinh_muc_v = int(data.get("tesa_dinh_muc_v") or 0)
+        self.tesa_dinh_muc_dt_v = int(data.get("tesa_dinh_muc_dt_v") or 0)
+
+    def _apply_catalog_side_effects(self):
+        self.register_custom_profiles()
+        self._link_shared_catalogs()
+        apply_vehicle_pairs(self.vehicles)
+        apply_company(self.company)  # luôn áp lại: mỗi kho dữ liệu có thông tin công ty riêng
+        apply_profile_overrides(self.profile_overrides)
+        self.rebuild_erp_map()
 
     def rebuild_erp_map(self):
         self.erp_map = {}
@@ -1807,6 +2011,7 @@ class DedicatedDataStore:
                         elif str(d.get("ts") or "") > str(mine[k].get("ts") or ""):
                             mine[k] = d
                     self.data_tong = list(mine.values())
+                self._backup(self.dt_path())
                 self._write_json(self.dt_path(), {"version": 1, "cap_nhat": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"), "items": self.data_tong}, compact=True)
                 self._sigs[self.dt_path()] = self._sig(self.dt_path())
             self._dt_cache, self._dt_idx = {}, None
@@ -2235,11 +2440,137 @@ class DedicatedDataStore:
         return any(self._sig(p) != self._sigs.get(p) for p in (self.catalog_file, self.records_file, self.dt_path()))
 
     def sync(self):
-        """Đọc lại dữ liệu nếu máy khác vừa thay đổi. Trả True nếu có đọc lại."""
+        """Đọc lại dữ liệu nếu máy khác vừa thay đổi (và gộp bản xung đột do OneDrive/Google Drive tạo). Trả True nếu có đọc lại."""
+        got = self.absorb_conflict_copies() > 0
         if not self.changed_on_disk():
-            return False
+            return got
         self.load_all()
+        self.last_sync = datetime.datetime.now().strftime("%H:%M %d/%m")
         return True
+
+    # ---- Sao lưu tự động trước khi ghi đè file dữ liệu dùng chung ---------------------------------------------------
+    BACKUP_DIR, BACKUP_EVERY, BACKUP_KEEP = "_SAO_LUU", 1800, 40
+
+    def backup_root(self):
+        return os.path.join(self.base_dir, self.BACKUP_DIR)
+
+    @staticmethod
+    def _machine_tag():
+        try:
+            import socket
+            n = socket.gethostname()
+        except Exception:  # noqa: BLE001
+            n = ""
+        return re.sub(r"[^A-Za-z0-9_-]", "", n)[:30] or "may"
+
+    def _backup(self, path, force=False, tag=""):
+        """Chép file dữ liệu hiện có vào _SAO_LUU/<tên file>/ trước khi ghi đè: mỗi file tối đa một bản / 30 phút (force: luôn chép),
+        giữ 40 bản mới nhất. Trả đường dẫn bản sao lưu hoặc None. Lỗi sao lưu không chặn việc lưu."""
+        try:
+            if not os.path.isfile(path):
+                return None
+            d = os.path.join(self.backup_root(), os.path.splitext(os.path.basename(path))[0])
+            os.makedirs(d, exist_ok=True)
+            olds = sorted(f for f in os.listdir(d) if f.endswith(".json"))
+            if not force and olds and time.time() - os.path.getmtime(os.path.join(d, olds[-1])) < self.BACKUP_EVERY:
+                return None
+            name = f"{datetime.datetime.now():%Y-%m-%d_%H%M%S}_{self._machine_tag()}{tag}.json"
+            dst = os.path.join(d, name)
+            shutil.copyfile(path, dst)
+            olds.append(name)
+            for f in sorted(set(olds))[:-self.BACKUP_KEEP]:
+                try:
+                    os.remove(os.path.join(d, f))
+                except OSError:
+                    pass
+            return dst
+        except Exception as e:  # noqa: BLE001
+            print("Warning backup:", e)
+            return None
+
+    def backup_count(self):
+        n = 0
+        for root, _dirs, files in os.walk(self.backup_root()):
+            n += sum(1 for f in files if f.endswith(".json"))
+        return n
+
+    # ---- Gộp hồ sơ / Data tổng ---------------------------------------------------------------------------------
+    @staticmethod
+    def _merge_records(mine, disk, base=None):
+        """Gộp danh sách hồ sơ theo mã hồ sơ: cùng mã thì bản sửa sau (updatedAt) thắng; hồ sơ máy khác thêm thì thêm vào;
+        hồ sơ máy khác đã xóa mà máy này không sửa gì thì bỏ; hồ sơ máy này đã xóa thì không lấy lại. base=None: gộp hợp nhất."""
+        base = base or {}
+        dmap = {r.get("id"): r for r in disk if isinstance(r, dict)}
+        out, ids = [], set()
+        for r in mine:
+            rid = r.get("id")
+            if rid in dmap:
+                d = dmap[rid]
+                if str(d.get("updatedAt") or "") > str(r.get("updatedAt") or ""):
+                    r = d
+            elif rid in base and str(r.get("updatedAt") or "") == base[rid]:
+                continue  # máy khác đã xóa hồ sơ này, máy này không sửa
+            ids.add(rid)
+            out.append(r)
+        for d in disk:
+            if isinstance(d, dict) and d.get("id") not in ids and d.get("id") not in base:
+                out.append(d)
+                ids.add(d.get("id"))
+        return out
+
+    def _merge_dt_items(self, mine, disk):
+        by = {self._dt_key(x): x for x in mine}
+        for d in disk:
+            if not isinstance(d, dict):
+                continue
+            k = self._dt_key(d)
+            if k not in by or str(d.get("ts") or "") > str(by[k].get("ts") or ""):
+                by[k] = d
+        return list(by.values())
+
+    # ---- Bản xung đột do OneDrive / Google Drive / Dropbox tạo khi hai máy sửa cùng lúc ------------------------------
+    @staticmethod
+    def conflict_copies(path):
+        """File kiểu 'master_catalog-TEN-MAY.json' (OneDrive), 'master_catalog (1).json' (Google Drive),
+        'master_catalog (… conflicted copy …).json' (Dropbox) nằm cạnh file dữ liệu."""
+        d, name = os.path.split(path)
+        stem, ext = os.path.splitext(name)
+        pat = re.compile("^" + re.escape(stem) + r"(-[^\\/.]+| \(.*\))" + re.escape(ext) + "$", re.I)
+        try:
+            return sorted(os.path.join(d, f) for f in os.listdir(d) if pat.match(f) and os.path.isfile(os.path.join(d, f)))
+        except OSError:
+            return []
+
+    def absorb_conflict_copies(self):
+        """Gộp các bản xung đột vào file chính (chỉ THÊM phần còn thiếu; chỗ trùng giữ bản chính, dòng 🔒 khóa thắng),
+        rồi chuyển bản xung đột vào _SAO_LUU/xung_dot. Trả số bản đã gộp."""
+        n = 0
+        for path in (self.catalog_file, self.records_file, self.dt_path()):
+            for cp in self.conflict_copies(path):
+                data = self._read_json(cp, None)
+                if data is None:
+                    continue
+                try:
+                    if path == self.catalog_file and isinstance(data, dict):
+                        self._take_merged_catalog(merge_catalog(None, copy.deepcopy(self._catalog_payload()), data))
+                        self.save_catalog()
+                    elif path == self.records_file and isinstance(data, list):
+                        self.records = self._merge_records(self.records, data)
+                        self.save_records()
+                    elif path == self.dt_path() and isinstance(data, dict):
+                        self.data_tong = self._merge_dt_items(self.data_tong, data.get("items") or [])
+                        self.dt_save()
+                    else:
+                        continue
+                    dst = os.path.join(self.backup_root(), "xung_dot")
+                    os.makedirs(dst, exist_ok=True)
+                    shutil.move(cp, os.path.join(dst, f"{datetime.datetime.now():%Y-%m-%d_%H%M%S}_{os.path.basename(cp)}"))
+                    n += 1
+                except Exception as e:  # noqa: BLE001
+                    print("Warning conflict copy:", cp, e)
+        if n:
+            self.last_conflicts = n
+        return n
 
     @contextlib.contextmanager
     def _lock(self):
@@ -2287,50 +2618,47 @@ class DedicatedDataStore:
         except Exception:
             return default
 
+    def _catalog_payload(self):
+        return {
+            "read_fixes": self.read_fixes[-300:],
+            "company": HT_NAME,
+            "address": ADDR_HT,
+            "tax_code": MST_HT,
+            "company_info": self.company,
+            "vehicle_pairs": self.vehicles,
+            "profile_overrides": self.profile_overrides,
+            "weights_db": self.weights_db,
+            "erp_catalog": self.erp_catalog,
+            "kodi_items": self.kodi_items,
+            "tesa_items": self.tesa_items,
+            "item_mem": self.item_mem,
+            "custom_profiles": self.custom_profiles,
+            "custom_items": self.custom_items,
+            "suppliers": self.suppliers,
+            "supplier_pref": self.supplier_pref,
+            "ten_kh_tay": self.ten_kh_tay,
+            "tesa_dinh_muc_v": self.tesa_dinh_muc_v,
+            "tesa_dinh_muc_dt_v": self.tesa_dinh_muc_dt_v,
+        }
+
+    def _take_merged_catalog(self, merged):
+        merged = copy.deepcopy(merged)
+        self._set_catalog_fields(merged)
+        self._apply_catalog_side_effects()
+
     def save_catalog(self):
         try:
             with self._lock():
-                disk = self._read_json(self.catalog_file, {}) if self.changed_on_disk() else {}
-                if disk:  # gộp phần máy khác vừa thêm; mục trùng thì bản của máy này thắng
-                    for k in ("item_mem", "custom_profiles", "profile_overrides", "weights_db", "supplier_pref", "ten_kh_tay"):
-                        merged = dict(disk.get(k) or {})
-                        merged.update(getattr(self, k, {}) or {})
-                        setattr(self, k, merged)
-                    items = {k: list(v) for k, v in (disk.get("custom_items") or {}).items()}
-                    for k, lst in self.custom_items.items():
-                        have = items.setdefault(k, [])
-                        for row in lst:
-                            ix = next((n for n, x in enumerate(have) if x.get("name") == row.get("name")), -1)
-                            if ix >= 0:
-                                have[ix] = row
-                            else:
-                                have.append(row)
-                    self.custom_items = items
-                    self._link_shared_catalogs()
-                if disk:
-                    seen = {json.dumps(x, sort_keys=True) for x in self.read_fixes}
-                    self.read_fixes = [x for x in (disk.get("read_fixes") or []) if json.dumps(x, sort_keys=True) not in seen] + self.read_fixes
-                self._write_json(self.catalog_file, {
-                    "read_fixes": self.read_fixes[-300:],
-                    "company": HT_NAME,
-                    "address": ADDR_HT,
-                    "tax_code": MST_HT,
-                    "company_info": self.company,
-                    "vehicle_pairs": self.vehicles,
-                    "profile_overrides": self.profile_overrides,
-                    "weights_db": self.weights_db,
-                    "erp_catalog": self.erp_catalog,
-                    "kodi_items": self.kodi_items,
-                    "tesa_items": self.tesa_items,
-                    "item_mem": self.item_mem,
-                    "custom_profiles": self.custom_profiles,
-                    "custom_items": self.custom_items,
-                    "suppliers": self.suppliers,
-                    "supplier_pref": self.supplier_pref,
-                    "ten_kh_tay": self.ten_kh_tay,
-                    "tesa_dinh_muc_v": self.tesa_dinh_muc_v,
-                    "tesa_dinh_muc_dt_v": self.tesa_dinh_muc_dt_v,
-                })
+                payload = copy.deepcopy(self._catalog_payload())
+                if self._sig(self.catalog_file) != self._sigs.get(self.catalog_file):  # máy khác vừa ghi: gộp 3 bên
+                    disk = self._read_json(self.catalog_file, {})
+                    if isinstance(disk, dict) and disk:
+                        payload = merge_catalog(getattr(self, "_cat_base", None), payload, disk)
+                        self._take_merged_catalog(payload)
+                        payload = copy.deepcopy(self._catalog_payload())
+                self._backup(self.catalog_file)
+                self._write_json(self.catalog_file, payload)
+                self._cat_base = payload
                 self._sigs[self.catalog_file] = self._sig(self.catalog_file)
         except Exception as e:
             print("Warning saving catalog:", e)
@@ -2394,17 +2722,11 @@ class DedicatedDataStore:
             with self._lock():
                 if self._sig(self.records_file) != self._sigs.get(self.records_file):
                     disk = self._read_json(self.records_file, [])
-                    local_ids = {r.get("id") for r in self.records}
-                    for r in disk:  # hồ sơ máy khác vừa thêm/sửa
-                        rid = r.get("id")
-                        if rid in getattr(self, "_loaded_ids", set()):
-                            ix = next((n for n, x in enumerate(self.records) if x.get("id") == rid), -1)
-                            if ix >= 0 and str(r.get("updatedAt") or "") > str(self.records[ix].get("updatedAt") or ""):
-                                self.records[ix] = r  # máy kia sửa mới hơn
-                        elif rid not in local_ids:
-                            self.records.append(r)
+                    self.records = self._merge_records(self.records, disk if isinstance(disk, list) else [], getattr(self, "_rec_base", None))
+                self._backup(self.records_file)
                 self._write_json(self.records_file, self.records)
                 self._loaded_ids = {r.get("id") for r in self.records}
+                self._rec_base = {r.get("id"): str(r.get("updatedAt") or "") for r in self.records}
                 self._sigs[self.records_file] = self._sig(self.records_file)
         except Exception as e:
             print("Warning saving records JSON:", e)

@@ -186,3 +186,129 @@ def test_reorganize_renames_standard_folder_to_date_and_pxk(tmp_path):
     assert [(os.path.basename(p["src"]), os.path.basename(p["dst"])) for p in plan] == [("2026-11-03_02", "2026-11-03_00000316")]
     s.apply_reorganize(plan)
     assert (hq / "Arizon" / "2026_Thang_11" / "2026-11-03_00000316" / "C26NAA-00000316-ABC-DPH.pdf").exists() and s.plan_reorganize() == []
+
+
+# ---- Gộp 3 bên, sao lưu, mang dữ liệu sang thư mục chung, bản xung đột OneDrive/Drive --------------------------------
+def test_stale_machine_does_not_overwrite_newer_settings(data_dir, tmp_path):
+    """Máy B mở từ trước, máy A đổi danh sách lái xe; B lưu việc khác thì KHÔNG được ghi đè danh sách mới của A."""
+    a = make_store(data_dir, tmp_path, "a")
+    b = make_store(data_dir, tmp_path, "b")
+    a.vehicles = [{"driver": "Lái A", "plate": "29C-111.11"}]
+    a.item_mem["Hàng cũ"] = {"div": 300, "kg": 1, "hs": ""}
+    a.save_catalog()
+    b.item_mem["Hàng B"] = {"div": 20, "kg": 2, "hs": ""}  # B chưa đọc lại
+    b.save_catalog()
+    c = make_store(data_dir, tmp_path, "c")
+    assert c.vehicles == [{"driver": "Lái A", "plate": "29C-111.11"}]
+    assert c.item_mem["Hàng cũ"]["div"] == 300 and "Hàng B" in c.item_mem
+
+
+def test_deleted_entry_is_not_brought_back_by_other_machine(data_dir, tmp_path):
+    a = make_store(data_dir, tmp_path, "a")
+    a.item_mem["Xóa đi"] = {"div": 1, "kg": 1, "hs": ""}
+    a.save_catalog()
+    b = make_store(data_dir, tmp_path, "b")
+    del a.item_mem["Xóa đi"]
+    a.save_catalog()
+    b.item_mem["Hàng B"] = {"div": 2, "kg": 2, "hs": ""}  # B vẫn còn "Xóa đi" trong bộ nhớ
+    b.save_catalog()
+    c = make_store(data_dir, tmp_path, "c")
+    assert "Xóa đi" not in c.item_mem and "Hàng B" in c.item_mem
+
+
+def _cust(store, key="khachx", rows=None):
+    store.custom_profiles[key] = {"label": "Khách X", "name": "CONG TY X"}
+    store.custom_items[key] = rows or [{"code": "M1", "name": "Hàng 1", "div": 100, "kg": 1.0},
+                                       {"code": "M2", "name": "Hàng 2", "div": 50, "kg": 2.0}]
+    store.save_catalog()
+
+
+def test_kg_kien_rows_merge_by_code_and_locked_row_wins(data_dir, tmp_path):
+    a = make_store(data_dir, tmp_path, "a")
+    _cust(a)
+    b = make_store(data_dir, tmp_path, "b")
+    # A sửa tay M1 (🔒), B (chưa đọc lại) học lại M1 = 250 không khóa và sửa M2
+    a.custom_items["khachx"][0].update(div=300, khoa=True)
+    a.save_catalog()
+    b.custom_items["khachx"][0].update(div=250)
+    b.custom_items["khachx"][1].update(kg=2.5)
+    b.custom_items["khachx"].append({"code": "M3", "name": "Hàng 3", "div": 10, "kg": 3.0})
+    b.save_catalog()
+    rows = {r["code"]: r for r in make_store(data_dir, tmp_path, "c").custom_items["khachx"]}
+    assert rows["M1"]["div"] == 300 and rows["M1"]["khoa"]  # dòng 🔒 thắng
+    assert rows["M2"]["kg"] == 2.5 and rows["M3"]["div"] == 10  # sửa/thêm của B vẫn còn
+    assert b.custom_items["khachx"][0]["div"] == 300  # máy B cũng nhận ngay bản đã gộp
+
+
+def test_backup_before_overwrite_and_throttle(data_dir, tmp_path):
+    a = make_store(data_dir, tmp_path, "a")
+    a.save_catalog()
+    a.save_catalog()
+    bk = data_dir / "_SAO_LUU" / "master_catalog"
+    n = len(list(bk.glob("*.json")))
+    assert n >= 1
+    a.save_catalog()
+    assert len(list(bk.glob("*.json"))) == n  # tối đa 1 bản / 30 phút
+    a.BACKUP_EVERY = 0
+    a.save_records()
+    assert list((data_dir / "_SAO_LUU" / "hongthien_records").glob("*.json"))
+    assert not any(o["customer"] == "_SAO_LUU" for o in a.declaration_folders())
+
+
+def test_join_empty_shared_folder_copies_everything(data_dir, tmp_path):
+    a = make_store(data_dir, tmp_path, "a")
+    _cust(a)
+    a.vehicles = [{"driver": "Lái A", "plate": "29C-111.11"}]
+    a.save_catalog()
+    a.records.insert(0, rec("A1", "PO-A"))
+    a.save_records()
+    (data_dir / "HAI_QUAN" / "Kodi" / "2026_Thang_11" / "2026-11-02").mkdir(parents=True)
+    (data_dir / "HAI_QUAN" / "Kodi" / "2026_Thang_11" / "2026-11-02" / "po.pdf").write_text("x")
+    shared = tmp_path / "OneDrive" / "HongThien"
+    st = a.change_base_dir(str(shared), mang_theo=True)
+    assert st["che_do"] == "chep" and st["file"] >= 1
+    c = make_store(shared, tmp_path, "c")
+    assert "khachx" in c.custom_items and c.vehicles[0]["driver"] == "Lái A" and any(r["id"] == "A1" for r in c.records)
+    assert (shared / "HAI_QUAN" / "Kodi" / "2026_Thang_11" / "2026-11-02" / "po.pdf").exists()
+    assert (data_dir / "master_catalog.json").exists()  # thư mục cũ giữ nguyên
+
+
+def test_join_shared_folder_with_data_merges_and_keeps_user_name(data_dir, tmp_path):
+    shared = tmp_path / "chung"
+    a = make_store(shared, tmp_path, "a")  # máy A đã dùng thư mục chung
+    _cust(a)
+    a.records.insert(0, rec("A1", "PO-A"))
+    a.save_records()
+    b = make_store(data_dir, tmp_path, "b")  # máy B còn dữ liệu riêng
+    b.set_user_name("Lan")
+    _cust(b, rows=[{"code": "M1", "name": "Hàng 1", "div": 999, "kg": 1.0},
+                   {"code": "M2", "name": "Hàng 2", "div": 75, "kg": 2.0, "khoa": True},
+                   {"code": "M9", "name": "Hàng 9", "div": 9, "kg": 9.0}])
+    b.records.insert(0, rec("B1", "PO-B"))
+    b.save_records()
+    st = b.change_base_dir(str(shared), mang_theo=True)
+    assert st["che_do"] == "gop" and st["ho_so"] >= 1 and st["sao_luu"]
+    assert b.user_name() == "Lan" and os.path.normcase(b.base_dir) == os.path.normcase(str(shared))
+    rows = {r["code"]: r for r in make_store(shared, tmp_path, "c").custom_items["khachx"]}
+    assert rows["M1"]["div"] == 100  # trùng: giữ bản trong thư mục chung
+    assert rows["M2"]["div"] == 75 and rows["M2"]["khoa"]  # dòng 🔒 của máy B thắng
+    assert rows["M9"]["div"] == 9  # mã chỉ máy B có: thêm vào
+    ids = {r["id"] for r in make_store(shared, tmp_path, "d").records}
+    assert {"A1", "B1"} <= ids
+
+
+def test_onedrive_conflict_copy_is_merged_and_moved(data_dir, tmp_path):
+    a = make_store(data_dir, tmp_path, "a")
+    _cust(a)
+    import json
+    other = json.loads((data_dir / "master_catalog.json").read_text(encoding="utf-8"))
+    other["item_mem"]["Hàng máy kia"] = {"div": 40, "kg": 4, "hs": ""}
+    other["custom_items"]["khachx"].append({"code": "M7", "name": "Hàng 7", "div": 7, "kg": 7.0})
+    (data_dir / "master_catalog-PC-KHO.json").write_text(json.dumps(other, ensure_ascii=False), encoding="utf-8")
+    (data_dir / "hongthien_records (1).json").write_text(json.dumps([rec("Z1", "PO-Z")]), encoding="utf-8")
+    assert a.sync()
+    assert "Hàng máy kia" in a.item_mem and any(r["code"] == "M7" for r in a.custom_items["khachx"])
+    assert any(r["id"] == "Z1" for r in a.records)
+    assert not (data_dir / "master_catalog-PC-KHO.json").exists()
+    assert len(list((data_dir / "_SAO_LUU" / "xung_dot").iterdir())) == 2
+    assert app.DedicatedDataStore.conflict_copies(str(data_dir / "master_catalog.json")) == []

@@ -3,7 +3,7 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView, QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QScrollArea,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QMessageBox, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from .. import widgets
@@ -116,8 +116,9 @@ class SettingsPage(_Page):
         dbox = QGroupBox("Nơi lưu dữ liệu (dùng chung nhiều máy)")
         dl = QVBoxLayout(dbox)
         tip = QLabel("Nhiều máy cùng dùng phần mềm: mỗi máy chọn CÙNG một thư mục này (ổ dùng chung, OneDrive, Google Drive...). "
-                     "Không cần mạng LAN hay máy chủ. Thông tin cơ bản của hồ sơ và khách hàng đọc từ thư mục này; "
-                     "muốn xem chi tiết thì mở thư mục hồ sơ.")
+                     "Không cần mạng LAN hay máy chủ. Khách hàng, bảng Kg & kiện, kho dữ liệu, cài đặt (lái xe, công ty) và hồ sơ "
+                     "đều đọc/ghi ở đây; máy khác lưu thì máy này tự đọc lại sau vài giây. Hai máy sửa cùng lúc thì phần mềm GỘP theo mã hàng "
+                     "(dòng 🔒 sửa tay được ưu tiên) và tự sao lưu trước khi ghi vào thư mục _SAO_LUU.")
         tip.setObjectName("hint")
         tip.setWordWrap(True)
         dl.addWidget(tip)
@@ -132,10 +133,18 @@ class SettingsPage(_Page):
         b2 = QPushButton("📁  Mở thư mục dữ liệu")
         b2.setObjectName("sec")
         b2.clicked.connect(lambda: widgets.open_folder(self.store.base_dir))
+        b3 = QPushButton("🗂  Mở thư mục sao lưu")
+        b3.setObjectName("sec")
+        b3.clicked.connect(self.open_backups)
         drow.addWidget(b1)
         drow.addWidget(b2)
+        drow.addWidget(b3)
         drow.addStretch(1)
         dl.addLayout(drow)
+        self.sync_info = QLabel("")
+        self.sync_info.setObjectName("hint")
+        self.sync_info.setWordWrap(True)
+        dl.addWidget(self.sync_info)
         tip = QLabel("Mẹo: nên đặt thư mục dữ liệu ở nơi cố định (ví dụ D:\\HongThien hoặc ổ mạng dùng chung), tránh thư mục Downloads vì dễ bị dọn nhầm.")
         tip.setObjectName("hint")
         tip.setWordWrap(True)
@@ -226,6 +235,12 @@ class SettingsPage(_Page):
     # --- dữ liệu / OCR
     def refresh(self):
         self.path.setText(f"Thư mục dữ liệu hiện tại: {self.store.base_dir}")
+        bits = [f"Sao lưu tự động: {self.store.backup_count()} bản trong _SAO_LUU (tối đa 1 bản / 30 phút cho mỗi file)."]
+        if self.store.last_sync:
+            bits.append(f"Lần gần nhất đọc lại dữ liệu máy khác: {self.store.last_sync}.")
+        if self.store.last_conflicts:
+            bits.append(f"Đã gộp {self.store.last_conflicts} bản xung đột do OneDrive/Google Drive tạo.")
+        self.sync_info.setText(" ".join(bits))
         self.show_ocr()
 
     def show_ocr(self):
@@ -264,13 +279,50 @@ class SettingsPage(_Page):
         self.store.set_user_name(self.user_edit.text())
         self.user_msg.setText(f"✅  Đã lưu: máy này là “{self.store.user_name() or '(chưa đặt tên)'}”.")
 
+    def open_backups(self):
+        import os
+        os.makedirs(self.store.backup_root(), exist_ok=True)
+        widgets.open_folder(self.store.backup_root())
+
     def change_dir(self):
-        d = QFileDialog.getExistingDirectory(self, "Chọn thư mục lưu dữ liệu")
+        import os
+        d = QFileDialog.getExistingDirectory(self, "Chọn thư mục lưu dữ liệu (thư mục chung của các máy)")
         if not d:
             return
-        self.store.change_base_dir(d)
+        if os.path.normcase(os.path.abspath(d)) == os.path.normcase(os.path.abspath(self.store.base_dir)):
+            return
+        has = self.store.folder_has_data(d)
+        box = QMessageBox(self)
+        box.setWindowTitle("Mang dữ liệu sang thư mục mới?")
+        if has:
+            box.setText("Thư mục này ĐÃ CÓ dữ liệu phần mềm (máy khác đang dùng).\n\n"
+                        "Gộp dữ liệu đang dùng trên máy này vào đó? Phần mềm chỉ THÊM phần còn thiếu (khách, mã hàng, hồ sơ, file hồ sơ); "
+                        "chỗ trùng giữ bản trong thư mục chung, riêng dòng 🔒 sửa tay ở bảng Kg & kiện được ưu tiên. "
+                        "Trước khi gộp sẽ sao lưu vào _SAO_LUU. Thư mục cũ trên máy này giữ nguyên.")
+        else:
+            box.setText("Thư mục này chưa có dữ liệu phần mềm.\n\n"
+                        "Chép toàn bộ dữ liệu đang dùng trên máy này (khách, Kg & kiện, kho dữ liệu, cài đặt, hồ sơ, mẫu chứng từ) sang đó? "
+                        "Thư mục cũ giữ nguyên.")
+        yes = box.addButton("Gộp vào thư mục chung" if has else "Chép dữ liệu sang", QMessageBox.YesRole)
+        no = box.addButton("Chỉ đổi thư mục, không mang theo", QMessageBox.NoRole)
+        box.addButton("Hủy", QMessageBox.RejectRole)
+        box.setDefaultButton(yes)
+        box.exec()
+        if box.clickedButton() not in (yes, no):
+            return
+        try:
+            st = self.store.change_base_dir(d, mang_theo=box.clickedButton() is yes)
+        except Exception as e:  # noqa: BLE001
+            widgets.warn(self, "Chưa đổi được thư mục", f"Lỗi: {e}")
+            return
         self.load_company()
         self.load_vehicles()
         self.refresh()
         self.data_changed.emit()
-        widgets.info(self, "Đã đổi thư mục dữ liệu", f"Phần mềm sẽ lưu và đọc dữ liệu tại:\n{self.store.base_dir}")
+        more = ""
+        if st.get("che_do") == "chep":
+            more = f"\n\nĐã chép dữ liệu máy này sang ({st['ho_so']} hồ sơ, {st['file']} file hồ sơ/mẫu)."
+        elif st.get("che_do") == "gop":
+            more = (f"\n\nĐã gộp dữ liệu máy này vào thư mục chung: thêm {st['ho_so']} hồ sơ, chép {st['file']} file còn thiếu. "
+                    f"Bản trước khi gộp đã sao lưu trong _SAO_LUU.")
+        widgets.info(self, "Đã đổi thư mục dữ liệu", f"Phần mềm sẽ lưu và đọc dữ liệu tại:\n{self.store.base_dir}{more}")
