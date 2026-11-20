@@ -176,6 +176,75 @@ def test_best_text_pdf_po_keeps_spec_on_row(tmp_path, store, best_customer):
     ]
 
 
+# Lớp chữ của PO Best thật (dữ liệu giả): cột bị trộn thứ tự (SL trước tên, thành tiền dính sau 'MM'),
+# ký hiệu phi hỏng font ('￠', 'ꬾ'), ĐVT lẫn '根' và 'PCS', số có dấu phẩy nghìn, nhiều cột phụ.
+BEST_TEXT_LAYER = """Purchase Order
+PO No:               :       POS269990005
+PO Date                      2026/11/02
+  1            AB0001                         1,200.00Ống giấy không bụi￠40*3.3*1650MM根10,000.00 12,000,000.00         QS2600000001        PRS2600000001           PackingF001             2026/11/10                  QC Vải
+  2            VN0000009                      2,100.00           PCS           12,345.00Ống giấy chống bụi        KT:ꬾ40*4*1800MM25,924,500.00         QS2600000001        PRS2600000001           PackingF001             2026/11/10                  QC Vải
+  3            VN0000003           400.00            PCS            9,000.00Ống giấy chống bụi                           KT:ꬾ40*4*1350MM3,600,000.00          QS2600000001        PRS2600000001           PackingF001             2026/11/10                  QC Vải
+                           Currency        : (VND)                       Grand Total           41,524,500.00
+"""
+# Cùng PO nhưng đọc theo đúng thứ tự cột (pdftotext -layout)
+BEST_TEXT_COLUMNS = """ No.     Item Code      Item Description     Specification     Quantity   Unit   Unit Price     Amount      Inquiry Number    PR No.    Customs Number
+  1       AB0001       Ống giấy không bụi   ￠40*3.3*1650MM    1,200.00    根     10,000.00   12,000,000.00   QS2600000001   PRS2600000001   PackingF001   2026/11/10   QC Vải
+  2      VN0000009     Ống giấy chống bụi  KT:ꬾ40*4*1800MM    2,100.00    PCS    12,345.00   25,924,500.00   QS2600000001   PRS2600000001   PackingF001   2026/11/10   QC Vải
+  3      VN0000003     Ống giấy chống bụi  KT:ꬾ40*4*1350MM      400.00    PCS     9,000.00    3,600,000.00   QS2600000001   PRS2600000001   PackingF001   2026/11/10   QC Vải
+"""
+
+
+@pytest.mark.parametrize("text", [BEST_TEXT_LAYER, BEST_TEXT_COLUMNS])
+def test_parse_best_po_rows_text_layer(text):
+    rows = app.parse_best_po_rows(text)
+    got = [(r["no"], r["code"], r["desc"], r["dims"], r["qty"], r["unit_po"], r["price"], r["amount"], r["inquiry"], r["pr"], r["customsNo"]) for r in rows]
+    assert got == [
+        (1, "AB0001", "Ống giấy không bụi", ["40", "3.3", "1650"], 1200, "根", 10000, 12000000, "QS2600000001", "PRS2600000001", "PackingF001"),
+        (2, "VN0000009", "Ống giấy chống bụi", ["40", "4", "1800"], 2100, "PCS", 12345, 25924500, "QS2600000001", "PRS2600000001", "PackingF001"),
+        (3, "VN0000003", "Ống giấy chống bụi", ["40", "4", "1350"], 400, "PCS", 9000, 3600000, "QS2600000001", "PRS2600000001", "PackingF001"),
+    ]
+
+
+def test_best_text_rows_keep_new_spec_and_match_total(store, best_customer):
+    """Quy cách chưa học (1800mm) không bị bỏ: đặt tên theo PO, kg/ống chờ điền; tổng khớp Grand Total; kiện = SL / 20 ống."""
+    prof = app.PROFILES[best_customer]
+    rows = app.parse_best_po_rows(BEST_TEXT_LAYER)
+    lines = app.lines_from_best_rows(rows, "POS269990005", prof, store.items_for_customer(best_customer), data_store=store, tare_val=1.0)
+    got = [(x["ma_sp"], x["ten_sp"], x["unit"], x["qty"], x["price"], x["amount"], x["kien"], x["kg"], x["read"]) for x in lines]
+    assert got == [
+        ("AB0001", "Ống giấy chống bụi 40 x 3.3 x 1650mm", "ống", 1200, 10000, 12000000, 60, 0.6, "ok"),
+        ("VN0000009", "Ống giấy chống bụi 40 x 4 x 1800mm", "ống", 2100, 12345, 25924500, 105, 0, "suy_ra"),
+        ("VN0000003", "Ống giấy chống bụi 40 x 4 x 1350mm", "ống", 400, 9000, 3600000, 20, 0.5, "ok"),
+    ]
+    assert all(x["inquiry"] == "QS2600000001" and x["customsNo"] == "PackingF001" and x["dept"] == "QC Vải" for x in lines)
+    assert app.po_total_check(BEST_TEXT_LAYER, lines).startswith("✅")
+
+
+def test_lot_load_best_text_pdf_reads_every_row(tmp_path, store, best_customer):
+    """Nạp PO Best PDF có chữ qua lot_load_po: đủ mọi dòng (cả quy cách chưa học) và báo tổng khớp."""
+    head = [(40, 500, "PO No: POS269990006"), (40, 490, "PO Date 2026/11/02")]
+    names = []
+    rows = [("VN0000002", "KT:40*4*1650MM", "400.00", "11,000.00", "4,400,000.00"),
+            ("VN0000009", "KT:40*4*1800MM", "2,100.00", "12,345.00", "25,924,500.00"),
+            ("VN0000003", "KT:40*4*1350MM", "300.00", "9,000.00", "2,700,000.00")]
+    for i, (code, spec, q, p, amt) in enumerate(rows):
+        y = 400 - i * 20
+        head += [(20, y, str(i + 1)), (40, y, code), (330, y, q), (380, y, "PCS"), (420, y, p), (480, y, amt),
+                 (560, y, "QS2600000001"), (640, y, "PackingF001")]
+        names += [(100, y, "Ong giay chong bui"), (200, y, spec)]
+    head.append((400, 300, "Grand Total 33,024,500.00"))
+    pdf = tmp_path / "po_best_text.pdf"
+    make_text_pdf(str(pdf), head, names)
+    res = app.lot_load_po(store, str(pdf), best_customer, tare_text="1")
+    assert res["ok"] and res["po"] == "POS269990006"
+    assert [(x["ma_sp"], x["ten_sp"], x["qty"], x["price"]) for x in res["items"]] == [
+        ("VN0000002", "Ống giấy chống bụi 40 x 4 x 1650mm", 400, 11000),
+        ("VN0000009", "Ong giay chong bui 40 x 4 x 1800mm", 2100, 12345),
+        ("VN0000003", "Ống giấy chống bụi 40 x 4 x 1350mm", 300, 9000),
+    ]
+    assert res["po_check"].startswith("✅")
+
+
 def test_remembered_refs_win_over_ocr(store, best_customer):
     name = "Ống giấy chống bụi 40 x 4 x 1350mm"
     store.remember_item_refs(best_customer, name, {"code": "VN0000003", "inquiry": "QS2600000003"})
