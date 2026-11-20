@@ -125,3 +125,65 @@ def test_conflict_copy_of_customer_file_is_merged(data_dir, tmp_path):
     assert any(x.get("code") == "K-CONF" for x in a.kodi_items)
     assert not os.path.exists(path[:-5] + "-KETOANBH.json")
     assert os.listdir(os.path.join(a.backup_root(), "xung_dot"))
+
+
+def migrated_with_dt(data_dir, tmp_path):
+    a = make_store(data_dir, tmp_path, "a")
+    add_dt(a)
+    a.data_tong += [{"khach": "FUJIDAN", "ten": "Lõi A", "kg": 0.15, "kg_nguon": "tay", "ts": "2"},  # trùng tên hàng với dòng Fujidan cũ
+                    {"khach": "Fujidan", "ten": "Lõi A", "kien": 50, "ts": "0"}]
+    a.dt_save()
+    a.chuyen_doi_thuc_hien()
+    return a
+
+
+def test_sap_xep_preview_then_apply_unifies_names_and_drops_duplicate_rows(data_dir, tmp_path):
+    a = migrated_with_dt(data_dir, tmp_path)
+    pv = a.sap_xep_xem_truoc()
+    assert pv["dong_trung"] == 2 and pv["doi_ten"] >= 2 and "fujidan" in pv["ten_goi"]
+    assert any(x["ma"] == "FG10496-004-00000" for x in pv["kg_lech"])  # chỉ báo
+    n = len(a.data_tong)
+    st = a.sap_xep_thuc_hien()
+    assert st["dong_trung"] == 2 and len(a.data_tong) == n - 2
+    fuji = [r for r in a.data_tong if a.dt_khach_key(r) == "fujidan"]
+    assert len({r["khach"] for r in fuji}) == 1  # một tên khách
+    loi_a = next(r for r in fuji if r["ten"] == "Lõi A")
+    assert loi_a["kg"] == 0.15 and loi_a["kien"] == 50  # giữ dòng sửa tay, ô trống lấy từ dòng bỏ
+    assert {x["ma"] for x in a.sap_xep_xem_truoc()["kg_lech"]} >= {"FG10496-004-00000"}  # cùng mã khác kg: không tự chọn
+    b = make_store(data_dir, tmp_path, "b")
+    assert len(b.data_tong) == n - 2
+
+
+def test_sap_xep_merges_old_files_written_by_old_app_and_misplaced_customer_file(data_dir, tmp_path):
+    a = migrated_with_dt(data_dir, tmp_path)
+    # bản phần mềm cũ ở máy khác ghi lại master_catalog.json với một mã mới
+    json.dump({"kodi_items": a.kodi_items + [{"name": "Từ bản cũ", "code": "OLD-1", "div": 1, "kg": 1}]},
+              open(a.catalog_file, "w", encoding="utf-8"), ensure_ascii=False)
+    # file khách Tesa bị kéo nhầm sang thư mục khác
+    old = a._khach_path("tesa")
+    wrong = os.path.join(a.customs_root(), "Nham", os.path.basename(old))
+    os.makedirs(os.path.dirname(wrong))
+    os.replace(old, wrong)
+    a._sigs = {}
+    a.load_all()
+    pv = a.sap_xep_xem_truoc()
+    assert pv["file_cu"] and pv["sai_cho"]
+    a.sap_xep_thuc_hien()
+    assert any(x.get("code") == "OLD-1" for x in a.kodi_items)
+    assert not os.path.exists(a.catalog_file) and os.path.isfile(old) and not os.path.exists(wrong)
+    assert any(x.get("code") == "OLD-1" for x in make_store(data_dir, tmp_path, "c").kodi_items)
+
+
+def test_sap_xep_undo_restores_everything(data_dir, tmp_path):
+    a = migrated_with_dt(data_dir, tmp_path)
+    n = len(a.data_tong)
+    a.sap_xep_thuc_hien()
+    assert len(a.data_tong) == n - 2
+    a.sap_xep_hoan_tac()
+    assert len(a.data_tong) == n and len(make_store(data_dir, tmp_path, "d").data_tong) == n
+
+
+def test_sap_xep_needs_migration_first(store):
+    import pytest
+    with pytest.raises(ValueError, match="chưa chuyển"):
+        store.sap_xep_xem_truoc()

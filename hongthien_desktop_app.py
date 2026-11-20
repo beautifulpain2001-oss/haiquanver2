@@ -3029,6 +3029,208 @@ class DedicatedDataStore:
         self.load_all()
         return bdir
 
+    # ---- SẮP XẾP LẠI DỮ LIỆU (nút ở Cài đặt, dùng khi đã chuyển sang mỗi khách một file) ----------------------------------
+    # Gom lại cho đúng: file kiểu cũ do bản phần mềm cũ ghi lại (master_catalog.json…) gộp vào file khách; file khách nằm sai
+    # thư mục hoặc bị nhân đôi về đúng thư mục khách; tên khách viết nhiều kiểu trong Kg & kiện về một tên; dòng Kg & kiện trùng
+    # (cùng khách + cùng tên hàng) còn một dòng. Chỗ lệch cần người quyết (PXK trùng, cùng mã khác kg, dòng hàng lặp) chỉ BÁO.
+    def _dt_row_rank(self, x):
+        return (bool(x.get("khoa")), self.DT_RANK.get(x.get("kg_nguon", ""), 0), self.DT_RANK.get(x.get("kien_nguon", ""), 0),
+                bool(x.get("kg")) + bool(x.get("kien")), str(x.get("ts") or ""))
+
+    def _sap_xep_ke_hoach(self):
+        """Tính việc cần làm (không ghi gì)."""
+        root = self.customs_root()
+        cu = [p for p in (self.catalog_file, self.records_file, self.dt_path()) if os.path.isfile(p)]
+        cu += [c for p in (self.catalog_file, self.records_file, self.dt_path()) for c in self.conflict_copies(p)]
+        found = {}
+        try:
+            dirs = [d for d in os.listdir(root) if not d.startswith((".", "_")) and os.path.isdir(os.path.join(root, d))]
+        except OSError:
+            dirs = []
+        for d in dirs:
+            for n in (os.listdir(os.path.join(root, d)) if os.path.isdir(os.path.join(root, d)) else []):
+                if re.fullmatch(re.escape(self.KHACH_FILE_PRE) + r"[A-Za-z0-9_]+\.json", n):
+                    found.setdefault(n[len(self.KHACH_FILE_PRE):-5].lower(), []).append(os.path.join(root, d, n))
+        nhan_doi, sai_cho = [], []
+        for key, paths in found.items():
+            main = self._kh_paths.get(key) or paths[0]
+            nhan_doi += [p for p in paths if os.path.normcase(p) != os.path.normcase(main)]
+            want = os.path.join(root, self._khach_dir_name(key), os.path.basename(main))
+            if os.path.normcase(want) != os.path.normcase(main) and not os.path.exists(want):
+                sai_cho.append((key, main, want))
+        # tên khách + dòng trùng trong Kg & kiện
+        groups, names = {}, {}
+        for i, row in enumerate(self.data_tong):
+            key = self.dt_khach_key(row)
+            names.setdefault(key, {}).setdefault(str(row.get("khach") or "").strip(), 0)
+            names[key][str(row.get("khach") or "").strip()] += 1
+            groups.setdefault((key, clean_str(row.get("ten"))), []).append(i)
+        chuan = {}
+        for key, cnt in names.items():
+            if key in PROFILES:
+                chuan[key] = str(PROFILES[key].get("label") or key)
+            else:
+                chuan[key] = max(cnt.items(), key=lambda kv: (kv[1], -len(kv[0])))[0]
+        doi_ten = sum(1 for row in self.data_tong if str(row.get("khach") or "").strip() != chuan.get(self.dt_khach_key(row), ""))
+        trung = {g: ix for g, ix in groups.items() if len(ix) > 1 and g[1]}
+        return {"cu": cu, "nhan_doi": nhan_doi, "sai_cho": sai_cho, "chuan": chuan, "doi_ten": doi_ten, "trung": trung,
+                "ten_goi": {k: sorted(v) for k, v in names.items() if len(v) > 1}}
+
+    def _bao_lech(self):
+        """Chỗ lệch chỉ báo cho người dùng quyết: số PXK trùng giữa các bộ, cùng mã khác kg, dòng hàng lặp trong hồ sơ."""
+        pxk = {}
+        for r in self.records:
+            m = re.fullmatch(r"\s*0*(\d{1,9})\s*", str(r.get("pxkNo") or ""))
+            if m and r.get("id") not in DEMO_RECORD_IDS:
+                pxk.setdefault(int(m.group(1)), []).append(r)
+        pxk_trung = [{"pxk": str(rs[0].get("pxkNo")), "ho_so": [f"{r.get('id')} ({r.get('customer')}, {str(r.get('docDate') or '')[:10]})" for r in rs]}
+                     for _n, rs in sorted(pxk.items()) if len({(r.get("customer"), str(r.get("docDate") or "")[:10]) for r in rs}) > 1]
+        by = {}
+        for row in self.data_tong:
+            code = str(row.get("ma_hang") or row.get("ma_erp") or "").strip()
+            if code:
+                by.setdefault((self.dt_khach_key(row), code), []).append(row)
+        kg_lech = [{"khach": k, "ma": c, "kg": sorted({str(r.get("kg")) for r in rs if r.get("kg") not in (None, "")})}
+                   for (k, c), rs in sorted(by.items()) if len({str(r.get("kg")) for r in rs if r.get("kg") not in (None, "")}) > 1]
+        lap = []
+        for r in self.records:
+            cnt = {}
+            for it in r.get("items") or []:
+                k = (str(it.get("po") or ""), str(it.get("ma_sp") or it.get("code") or ""), clean_str(it.get("ten_sp") or it.get("name")))
+                cnt[k] = cnt.get(k, 0) + 1
+            lap += [{"ho_so": r.get("id"), "po": k[0], "ma": k[1] or k[2], "lan": n} for k, n in cnt.items() if n > 1]
+        return {"pxk_trung": pxk_trung, "kg_lech": kg_lech, "dong_lap": lap}
+
+    def sap_xep_xem_truoc(self):
+        """Xem trước nút 'Sắp xếp lại dữ liệu' (không ghi gì)."""
+        if not self.theo_khach():
+            raise ValueError("Thư mục dữ liệu chưa chuyển sang mỗi khách một file. Bấm 'Xem trước và chuyển' trước.")
+        self.sync()
+        k = self._sap_xep_ke_hoach()
+        root = self.customs_root()
+        rel = lambda p: os.path.relpath(p, root) if not os.path.relpath(p, root).startswith("..") else p
+        return {"file_cu": [rel(p) for p in k["cu"]], "nhan_doi": [rel(p) for p in k["nhan_doi"]],
+                "sai_cho": [(rel(a), rel(b)) for _k, a, b in k["sai_cho"]], "ten_goi": k["ten_goi"],
+                "doi_ten": k["doi_ten"], "dong_trung": sum(len(ix) - 1 for ix in k["trung"].values()), **self._bao_lech()}
+
+    def sap_xep_thuc_hien(self):
+        """Sắp xếp lại: sao lưu mọi file dữ liệu vào _SAO_LUU/truoc_sap_xep_<giờ>/ rồi gom/gộp/bỏ trùng như xem trước.
+        Không đổi số PXK, không chọn hộ kg khi cùng mã khác kg, không xóa dòng hàng trong hồ sơ. Trả thống kê."""
+        if not self.theo_khach():
+            raise ValueError("Thư mục dữ liệu chưa chuyển sang mỗi khách một file.")
+        self.sync()
+        k = self._sap_xep_ke_hoach()
+        root = self.customs_root()
+        stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        bdir = os.path.join(self.backup_root(), f"truoc_sap_xep_{stamp}")
+        os.makedirs(bdir, exist_ok=True)
+        man = {"chep": [], "tao_moi": [], "doi_ten": []}
+        for p in self._theo_khach_files() + k["nhan_doi"] + k["cu"]:
+            if os.path.isfile(p):
+                dst = os.path.join(bdir, "files", f"{len(man['chep']):03d}_{os.path.basename(p)}")
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy2(p, dst)
+                man["chep"].append({"goc": p, "ban": dst})
+        st = {"sao_luu": bdir, "file_cu": 0, "nhan_doi": 0, "sai_cho": 0, "doi_ten": 0, "dong_trung": 0}
+        # 1) file kiểu cũ (bản phần mềm cũ ghi lại) và bản xung đột của chúng: gộp vào, rồi cất đi
+        for p in k["cu"]:
+            data = self._read_json(p, None)
+            base = os.path.basename(p).lower()
+            if isinstance(data, dict) and base.startswith("master_catalog"):
+                self._take_merged_catalog(merge_catalog(None, copy.deepcopy(self._catalog_payload()), data))
+            elif isinstance(data, list) and base.startswith("hongthien_records"):
+                self.records = self._merge_records(self.records, [r for r in data if isinstance(r, dict) and r.get("id") not in DEMO_RECORD_IDS])
+            elif isinstance(data, dict) and base.startswith(os.path.splitext(DT_FILE)[0].lower()):
+                self.data_tong = self._merge_dt_items(self.data_tong, data.get("items") or [])
+            else:
+                continue
+            new = os.path.splitext(p)[0] + f".DA_GOP_{stamp}.json"
+            os.replace(p, new)
+            man["doi_ten"].append({"goc": p, "moi": new})
+            st["file_cu"] += 1
+        # 2) file khách nhân đôi: gộp vào file chính rồi cất
+        for p in k["nhan_doi"]:
+            data = self._read_json(p, None)
+            if isinstance(data, dict):
+                key = str(data.get("khach") or os.path.basename(p)[len(self.KHACH_FILE_PRE):-5]).lower()
+                parts = self._split_parts()
+                parts[key] = self._merge_part(None, parts.get(key) or self._part_body({}), self._part_body(data))
+                self._join_parts(parts)
+            new = p[:-5] + f".DA_GOP_{stamp}.json"
+            os.replace(p, new)
+            man["doi_ten"].append({"goc": p, "moi": new})
+            st["nhan_doi"] += 1
+        # 3) file khách nằm sai thư mục: chuyển về thư mục khách
+        for key, old, want in k["sai_cho"]:
+            if os.path.isfile(old) and not os.path.exists(want):
+                os.makedirs(os.path.dirname(want), exist_ok=True)
+                os.replace(old, want)
+                man["doi_ten"].append({"goc": old, "moi": want})
+                self._kh_paths[key] = want
+                if old in self._kbase:
+                    self._kbase[want] = self._kbase.pop(old)
+                self._sigs[want] = self._sig(want)
+                self._sigs.pop(old, None)
+                st["sai_cho"] += 1
+        # 4) tên khách một kiểu + 5) bỏ dòng trùng (giữ dòng 🔒 / nguồn tay > invoice > ERP / mới nhất; ô trống lấy từ dòng bỏ)
+        k = self._sap_xep_ke_hoach()
+        drop = set()
+        for _g, ix in k["trung"].items():
+            rows = [self.data_tong[i] for i in ix]
+            best = max(range(len(rows)), key=lambda j: self._dt_row_rank(rows[j]))
+            keep = rows[best]
+            for j, r in enumerate(rows):
+                if j != best:
+                    for f, v in r.items():
+                        if v not in (None, "", 0) and keep.get(f) in (None, "", 0):
+                            keep[f] = v
+                    drop.add(ix[j])
+        for row in self.data_tong:
+            want = k["chuan"].get(self.dt_khach_key(row))
+            if want and str(row.get("khach") or "").strip() != want:
+                if not row.get("khach_day_du") and row.get("khach"):
+                    row["khach_day_du"] = row["khach"]
+                row["khach"] = want
+                st["doi_ten"] += 1
+        st["dong_trung"] = len(drop)
+        self.data_tong = [r for i, r in enumerate(self.data_tong) if i not in drop]
+        self._dt_cache, self._dt_idx = {}, None
+        with open(os.path.join(bdir, "sap_xep.json"), "w", encoding="utf-8") as f:
+            json.dump({"luc": stamp, "may": self._machine_tag(), "thong_ke": st, **man}, f, ensure_ascii=False, indent=2)
+        self._save_theo_khach()
+        for p in self._theo_khach_files():
+            if os.path.isfile(p) and not any(os.path.normcase(c["goc"]) == os.path.normcase(p) for c in man["chep"]):
+                man["tao_moi"].append(p)
+        with open(os.path.join(bdir, "sap_xep.json"), "w", encoding="utf-8") as f:
+            json.dump({"luc": stamp, "may": self._machine_tag(), "thong_ke": st, **man}, f, ensure_ascii=False, indent=2)
+        return st
+
+    def sap_xep_hoan_tac(self):
+        """Trả dữ liệu về như ngay trước lần 'Sắp xếp lại' gần nhất (thay đổi làm sau đó trong các file đó sẽ mất)."""
+        root = self.backup_root()
+        cands = sorted(d for d in (os.listdir(root) if os.path.isdir(root) else []) if d.startswith("truoc_sap_xep_"))
+        if not cands:
+            raise ValueError("Chưa có lần sắp xếp nào để hoàn tác.")
+        bdir = os.path.join(root, cands[-1])
+        man = self._read_json(os.path.join(bdir, "sap_xep.json"), None)
+        if not isinstance(man, dict):
+            raise ValueError(f"Bản sao lưu {bdir} thiếu sap_xep.json.")
+        for x in reversed(man.get("doi_ten") or []):
+            if os.path.isfile(x["moi"]) and not os.path.exists(x["goc"]):
+                os.makedirs(os.path.dirname(x["goc"]), exist_ok=True)
+                os.replace(x["moi"], x["goc"])
+        for p in man.get("tao_moi") or []:
+            if os.path.isfile(p):
+                os.remove(p)
+        for c in man.get("chep") or []:
+            if os.path.isfile(c["ban"]):
+                os.makedirs(os.path.dirname(c["goc"]), exist_ok=True)
+                shutil.copy2(c["ban"], c["goc"])
+        os.replace(bdir, bdir.replace("truoc_sap_xep_", "da_hoan_tac_sap_xep_"))
+        self._sigs, self._kbase, self._kh_paths = {}, {}, {}
+        self.load_all()
+        return bdir
+
     @contextlib.contextmanager
     def _lock(self):
         path = os.path.join(self.base_dir, ".khoa_ghi")

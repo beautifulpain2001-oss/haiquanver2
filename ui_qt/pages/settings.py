@@ -174,6 +174,23 @@ class SettingsPage(_Page):
         krow.addWidget(self.kh_undo)
         krow.addStretch(1)
         kl.addLayout(krow)
+        tip2 = QLabel("Sắp xếp lại dữ liệu (bấm khi cần): gộp file kiểu cũ do máy chưa cập nhật ghi lại, đưa file khách về đúng thư mục khách, "
+                      "một khách một tên trong Kg & kiện, bỏ dòng Kg & kiện trùng. Số PXK trùng, cùng mã khác kg, dòng hàng lặp chỉ được BÁO để bạn tự sửa. "
+                      "Có xem trước, sao lưu trước và hoàn tác.")
+        tip2.setObjectName("hint")
+        tip2.setWordWrap(True)
+        kl.addWidget(tip2)
+        srow = QHBoxLayout()
+        self.sx_btn = QPushButton("🧹  Sắp xếp lại dữ liệu…")
+        self.sx_btn.setObjectName("sec")
+        self.sx_btn.clicked.connect(self.sap_xep)
+        self.sx_undo = QPushButton("↩  Hoàn tác lần sắp xếp gần nhất…")
+        self.sx_undo.setObjectName("sec")
+        self.sx_undo.clicked.connect(self.sap_xep_hoan_tac)
+        srow.addWidget(self.sx_btn)
+        srow.addWidget(self.sx_undo)
+        srow.addStretch(1)
+        kl.addLayout(srow)
         lay.addWidget(kbox)
 
         lbox = QGroupBox("Dữ liệu học (định mức từng mặt hàng)")
@@ -274,6 +291,67 @@ class SettingsPage(_Page):
         self.kh_state.setText("✅  Đang dùng cách lưu mỗi khách một file." if on else "Đang dùng cách lưu cũ (3 file chung cho mọi khách).")
         self.kh_btn.setEnabled(not on)
         self.kh_undo.setEnabled(on)
+        self.sx_btn.setEnabled(on)
+        self.sx_undo.setEnabled(on)
+
+    def sap_xep(self):
+        try:
+            pv = self.store.sap_xep_xem_truoc()
+        except Exception as e:  # noqa: BLE001
+            widgets.warn(self, "Chưa xem trước được", str(e))
+            return
+        lines = ["Sẽ làm:"]
+        lines.append(f"• Gộp {len(pv['file_cu'])} file kiểu cũ: {', '.join(pv['file_cu'])}" if pv["file_cu"] else "• Không có file kiểu cũ.")
+        if pv["nhan_doi"]:
+            lines.append(f"• Gộp {len(pv['nhan_doi'])} file khách bị nhân đôi: {', '.join(pv['nhan_doi'])}")
+        lines += [f"• Chuyển {a} → {b}" for a, b in pv["sai_cho"]]
+        if pv["ten_goi"]:
+            lines.append(f"• Một khách một tên ({pv['doi_ten']} dòng Kg & kiện đổi tên):")
+            lines += [f"   {k}: {' / '.join(v)}" for k, v in list(pv["ten_goi"].items())[:15]]
+        lines.append(f"• Bỏ {pv['dong_trung']} dòng Kg & kiện trùng (giữ dòng 🔒 / sửa tay / mới nhất, ô trống lấy từ dòng bỏ)." if pv["dong_trung"]
+                     else "• Không có dòng Kg & kiện trùng.")
+        bao = []
+        if pv["pxk_trung"]:
+            bao.append("Số PXK trùng giữa các bộ (đổi một bộ theo số Bkav):")
+            bao += [f"   {x['pxk']}: {', '.join(x['ho_so'])}" for x in pv["pxk_trung"]]
+        if pv["kg_lech"]:
+            bao.append(f"{len(pv['kg_lech'])} mã có nhiều kg khác nhau (sửa ở bảng Kg & kiện):")
+            bao += [f"   {x['khach']} {x['ma']}: {' / '.join(x['kg'])} kg" for x in pv["kg_lech"][:12]]
+        if pv["dong_lap"]:
+            bao.append(f"{len(pv['dong_lap'])} dòng hàng lặp trong hồ sơ (nhập thừa hay giao nhiều đợt?):")
+            bao += [f"   {x['ho_so']} PO {x['po'] or '-'} {x['ma']}: {x['lan']} lần" for x in pv["dong_lap"][:12]]
+        if bao:
+            lines += ["", "⚠ Cần bạn tự xem (phần mềm KHÔNG tự sửa):"] + bao
+        lines += ["", "Trước khi làm sẽ sao lưu mọi file dữ liệu vào _SAO_LUU/truoc_sap_xep_<giờ>. Sắp xếp ngay?"]
+        box = QMessageBox(self)
+        box.setWindowTitle("Sắp xếp lại dữ liệu")
+        box.setText("\n".join(lines))
+        yes = box.addButton("Sắp xếp ngay", QMessageBox.YesRole)
+        box.addButton("Hủy", QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is not yes:
+            return
+        try:
+            st = self.store.sap_xep_thuc_hien()
+        except Exception as e:  # noqa: BLE001
+            widgets.warn(self, "Chưa sắp xếp được", str(e))
+            return
+        self.refresh()
+        self.data_changed.emit()
+        widgets.info(self, "Đã sắp xếp", f"Gộp {st['file_cu']} file cũ, {st['nhan_doi']} file nhân đôi; chuyển {st['sai_cho']} file về đúng thư mục; "
+                                         f"đổi tên khách {st['doi_ten']} dòng; bỏ {st['dong_trung']} dòng trùng.\nBản sao lưu: {st['sao_luu']}")
+
+    def sap_xep_hoan_tac(self):
+        if not widgets.ask(self, "Hoàn tác sắp xếp", "Trả dữ liệu về như ngay trước lần sắp xếp gần nhất?\n\nThay đổi làm sau lần sắp xếp đó sẽ mất."):
+            return
+        try:
+            d = self.store.sap_xep_hoan_tac()
+        except Exception as e:  # noqa: BLE001
+            widgets.warn(self, "Chưa hoàn tác được", str(e))
+            return
+        self.refresh()
+        self.data_changed.emit()
+        widgets.info(self, "Đã hoàn tác", f"Đã lấy lại dữ liệu từ {d}.")
 
     def chuyen_doi(self):
         try:
