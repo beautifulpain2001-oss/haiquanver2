@@ -31,7 +31,7 @@ def tk_rows():
     return tc.rows_from_file(str(TK_FILE), app)
 
 
-def run(rec, rows=None, tol=0.01):
+def run(rec, rows=None, tol=0.0):
     wb, res = tc.build_workbook(app, rec, [("tk.xlsx", rows if rows is not None else tk_rows())], tol)
     return wb, res
 
@@ -156,6 +156,17 @@ def test_qty_price_name_missing_and_origin_errors():
     assert not_on == [5]
 
 
+def test_no_tolerance_one_cent_is_flagged():
+    """Không cho phép sai số: lệch 0,01 vẫn báo, nhiễu số thực (1.1400000000000001 so 1.14) thì không."""
+    assert tc.differs(1.14, 1.15) and not tc.differs(1.1400000000000001, 1.14) and not tc.differs(100, 100)
+    rec = shirai_rec()
+    rec["items"][2]["net"] = round(rec["items"][2]["net"] + 0.01, 2)
+    _wb, res = run(rec)
+    by = {r["tk"]["tag"]: r for r in res["rows"] if r["tk"]}
+    assert by["TK1-<03>"]["status"] == "LỆCH" and "net" in by["TK1-<03>"]["bad"]
+    assert res["summary"]["tol"] == 0
+
+
 def test_unit_and_hs_by_customer():
     rec = shirai_rec()
     rec["items"][0]["hs"] = "48239099"  # HS hồ sơ khác HS tờ khai 48191000
@@ -185,7 +196,7 @@ def test_workbook_sheets_and_formatting():
     wb, res = run(rec, rows)
     assert wb.sheetnames == ["KetQua", "ToKhai", "Invoice", "HoaDon_VAT", "PXK"]
     ws = wb["KetQua"]
-    assert ws["C3"].value == 0.01
+    assert ws["C3"].value == 0
     assert "PHÁT HIỆN" in ws["H5"].value
     rules = [r for rng in ws.conditional_formatting for r in rng.rules]
     assert rules and all("$C$3" in r.formula[0] for r in rules)
@@ -196,7 +207,7 @@ def test_workbook_sheets_and_formatting():
 
 def test_run_check_writes_into_lot_folder(store, tmp_path, monkeypatch):
     rec = shirai_rec()
-    res = app.lot_tokhai_check(store, rec, [str(TK_FILE)], 0.01)
+    res = app.lot_tokhai_check(store, rec, [str(TK_FILE)])
     folder = store.ensure_lot_folder(rec)
     assert Path(res["path"]).parent == Path(folder) and res["fname"] == "KiemTraToKhai_shirai_20.11.xlsx"
     assert [Path(p).name for p in res["tkFiles"]] == ["ToKhaiNhap_shirai_20.11.xlsx"]
@@ -210,7 +221,7 @@ def test_run_check_writes_into_lot_folder(store, tmp_path, monkeypatch):
         return real_save(self, path)
 
     monkeypatch.setattr(openpyxl.Workbook, "save", locked)
-    res2 = app.lot_tokhai_check(store, rec, res["tkFiles"], 0.01)
+    res2 = app.lot_tokhai_check(store, rec, res["tkFiles"])
     assert res2["renamed"] and res2["fname"] == "KiemTraToKhai_shirai_20.11_2.xlsx"
 
 
@@ -227,9 +238,9 @@ def test_record_keeps_tokhai_files(store):
     lot = Lot(app, store)
     rec = shirai_rec()
     lot.load_record(dict(rec, tkDraftFiles=[str(TK_FILE)], tkTol=0.5))
-    assert lot.tk_files == [str(TK_FILE)] and lot.tk_tol == 0.5
+    assert lot.tk_files == [str(TK_FILE)] and lot.tk_tol == 0  # không còn sai số: bỏ qua tkTol của bản cũ
     r = lot.record()
-    assert r["tkDraftFiles"] == [str(TK_FILE)] and r["tkTol"] == 0.5
+    assert r["tkDraftFiles"] == [str(TK_FILE)]
     out = lot.check_tokhai()
     assert any(f["mode"] == "TKCHECK" for f in lot.files) and out["result"]["summary"]["nTK"] == 36
 

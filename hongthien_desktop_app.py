@@ -9534,7 +9534,7 @@ def lot_build_record(store, form, items):
         "updatedAt": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
         "poFiles": [str(x) for x in (form.get("po_files") or []) if x],
         "tkDraftFiles": [str(x) for x in (form.get("tk_files") or []) if x],  # tờ khai nháp đã nạp ở bước ⑤ (bản sao trong thư mục lô)
-        "tkTol": form.get("tk_tol") or 0.01,
+        "tkTol": form.get("tk_tol") or 0.0,
         "workedBy": store.user_name(),  # người làm hồ sơ (tên đặt ở Cài đặt của từng máy)
         "items": [dict(x) for x in items],
         "files": {"po": None, "pxk": None, "vat": None, "pkl": None, "tk": None, "scan": None},
@@ -9777,7 +9777,7 @@ LOT_MODE_LABELS = {
 }
 
 
-def lot_tokhai_check(store, rec, paths, tol=0.01, paste_text=None):
+def lot_tokhai_check(store, rec, paths, tol=0.0, paste_text=None):
     """Bước ⑤: đối chiếu tờ khai nháp ECUS (file Excel/CSV hoặc đoạn dán) với Invoice, Hóa đơn VAT, PXK của lô; ghi
     KiemTraToKhai_<khách>_<ngày>.xlsx vào thư mục lô. Logic ở tokhai_check.py (chép macro ModToKhai). Không nằm trong 'Xuất trọn bộ'."""
     import tokhai_check

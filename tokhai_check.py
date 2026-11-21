@@ -33,7 +33,7 @@ try:  # chữ nhiều màu trong một ô (tô phần tên khác nhau); openpyxl
 except ImportError:  # pragma: no cover
     CellRichText = None
 
-TOL_DEFAULT = 0.01
+TOL_DEFAULT = 0.0  # so khớp tuyệt đối (Huy 21/11: không cho phép sai số); chỉ bỏ nhiễu số thực sau 6 số lẻ
 TK_EXTS = (".xlsx", ".xlsm", ".xls", ".csv")
 NE = "≠"  # ≠
 
@@ -172,6 +172,11 @@ def fmt_short(v):
     """Như Format(v, "#,##0.##"): tối đa 2 số lẻ, bỏ số 0 thừa."""
     s = f"{float(v or 0):,.2f}".rstrip("0").rstrip(".")
     return s or "0"
+
+
+def differs(a, b, tol=0.0):
+    """Hai số khác nhau? Mặc định tuyệt đối (làm tròn 6 số lẻ để bỏ nhiễu số thực: 1.1400000000000001 = 1.14)."""
+    return round(abs(float(a or 0) - float(b or 0)), 6) > tol
 
 
 def append_msg(cur, add):
@@ -464,11 +469,11 @@ def _digits(s):
 def check_row_internal(tk, inv_row, exp_po, tol):
     """Kiểm tra nội bộ một dòng tờ khai (CheckTKRowInternal) + HS so với mã hàng."""
     msg = ""
-    if abs(tk["qty"] * tk["price"] - tk["amount"]) > tol:
+    if differs(tk["qty"] * tk["price"], tk["amount"], tol):
         msg = append_msg(msg, f"SL×ĐG{NE}Trị giá TK")
-    if tk["taxP"] > 0 and abs(tk["price"] - tk["taxP"]) > tol:
+    if tk["taxP"] > 0 and differs(tk["price"], tk["taxP"], tol):
         msg = append_msg(msg, f"ĐG{NE}ĐG tính thuế")
-    if tk["taxV"] > 0 and abs(tk["amount"] - tk["taxV"]) > tol:
+    if tk["taxV"] > 0 and differs(tk["amount"], tk["taxV"], tol):
         msg = append_msg(msg, f"TG{NE}TG tính thuế")
     if not tk["hs"]:
         msg = append_msg(msg, "Thiếu HS Code")
@@ -537,9 +542,7 @@ def bkav_totals(ws, head_row):
 def check_tokhai(core, rec, tk, tol=TOL_DEFAULT, bkav=None):
     """Đối chiếu tờ khai đã đọc (`read_tokhai`) với lô `rec`. `bkav`: {"VAT": tổng, "PXK": tổng} từ `bkav_totals` (tùy chọn).
     Trả {"rows": [...], "header": [...], "summary": {...}}."""
-    tol = float(tol or 0)
-    if tol <= 0:
-        tol = TOL_DEFAULT
+    tol = max(float(tol or 0), 0.0)
     inv = invoice_rows(core, rec)
     used = [False] * len(inv)
     inv_pos = []
@@ -572,7 +575,7 @@ def check_tokhai(core, rec, tk, tol=TOL_DEFAULT, bkav=None):
             used[j] = True
             checks = {"qty": (t["qty"], ir["qty"]), "net": (t["net"], ir["net"]), "price": (t["price"], ir["price"]),
                       "amount": (t["amount"], ir["amount"])}
-            row["bad"] = {k for k, (a, b) in checks.items() if abs(a - b) > tol}
+            row["bad"] = {k for k, (a, b) in checks.items() if differs(a, b, tol)}
             if not name_diff and not row["bad"] and not int_msg:
                 n_ok += 1
                 row["status"] = "KHỚP"
@@ -637,10 +640,10 @@ def header_checks(core, rec, tk, inv_pos, inv_sum, tol, bkav=None):
     amt = sum(h["amount"] for h in hs)
     tax = sum(h["taxAmount"] for h in hs)
     sfx = f" ({len(hs)} tờ khai cộng lại)" if multi else ""
-    ok = pk > 0 and abs(pk - inv_sum["kien"]) <= tol
+    ok = pk > 0 and not differs(pk, inv_sum["kien"], tol)
     add("R40", "Số lượng kiện (PK)", fmt_num(pk) + " PK" + sfx, fmt_num(inv_sum["kien"]) + " PK", ok,
         "Khớp số kiện với Invoice", f"Lệch số kiện (TK={fmt_num(pk)} {NE} INV={fmt_num(inv_sum['kien'])})")
-    ok = gross > 0 and abs(gross - inv_sum["gross"]) <= tol
+    ok = gross > 0 and not differs(gross, inv_sum["gross"], tol)
     add("R41", "Tổng trọng lượng Gross", fmt_num(gross, 2) + " kg" + sfx, fmt_num(inv_sum["gross"], 2) + " kg", ok,
         "Khớp tổng Gross với Invoice",
         f"Chênh lệch {fmt_num(gross - inv_sum['gross'], 2)} kg (TK={fmt_num(gross, 2)} {NE} INV={fmt_num(inv_sum['gross'], 2)})")
@@ -667,10 +670,10 @@ def header_checks(core, rec, tk, inv_pos, inv_sum, tol, bkav=None):
     shown = " | ".join(d or "(trống)" for d in dates)
     add("R51", "Ngày phát hành", shown, doc_vn + " (ngày chứng từ)", ok, "Đúng ngày chứng từ",
         f"Ngày PH ({shown}) {NE} ngày chứng từ ({doc_vn})")
-    ok = amt > 0 and abs(amt - inv_sum["amount"]) <= tol
+    ok = amt > 0 and not differs(amt, inv_sum["amount"], tol)
     add("R53", "Tổng trị giá hóa đơn", fmt_num(amt) + " VND" + sfx, fmt_num(inv_sum["amount"]) + " VND", ok,
         "Khớp tổng thành tiền Invoice", f"Lệch tổng tiền (TK={fmt_num(amt)} {NE} INV={fmt_num(inv_sum['amount'])})")
-    ok = tax > 0 and abs(tax - inv_sum["amount"]) <= tol
+    ok = tax > 0 and not differs(tax, inv_sum["amount"], tol)
     add("R54", "Tổng trị giá tính thuế", fmt_num(tax) + " VND" + sfx, fmt_num(inv_sum["amount"]) + " VND", ok,
         "Khớp tổng thành tiền Invoice", f"Lệch trị giá tính thuế (TK={fmt_num(tax)} {NE} INV={fmt_num(inv_sum['amount'])})")
     notes = [h["note"] for h in hs]
@@ -689,7 +692,7 @@ def header_checks(core, rec, tk, inv_pos, inv_sum, tol, bkav=None):
         b = (bkav or {}).get(key)
         if not b:
             continue
-        ok = abs(b["qty"] - inv_sum["qty"]) <= tol and abs(b["amount"] - inv_sum["amount"]) <= tol
+        ok = not differs(b["qty"], inv_sum["qty"], tol) and not differs(b["amount"], inv_sum["amount"], tol)
         add(tag, title, f"{fmt_num(b['qty'])} SL | {fmt_num(b['amount'])} VND ({b['rows']} dòng)",
             f"{fmt_num(inv_sum['qty'])} SL | {fmt_num(inv_sum['amount'])} VND", ok, "Khớp tổng SL và thành tiền với Invoice",
             f"Lệch với Invoice (SL {fmt_num(b['qty'])} {NE} {fmt_num(inv_sum['qty'])}; tiền {fmt_num(b['amount'])} {NE} {fmt_num(inv_sum['amount'])})")
@@ -782,7 +785,7 @@ def write_ketqua_sheet(ws, rec, result, label=""):
     ws["A3"].font = Font(bold=True)
     ws["C3"] = s["tol"]
     ws["C3"].fill = _fill("FFFF99")
-    ws["D3"] = "(chênh lệch ≤ giá trị này coi là khớp; sửa ô này thì các ô số lệch tự tô lại)"
+    ws["D3"] = "(0 = so khớp tuyệt đối, lệch bao nhiêu cũng báo; ô số lệch tô đỏ theo ô này)"
     ws["D3"].font = Font(italic=True, color="595959")
 
     # --- tóm tắt A5:R8
@@ -940,10 +943,10 @@ def write_ketqua_sheet(ws, rec, result, label=""):
                          ("F", "#,##0.##"), ("L", "#,##0.##"), ("G", "#,##0"), ("M", "#,##0")):
             for r2 in range(first, last + 1):
                 ws[f"{col}{r2}"].number_format = fmt
-        # ô số lệch tô đỏ bằng định dạng có điều kiện theo ô sai số $C$3: sửa sai số hay sửa số trong Excel thì tự tô lại
+        # ô số lệch tô đỏ bằng định dạng có điều kiện theo ô $C$3 (0): sửa số trong Excel thì tự tô lại
         red = PatternFill("solid", start_color=ERR_FILL, end_color=ERR_FILL)
         for a, b in (("D", "J"), ("E", "K"), ("F", "L"), ("G", "M")):
-            f = f"AND(ISNUMBER(${a}{first}),ISNUMBER(${b}{first}),ABS(${a}{first}-${b}{first})>$C$3)"
+            f = f"AND(ISNUMBER(${a}{first}),ISNUMBER(${b}{first}),ROUND(ABS(${a}{first}-${b}{first}),6)>$C$3)"
             ws.conditional_formatting.add(f"{a}{first}:{a}{last}", FormulaRule(formula=[f], fill=red, font=Font(color=ERR_FONT, bold=True)))
             ws.conditional_formatting.add(f"{b}{first}:{b}{last}", FormulaRule(formula=[f], fill=red, font=Font(color=ERR_FONT, bold=True)))
         ws.auto_filter.ref = f"A{hdr_row}:R{last}"

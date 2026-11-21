@@ -33,7 +33,7 @@ class Lot:
         self.skip_h = False  # Kodi: Invoice không lấy cột Thành Tiền
         self.tk_files = []  # bước ⑤: file tờ khai nháp đã nạp (bản sao nằm trong thư mục lô sau lần kiểm tra đầu)
         self.tk_paste = ""  # bước ⑤: tờ khai dán từ clipboard (chưa lưu thành file)
-        self.tk_tol = 0.01
+        self.tk_tol = 0.0  # không cho phép sai số
         self.tk_result = None  # kết quả lần kiểm tra gần nhất (tokhai_check.run_check)
         self.form = {"doc_date": datetime.date.today().strftime("%Y-%m-%d"), "po": "", "po_date": "", "pxk": "", "hd": "", "tk": "", "tk_nhap": ""}
         if customer:
@@ -642,10 +642,7 @@ class Lot:
                     it["read"], it["read_note"] = "ok", ""
         self.exported = {k: v for k, v in (rec.get("files") or {}).items() if v}
         self.tk_files = [p for p in (rec.get("tkDraftFiles") or []) if p and os.path.isfile(p)]
-        try:
-            self.tk_tol = float(rec.get("tkTol") or 0.01)
-        except (TypeError, ValueError):
-            self.tk_tol = 0.01
+        self.tk_tol = 0.0  # so khớp tuyệt đối, bỏ qua tkTol lưu ở bản cũ
         self.files = []
         self.record_id = rec.get("id")
         self.saved = True

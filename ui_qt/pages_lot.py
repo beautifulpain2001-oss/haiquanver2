@@ -1451,15 +1451,7 @@ class TokhaiStep(QWidget):
         lay.addLayout(row)
         self.files_lb = _label("", "hint", wrap=True)
         lay.addWidget(self.files_lb)
-        trow = QHBoxLayout()
-        trow.addWidget(_label("Sai số cho phép:"))
-        self.tol = QLineEdit()
-        self.tol.setFixedWidth(90)
-        self.tol.editingFinished.connect(self.on_tol)
-        trow.addWidget(self.tol)
-        trow.addWidget(_label("(chênh lệch nhỏ hơn hoặc bằng số này coi là khớp)", "hint"))
-        trow.addStretch(1)
-        lay.addLayout(trow)
+        lay.addWidget(_label("So khớp tuyệt đối: lệch dù chỉ 0,01 cũng báo (không có sai số cho phép).", "hint", wrap=True))
         self.check_btn = QPushButton("🔍  Kiểm tra && mở Excel")
         self.check_btn.setObjectName("big")
         self.check_btn.clicked.connect(self.do_check)
@@ -1487,7 +1479,6 @@ class TokhaiStep(QWidget):
         if self.lot.tk_paste.strip():
             names.append(f"đoạn dán ({len(self.lot.tk_paste.splitlines())} dòng)")
         self.files_lb.setText("Tờ khai đã nạp: " + ("; ".join(names) if names else "chưa có"))
-        self.tol.setText(f"{self.lot.tk_tol:g}".replace(".", ","))
         has_tk = bool(names)
         errors, _ = self.lot.validate()
         self.check_btn.setEnabled(has_tk and not errors)
@@ -1500,14 +1491,6 @@ class TokhaiStep(QWidget):
         else:
             self.result.setText(_lines_html(["Chưa kiểm tra. Nạp tờ khai rồi bấm “Kiểm tra & mở Excel”."]))
         self.reopen_btn.setEnabled(bool(res and os.path.exists(res["path"])))
-
-    def on_tol(self):
-        try:
-            v = float(self.tol.text().replace(",", ".").strip() or 0.01)
-        except ValueError:
-            v = 0.01
-        self.lot.tk_tol = v if v > 0 else 0.01
-        self.tol.setText(f"{self.lot.tk_tol:g}".replace(".", ","))
 
     def choose(self, append):
         paths, _ = QFileDialog.getOpenFileNames(self, "Chọn file tờ khai nháp", "", "Tờ khai (*.xlsx *.xlsm *.xls *.csv)")
@@ -1531,7 +1514,6 @@ class TokhaiStep(QWidget):
             self.refresh()
 
     def do_check(self):
-        self.on_tol()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
             res = self.lot.check_tokhai()
