@@ -4159,7 +4159,8 @@ class DedicatedDataStore:
                         plan.append({"customer": cust, "src": path, "dst": target(cust, day, pxk), "date": day, "nguon": src, "loai": "thu_muc"})
                 # file nằm lẻ trong thư mục khách: gom theo ngày
                 try:
-                    loose = [f for f in os.listdir(cdir) if os.path.isfile(os.path.join(cdir, f)) and not f.startswith((".", "~$"))]
+                    loose = [f for f in os.listdir(cdir) if os.path.isfile(os.path.join(cdir, f)) and not f.startswith((".", "~$"))
+                             and not f.startswith(self.KHACH_FILE_PRE)]  # DU_LIEU_<MÃ>.json là file dữ liệu của khách: luôn nằm ngay thư mục khách
                 except OSError:
                     loose = []
                 if loose and any(os.path.isdir(os.path.join(cdir, d)) for d in os.listdir(cdir)):
