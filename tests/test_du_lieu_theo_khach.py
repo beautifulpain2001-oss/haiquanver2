@@ -285,3 +285,14 @@ def test_customs_folder_with_own_records_is_not_redirected_to_parent(tmp_path):
     (own / "hongthien_records.json").write_text("[]", encoding="utf-8")
     b = make_store(own, tmp_path, "b")
     assert os.path.normcase(b.base_dir) == os.path.normcase(str(own))
+
+
+def test_reorganize_never_moves_customer_data_files(data_dir, tmp_path):
+    """'Sắp xếp lại thư mục' (theo ngày) không được đưa DU_LIEU_<MÃ>.json vào thư mục ngày lô."""
+    a = make_store(data_dir, tmp_path, "a")
+    a.save_learned_customer("minhanh", {"name": "CÔNG TY MINH ANH", "label": "Minh Anh"}, [{"name": "Ống A", "code": "A1"}])
+    a.chuyen_doi_thuc_hien()
+    cdir = os.path.dirname(a._khach_path("minhanh"))
+    os.makedirs(os.path.join(cdir, "2026_Thang_11", "2026-11-10"))  # đã có thư mục lô: trước đây file lẻ bị gom vào ngày
+    plan = a.plan_reorganize()
+    assert not any(os.path.basename(it["src"]).startswith("DU_LIEU_") for it in plan)
