@@ -17,7 +17,7 @@ TOKENS = [
     ("khach_ten", "Tên công ty khách"), ("khach_dia_chi", "Địa chỉ khách"), ("khach_mst", "Mã số thuế khách"),
     ("ben_ban_ten", "Tên công ty bên bán (Hồng Thiên)"), ("ben_ban_dia_chi", "Địa chỉ bên bán"), ("ben_ban_mst", "Mã số thuế bên bán"),
     ("so_po", "Số PO"), ("ngay_po", "Ngày PO"), ("so_pxk", "Số phiếu xuất kho"), ("so_hd", "Số hóa đơn VAT"), ("so_tk", "Số tờ khai"),
-    ("ngay", "Ngày chứng từ dd/mm/yyyy"), ("dd", "Ngày (2 số)"), ("mm", "Tháng (2 số)"), ("yyyy", "Năm"),
+    ("ngay", "Ngày chứng từ dd/mm/yyyy"), ("dd", "Ngày (2 số)"), ("mm", "Tháng (2 số)"), ("yyyy", "Năm"), ("yy", "Năm (2 số cuối)"),
     ("tong_sl", "Tổng số lượng"), ("tong_tri_gia", "Tổng trị giá"), ("tong_tri_gia_chu", "Tổng trị giá bằng chữ"), ("tong_kien", "Tổng số kiện"),
     ("tong_net", "Tổng trọng lượng tịnh"), ("tong_gross", "Tổng trọng lượng cả bì"),
     ("ten_hang", "Tên các mặt hàng (nối bằng ; )"), ("ma_hang", "Mã các mặt hàng"), ("hs", "Mã HS các mặt hàng"),
@@ -29,7 +29,7 @@ TOKENS = [
 ]
 ITEM_TOKENS = [
     ("stt", "Số thứ tự"), ("ma", "Mã hàng"), ("ten", "Tên hàng"), ("dvt", "Đơn vị tính"), ("sl", "Số lượng"), ("gia", "Đơn giá"),
-    ("thanh_tien", "Thành tiền"), ("kg", "kg/chiếc"), ("kien", "Số kiện"), ("net", "Trọng lượng tịnh"), ("gross", "Trọng lượng cả bì"), ("hs_dong", "Mã HS"),
+    ("thanh_tien", "Thành tiền"), ("kg", "kg/chiếc"), ("bi", "Bì của dòng (cả bì - tịnh, kg)"), ("kien", "Số kiện"), ("net", "Trọng lượng tịnh"), ("gross", "Trọng lượng cả bì"), ("hs_dong", "Mã HS"),
     ("dvt_hoa", "Đơn vị tính viết hoa chữ đầu"),
     ("quy_cach", "Quy cách 'phi x dày x dài' (VD 114 x 2.5 x 265)"), ("phi", "Đường kính trong (số)"), ("day", "Độ dày (số)"), ("dai", "Chiều dài (số)"),
     ("tc_phi", "Tiêu chuẩn đường kính trong (VD 114±0,5)"), ("tc_day", "Tiêu chuẩn độ dày (VD 2.5±0,2)"), ("tc_dai", "Tiêu chuẩn chiều dài (VD 265±2)"),
@@ -80,7 +80,7 @@ def batch_values(rec, prof, consts):
         "khach_ten": prof.get("name", ""), "khach_dia_chi": prof.get("addr", ""), "khach_mst": prof.get("mst", ""),
         "ben_ban_ten": consts["name"], "ben_ban_dia_chi": consts["addr"].rstrip("."), "ben_ban_mst": consts["mst"],
         "so_po": rec.get("poNumber", ""), "ngay_po": rec.get("poDate") or _po_dates(rec), "so_pxk": rec.get("pxkNo", ""), "so_hd": rec.get("hdNo", ""), "so_tk": rec.get("tkNo", ""),
-        "ngay": d.strftime("%d/%m/%Y"), "dd": d.strftime("%d"), "mm": d.strftime("%m"), "yyyy": d.strftime("%Y"),
+        "ngay": d.strftime("%d/%m/%Y"), "dd": d.strftime("%d"), "mm": d.strftime("%m"), "yyyy": d.strftime("%Y"), "yy": d.strftime("%y"),
         "tong_sl": _dots(num("qty")), "tong_tri_gia": _dots(total), "tong_tri_gia_chu": consts["words"](round(total)),
         "tong_kien": _dots(kien), "sl_kien": sl_kien, "__kien_gop__": bool(consts.get("kien_gop")), "tong_net": _dots(num("net")), "tong_gross": _dots(num("gross")),
         "ten_hang": "; ".join(str(it.get("ten_sp") or "") for it in items), "ma_hang": "; ".join(str(it.get("ma_sp") or "") for it in items),
@@ -137,6 +137,7 @@ def item_values(rec, qc_items=None):
         out.append({"stt": i, "ma": it.get("ma_sp", ""), "ten": it.get("ten_sp", ""), "dvt": it.get("unit", ""), "sl": qty, "gia": price,
                     "thanh_tien": float(it.get("amount") or 0) or qty * price, "kg": float(it.get("kg") or 0), "kien": float(it.get("kien") or 0),
                     "net": float(it.get("net") or 0), "gross": float(it.get("gross") or 0), "hs_dong": it.get("hs", ""),
+                    "bi": round(float(it.get("gross") or 0) - float(it.get("net") or 0), 6),
                     "dvt_hoa": str(it.get("unit") or "")[:1].upper() + str(it.get("unit") or "")[1:]})
         out[-1].update(qc_values(it, (qc_items or {}).get(str(it.get("ma_sp") or ""))))
         if str(it.get("po") or "").strip():  # {{so_po}} nằm trong dòng hàng = số PO của chính dòng đó (lô nhiều PO)
@@ -148,11 +149,20 @@ def _text(v):
     return _dots(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else str(v)
 
 
-def _sub(text, vals, unknown):
+def _formula_num(v):
+    """Số đặt vào công thức Excel: dấu chấm thập phân, không ngăn nghìn (7.79, không phải '7,79')."""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return f"{float(v):.10g}"
+    return str(v)
+
+
+def _sub(text, vals, unknown, formula=None):
+    if formula is None:
+        formula = isinstance(text, str) and text.startswith("=")
     def repl(m):
         k = m.group(1)
         if k in vals:
-            return _text(vals[k])
+            return _formula_num(vals[k]) if formula else _text(vals[k])
         unknown.add(k)
         return m.group(0)
     return _TOKEN.sub(repl, text)

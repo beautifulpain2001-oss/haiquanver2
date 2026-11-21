@@ -354,6 +354,7 @@ CUSTOMER_FIELDS = [
     ("bkavId", "Mã chứng từ Bkav IDChungTu (vd deli{dd}/{mm} hd; trống = mã khách + ngày.tháng)"),
     ("bkavIdPxk", "Mã IDChungTu riêng cho Phiếu xuất kho Bkav (vd HSMT {d}.{m}; trống = dùng mã của hóa đơn VAT)"),
     ("shareItems", "Dùng chung danh mục mã hàng với khách khác (nhập mã khách, vd delihd; Deli Hải Dương / Bắc Ninh tự dùng chung)"),
+    ("lyDoXuat", "Lý do xuất kho trên PXK Bkav, ghi kèm tên khách (vd Xuất chuyển kho cho; trống = Xuất chuyển kho)"),
     ("fixedItem", "Mã hàng cố định (khách chỉ đặt 1 mã: không đọc PO, chỉ xác nhận số PO, SL, giá)"),
     ("note", "Lưu ý đặc thù khi làm chứng từ (hiện ở trang Khách hàng và nhắc ở bước xuất)"),
 ]
@@ -2140,7 +2141,10 @@ class DedicatedDataStore:
         """Mục data tổng của một khách (đã nạp vào bộ nhớ đệm, xóa khi dữ liệu đổi)."""
         if cust_key not in self._dt_cache:
             prof = PROFILES.get(cust_key) or {}
-            self._dt_cache[cust_key] = [x for x in self.data_tong if self._khach_match(prof, x.get("khach")) or self._khach_match(prof, x.get("khach_day_du"))]
+            rows = [x for x in self.data_tong if self._khach_match(prof, x.get("khach")) or self._khach_match(prof, x.get("khach_day_du"))]
+            if not uses_erp(prof):  # khách không dùng ERP (Anyone): bỏ mục nạp từ ERP, chỉ giữ số học từ invoice / nhập tay
+                rows = [x for x in rows if x.get("kg_nguon") in ("invoice", "tay") or x.get("kien_nguon") in ("invoice", "tay")]
+            self._dt_cache[cust_key] = rows
         return self._dt_cache[cust_key]
 
     _CODE_FIELDS = ("ma_hang", "ma_erp", "ma_kh")
@@ -5368,7 +5372,7 @@ def build_pxk_bkav_sheet(wb, rec, sheet_name="PXK_BKAV"):
             14: dt_vn,
             15: HT_NAME,
             16: f"{prof['veViec']} {prof['name']}".strip(),
-            17: "Xuất chuyển kho",
+            17: f"{prof['lyDoXuat']} {prof['name']}".strip() if str(prof.get("lyDoXuat") or "").strip() else "Xuất chuyển kho",  # Anyone: 'Xuất chuyển kho cho <khách>'
             18: drv,
             19: prof["carrier"],
             21: f"Ô tô tải:{xe}",
@@ -7379,7 +7383,7 @@ def hd_cell(hd_no, col, first_row, row):
 def build_dccn_best_sheet(wb, rec, sheet_name="DCCN"):
     """对账单 Đối Chiếu Công Nợ: mỗi dòng hàng một dòng, hạn thanh toán = ngày hóa đơn + số ngày."""
     tpl = best_template(PROFILES[rec["customer"]], "dccn")
-    if not tpl and is_able(PROFILES[rec["customer"]]) and mau_chung_tu:
+    if not tpl and is_dccn_month(PROFILES[rec["customer"]]) and mau_chung_tu:
         import mau_able_dccn
         tpl = mau_able_dccn.template_path()  # Able: mẫu đối chiếu công nợ đúng nguyên bản khách đưa (khách nạp mẫu riêng thì mẫu đó thắng)
     if tpl:
@@ -9117,6 +9121,16 @@ def is_able(prof):
     return (prof or {}).get("poStyle") == "able" or bool(re.search(r"\bABLE\b", str((prof or {}).get("name") or "").upper()))
 
 
+def is_dccn_month(prof):
+    """Bảng đối chiếu công nợ CẢ THÁNG theo mẫu tiếng Việt (mẫu Able): Able, hoặc khách có dccnStyle = thang (VD Anyone)."""
+    return is_able(prof) or (prof or {}).get("dccnStyle") == "thang"
+
+
+def uses_erp(prof):
+    """Khách có dùng dữ liệu ERP không. noErp (VD Anyone): mã/tên/kg chỉ lấy từ chứng từ và danh mục khách, không lấy từ ERP."""
+    return not (prof or {}).get("noErp")
+
+
 def parse_able_po_rows(text, catalog_items):
     """PO Able: mỗi dòng có tên (gam: 250g), quy cách (38*5*460), SL, đơn giá, thành tiền, mã tham chiếu 2026-2350-020.
     Chỉ cần gam + quy cách + SL: tra mã Able theo 'phi*dày*dài*gam'; có chữ 印刷 (in) thì lấy mã 'in', không có thì mã '-ko-in' nếu có.
@@ -9736,7 +9750,7 @@ def lot_mode_workbook(store, rec, mode, skip_h=False):
         build_pgh_best_sheet(wb, rec, f"PGH_{s_key}")
         fname = f"PhieuGiaoHang_{rec['customer']}_{s_key}.xlsx"
     elif mode == "DCCN":
-        build_dccn_best_sheet(wb, dict(rec, bdcRows=bdc_month_rows(store, rec)) if is_able(PROFILES[rec["customer"]]) else rec, f"DCCN_{s_key}")
+        build_dccn_best_sheet(wb, dict(rec, bdcRows=bdc_month_rows(store, rec)) if is_dccn_month(PROFILES[rec["customer"]]) else rec, f"DCCN_{s_key}")
         fname = f"DoiChieuCongNo_{rec['customer']}_{s_key}.xlsx"
     elif mode == "CHECK":
         problems = check_lot(rec)
@@ -10238,7 +10252,7 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
             po_no = labelled  # số PO ghi sau nhãn 'mã PO' / '采购订单编号'; mẫu nhận dạng đã học không khớp thì không tin số đoán được
         if dated_rows:  # PO chữ Hán: tra tên/mã theo mã liệu + quy cách trong danh mục khách rồi danh mục ERP
             cat = store.items_for_customer(customer)
-            resolved = [resolve_po_item(r, cat, store.erp_catalog) for r in dated_rows]
+            resolved = [resolve_po_item(r, cat, store.erp_catalog if uses_erp(prof) else None) for r in dated_rows]
             rows2 = [{"code": rv["code"] or r["code"], "desc": rv["name"] or r["desc"], "qty": r["qty"], "price": r["price"], "ship": r["ship"], "_known": rv["item"] or {}}
                      for r, rv in zip(dated_rows, resolved)]
             lines = lines_from_erp_rows(rows2, po_no, prof, cat, data_store=store, tare_val=tare_v)
@@ -10418,6 +10432,8 @@ def lot_erp_info(store, customer, item):
     """Dữ liệu ERP của một dòng hàng, chỉ để xem đối chiếu (nút "Hiện dữ liệu ERP" ở bước kiểm tra dòng): {ma_erp, ten_erp, ten_kh, kg}.
     Số khai hải quan trên dòng vẫn theo invoice/danh mục khách; hàm này không đổi dòng. {} nếu không có dữ liệu ERP."""
     code = str((item or {}).get("ma_sp") or "").strip()
+    if not uses_erp(PROFILES.get(customer)):
+        return {}
     try:
         info = dict(store.dt_erp_info(customer, code)) if code else {}
     except Exception:  # noqa: BLE001 - Data tổng chưa nạp/hỏng: chỉ dùng thông tin đã gắn trên dòng
