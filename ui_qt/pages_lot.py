@@ -1,4 +1,5 @@
-"""Trang "Làm chứng từ": 5 bước ① Chọn khách hàng → ② Nạp file PO → ③ Kiểm tra dòng hàng → ④ Thông tin chuyến hàng → ⑤ Xuất & lưu."""
+"""Trang "Làm chứng từ": 5 bước ① Chọn khách hàng → ② Nạp file PO → ③ Kiểm tra dòng hàng → ④ Thông tin chuyến & xuất hồ sơ
+→ ⑤ Kiểm tra tờ khai (đối chiếu tờ khai nháp ECUS với Invoice, Hóa đơn VAT, PXK)."""
 
 import html
 
@@ -16,7 +17,7 @@ from .dialogs import ItemDialog, LookupDialog, PickNumbersDialog
 from .po_viewer import PoStack
 from .state import Lot
 
-STEPS = ["① Chọn khách hàng", "② Nạp file PO", "③ Kiểm tra dòng hàng", "④ Thông tin chuyến & xuất hồ sơ"]
+STEPS = ["① Chọn khách hàng", "② Nạp file PO", "③ Kiểm tra dòng hàng", "④ Thông tin chuyến & xuất hồ sơ", "⑤ Kiểm tra tờ khai"]
 def _label(text, name=None, wrap=False):
     lb = QLabel(text)
     if name:
@@ -35,7 +36,7 @@ def _inner(layout_cls=QVBoxLayout, margins=(28, 24, 28, 24), spacing=12):
 
 
 class StepBar(QWidget):
-    """Thanh tiến trình 4 bước; bước đã qua màu xanh, bước hiện tại tô đậm."""
+    """Thanh tiến trình các bước; bước đã qua màu xanh, bước hiện tại tô đậm."""
 
     def __init__(self):
         super().__init__()
@@ -1381,7 +1382,187 @@ class FinishStep(QWidget):
         self.export.refresh()
 
 
-# --------------------------------------------------------------------------- trang chứa 4 bước
+# --------------------------------------------------------------------------- ⑤ kiểm tra tờ khai
+class PasteDialog(QDialog):
+    """Ô dán tờ khai đã copy (chọn vùng ô trên Excel/ECUS rồi Ctrl+C)."""
+
+    def __init__(self, parent=None, text=""):
+        super().__init__(parent)
+        self.setWindowTitle("Dán tờ khai đã copy")
+        self.resize(760, 480)
+        lay = QVBoxLayout(self)
+        lay.addWidget(_label("Mở tờ khai nháp (bản In thử) trong Excel, chọn hết các ô (Ctrl+A), Ctrl+C rồi dán vào ô dưới (Ctrl+V).", "hint", wrap=True))
+        from PySide6.QtWidgets import QPlainTextEdit
+        self.box = QPlainTextEdit()
+        self.box.setPlainText(text)
+        lay.addWidget(self.box, 1)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        ok = QPushButton("Dùng đoạn này")
+        ok.clicked.connect(self.accept)
+        cancel = QPushButton("Hủy")
+        cancel.setObjectName("sec")
+        cancel.clicked.connect(self.reject)
+        row.addWidget(cancel)
+        row.addWidget(ok)
+        lay.addLayout(row)
+
+    def text(self):
+        return self.box.toPlainText()
+
+
+class TokhaiStep(QWidget):
+    """Bước ⑤: nạp tờ khai nháp ECUS, đối chiếu với Invoice / Hóa đơn VAT / PXK của lô, mở file Excel kết quả."""
+
+    def __init__(self, lot: Lot):
+        super().__init__()
+        self.setObjectName("inner")
+        self.lot = lot
+        self.setAcceptDrops(True)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.scroll = scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QFrame.NoFrame)
+        content = QWidget()
+        content.setObjectName("inner")
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
+        lay = QVBoxLayout(content)
+        lay.setContentsMargins(28, 20, 28, 20)
+        lay.setSpacing(10)
+        lay.addWidget(_label("Kiểm tra tờ khai nháp với Invoice, Hóa đơn VAT và Phiếu xuất kho", "h2"))
+        lay.addWidget(_label("Xuất tờ khai nháp (bản “In thử”) từ ECUS ra Excel rồi chọn file ở đây, hoặc kéo thả file vào trang này. "
+                             "Lô trên 50 dòng chia nhiều tờ khai thì chọn cùng lúc các file.", "hint", wrap=True))
+        row = QHBoxLayout()
+        self.pick_btn = QPushButton("📄  Chọn file tờ khai nháp…")
+        self.pick_btn.setObjectName("sec")
+        self.pick_btn.clicked.connect(lambda: self.choose(False))
+        self.add_btn = QPushButton("➕  Thêm tờ khai")
+        self.add_btn.setObjectName("sec")
+        self.add_btn.clicked.connect(lambda: self.choose(True))
+        self.paste_btn = QPushButton("📋  Dán tờ khai đã copy")
+        self.paste_btn.setObjectName("sec")
+        self.paste_btn.clicked.connect(self.paste)
+        for b in (self.pick_btn, self.add_btn, self.paste_btn):
+            row.addWidget(b)
+        row.addStretch(1)
+        lay.addLayout(row)
+        self.files_lb = _label("", "hint", wrap=True)
+        lay.addWidget(self.files_lb)
+        trow = QHBoxLayout()
+        trow.addWidget(_label("Sai số cho phép:"))
+        self.tol = QLineEdit()
+        self.tol.setFixedWidth(90)
+        self.tol.editingFinished.connect(self.on_tol)
+        trow.addWidget(self.tol)
+        trow.addWidget(_label("(chênh lệch nhỏ hơn hoặc bằng số này coi là khớp)", "hint"))
+        trow.addStretch(1)
+        lay.addLayout(trow)
+        self.check_btn = QPushButton("🔍  Kiểm tra && mở Excel")
+        self.check_btn.setObjectName("big")
+        self.check_btn.clicked.connect(self.do_check)
+        lay.addWidget(self.check_btn)
+        lay.addWidget(_label("Kết quả", "h2"))
+        self.result = _text_card(lay)
+        brow = QHBoxLayout()
+        self.reopen_btn = QPushButton("📊  Mở lại file kiểm tra")
+        self.reopen_btn.setObjectName("sec")
+        self.reopen_btn.clicked.connect(self.reopen)
+        self.dir_btn = QPushButton("📁  Mở thư mục lô")
+        self.dir_btn.setObjectName("sec")
+        self.dir_btn.clicked.connect(lambda: widgets.open_folder(self.lot.folder()))
+        brow.addWidget(self.reopen_btn)
+        brow.addWidget(self.dir_btn)
+        brow.addStretch(1)
+        lay.addLayout(brow)
+        self.msg = _label("", "hint", wrap=True)
+        lay.addWidget(self.msg)
+        lay.addStretch(1)
+
+    def refresh(self):
+        import os
+        names = [os.path.basename(p) for p in self.lot.tk_files]
+        if self.lot.tk_paste.strip():
+            names.append(f"đoạn dán ({len(self.lot.tk_paste.splitlines())} dòng)")
+        self.files_lb.setText("Tờ khai đã nạp: " + ("; ".join(names) if names else "chưa có"))
+        self.tol.setText(f"{self.lot.tk_tol:g}".replace(".", ","))
+        has_tk = bool(names)
+        errors, _ = self.lot.validate()
+        self.check_btn.setEnabled(has_tk and not errors)
+        self.add_btn.setEnabled(bool(self.lot.tk_files))
+        res = self.lot.tk_result
+        if res:
+            self.result.setText(_lines_html(res["lines"]))
+        elif errors:
+            self.result.setText(_lines_html(["❌  " + t for t in errors]))
+        else:
+            self.result.setText(_lines_html(["Chưa kiểm tra. Nạp tờ khai rồi bấm “Kiểm tra & mở Excel”."]))
+        self.reopen_btn.setEnabled(bool(res and os.path.exists(res["path"])))
+
+    def on_tol(self):
+        try:
+            v = float(self.tol.text().replace(",", ".").strip() or 0.01)
+        except ValueError:
+            v = 0.01
+        self.lot.tk_tol = v if v > 0 else 0.01
+        self.tol.setText(f"{self.lot.tk_tol:g}".replace(".", ","))
+
+    def choose(self, append):
+        paths, _ = QFileDialog.getOpenFileNames(self, "Chọn file tờ khai nháp", "", "Tờ khai (*.xlsx *.xlsm *.xls *.csv)")
+        if paths:
+            self.load(paths, append)
+
+    def load(self, paths, append=False):
+        try:
+            self.lot.set_tokhai_files(paths, append)
+        except ValueError as e:
+            widgets.warn(self, "Chưa nạp được", str(e))
+            return
+        self.msg.setText("")
+        self.refresh()
+
+    def paste(self):
+        dlg = PasteDialog(self, self.lot.tk_paste)
+        if dlg.exec() == QDialog.Accepted and dlg.text().strip():
+            self.lot.set_tokhai_paste(dlg.text())
+            self.msg.setText("")
+            self.refresh()
+
+    def do_check(self):
+        self.on_tol()
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            res = self.lot.check_tokhai()
+        except ValueError as e:
+            widgets.warn(self, "Chưa kiểm tra được", str(e))
+            return
+        except Exception as e:  # noqa: BLE001
+            widgets.warn(self, "Lỗi khi kiểm tra tờ khai", f"{e}\n\nChi tiết đã ghi vào LOI_PHAN_MEM.txt cạnh phần mềm.")
+            raise
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.refresh()
+        note = " File kiểm tra cũ đang mở trong Excel nên đã ghi bản mới." if res.get("renamed") else ""
+        self.msg.setText(f"Đã ghi {res['fname']} vào thư mục lô.{note}")
+        widgets.open_file(res["path"])
+
+    def reopen(self):
+        if self.lot.tk_result:
+            widgets.open_file(self.lot.tk_result["path"])
+
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasUrls():
+            e.acceptProposedAction()
+
+    def dropEvent(self, e):
+        paths = [u.toLocalFile() for u in e.mimeData().urls() if u.toLocalFile()]
+        if paths:
+            self.load(paths, append=bool(self.lot.tk_files))
+
+
+# --------------------------------------------------------------------------- trang chứa 5 bước
 class LotPage(QWidget):
     saved = Signal()
 
@@ -1404,12 +1585,14 @@ class LotPage(QWidget):
         self.step4 = InfoStep(self.lot)
         self.step5 = ExportStep(self.lot)
         self.finish = FinishStep(self.step4, self.step5)
-        self.steps = [self.step1, self.step2, self.step3, self.finish]
+        self.step6 = TokhaiStep(self.lot)
+        self.steps = [self.step1, self.step2, self.step3, self.finish, self.step6]
         for s in self.steps:
             self.stack.addWidget(s)
         self.step1.changed.connect(self.refresh_buttons)
         self.step2.changed.connect(self.refresh_buttons)
         self.step2.changed.connect(lambda: setattr(self.step3, "viewer_closed_by_user", False))  # PO mới: mở lại khung xem nếu có dòng cần soát
+        self.step4.changed.connect(self.refresh_buttons)
         self.step5.saved.connect(self.saved)
         self.step5.new_lot.connect(self.start_new)
         nav = QHBoxLayout()
@@ -1439,6 +1622,8 @@ class LotPage(QWidget):
         # Bước ① phải chọn khách rồi mới đi tiếp
         ok = idx < len(STEPS) - 1 and (idx > 0 or self.lot.customer is not None)
         if idx == 1 and self.lot.ncu_blockers():  # Shirai: đủ tên theo khách hàng và nhà cung ứng rồi mới sang bước ③
+            ok = False
+        if idx == 3 and self.lot.validate()[0]:  # bước ⑤ cần lô đã đủ để xuất chứng từ
             ok = False
         self.next.setEnabled(ok)
 

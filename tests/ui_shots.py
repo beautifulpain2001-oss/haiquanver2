@@ -61,8 +61,8 @@ def load_kodi_po(win, app, workdir):
 
 
 def view_names(mw):
-    """Tên các màn hình cần kiểm: 4 bước Làm chứng từ rồi các trang còn lại."""
-    names = ["lam_chung_tu_b1", "lam_chung_tu_b2", "lam_chung_tu_b3", "lam_chung_tu_b4"]
+    """Tên các màn hình cần kiểm: 5 bước Làm chứng từ rồi các trang còn lại."""
+    names = ["lam_chung_tu_b1", "lam_chung_tu_b2", "lam_chung_tu_b3", "lam_chung_tu_b4", "lam_chung_tu_b5"]
     for i in range(1, len(mw.NAV)):
         names.append(f"trang_{i + 1}")
     return names

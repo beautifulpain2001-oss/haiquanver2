@@ -31,6 +31,10 @@ class Lot:
         self.files = []  # mọi file đã xuất trong lô này, để hiển thị
         self.saved = False
         self.skip_h = False  # Kodi: Invoice không lấy cột Thành Tiền
+        self.tk_files = []  # bước ⑤: file tờ khai nháp đã nạp (bản sao nằm trong thư mục lô sau lần kiểm tra đầu)
+        self.tk_paste = ""  # bước ⑤: tờ khai dán từ clipboard (chưa lưu thành file)
+        self.tk_tol = 0.01
+        self.tk_result = None  # kết quả lần kiểm tra gần nhất (tokhai_check.run_check)
         self.form = {"doc_date": datetime.date.today().strftime("%Y-%m-%d"), "po": "", "po_date": "", "pxk": "", "hd": "", "tk": "", "tk_nhap": ""}
         if customer:
             self.apply_defaults()
@@ -493,7 +497,8 @@ class Lot:
         self.core.lot_fix_code_names(self.store, self.customer, self.items)  # dòng đã đọc từ bản cũ có tên = mã: sửa trước khi xuất
         self.normalize()
         self.core.lot_recalc(self.items, self.customer, self.form.get("tare", ""))  # cả bì = tịnh + bì cộng thêm mỗi dòng đang nhập ở bước ④, cho mọi invoice
-        form = dict(self.form, customer=self.customer, schedule="", po_dates=self.po_dates, record_id=self.record_id, po_files=self.po_files)
+        form = dict(self.form, customer=self.customer, schedule="", po_dates=self.po_dates, record_id=self.record_id, po_files=self.po_files,
+                    tk_files=self.tk_files, tk_tol=self.tk_tol)
         return self.core.lot_build_record(self.store, form, self.items)
 
     def totals(self):
@@ -576,6 +581,39 @@ class Lot:
         one = {"mode": mode, "label": self.core.lot_mode_label(mode), "name": res["fname"], "path": res["path"]}
         return {"files": [one], "problems": res["problems"], "dsh": res["dsh"]}
 
+    # ---- bước ⑤: kiểm tra tờ khai nháp ----------------------------------------
+    def set_tokhai_files(self, paths, append=False):
+        ok = [p for p in paths if str(p).lower().endswith((".xlsx", ".xlsm", ".xls", ".csv"))]
+        if not ok:
+            raise ValueError("File tờ khai phải là Excel (.xlsx, .xlsm, .xls) hoặc CSV.")
+        base = self.tk_files if append else []
+        self.tk_files = base + [p for p in ok if p not in base]
+        if not append:
+            self.tk_paste = ""
+        self.tk_result = None
+        self.saved = False
+
+    def set_tokhai_paste(self, text):
+        self.tk_paste = str(text or "")
+        self.tk_files = []
+        self.tk_result = None
+        self.saved = False
+
+    def clear_tokhai(self):
+        self.tk_files, self.tk_paste, self.tk_result = [], "", None
+
+    def check_tokhai(self):
+        """Đối chiếu tờ khai nháp với chứng từ của lô, ghi file KiemTraToKhai_... vào thư mục lô. Trả kết quả của core."""
+        rec = self.record()
+        old_dir = os.path.dirname(self.files[0]["path"]) if self.files else ""
+        res = self.core.lot_tokhai_check(self.store, rec, list(self.tk_files), self.tk_tol, self.tk_paste or None)
+        if old_dir and os.path.dirname(res["path"]) != old_dir:
+            self._repoint(old_dir, os.path.dirname(res["path"]))
+        self.tk_files, self.tk_paste = list(res["tkFiles"]), ""  # từ giờ dùng bản sao trong thư mục lô (đoạn dán đã lưu thành CSV)
+        self.tk_result = res
+        self._note_file("TKCHECK", res["fname"], res["path"], datetime.datetime.now().strftime("%d/%m/%Y %H:%M"))
+        return res
+
     def save(self):
         rec = self.core.lot_save_new(self.store, self.record(), self.exported)
         self.record_id = rec["id"]
@@ -603,6 +641,11 @@ class Lot:
                         and float(it.get("qty") or 0) > 0 and float(it.get("price") or 0) > 0:
                     it["read"], it["read_note"] = "ok", ""
         self.exported = {k: v for k, v in (rec.get("files") or {}).items() if v}
+        self.tk_files = [p for p in (rec.get("tkDraftFiles") or []) if p and os.path.isfile(p)]
+        try:
+            self.tk_tol = float(rec.get("tkTol") or 0.01)
+        except (TypeError, ValueError):
+            self.tk_tol = 0.01
         self.files = []
         self.record_id = rec.get("id")
         self.saved = True

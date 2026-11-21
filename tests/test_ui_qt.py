@@ -102,7 +102,7 @@ def test_settings_migrate_to_one_file_per_customer_and_undo(win, store, monkeypa
 
 def test_step_bar_and_buttons(win):
     lot = win.lot
-    assert len(lot.bar.labels) == 4 and lot.bar.current == 0 and not lot.back.isEnabled()
+    assert len(lot.bar.labels) == 5 and lot.bar.current == 0 and not lot.back.isEnabled()
     assert not lot.next.isEnabled()  # chưa chọn khách thì chưa đi tiếp
     lot.step1.cards["kodi"].click()
     assert lot.step1.customer == "kodi" and lot.next.isEnabled()
@@ -111,9 +111,9 @@ def test_step_bar_and_buttons(win):
     lot.next.click()
     lot.next.click()
     assert lot.bar.current == 3 and lot.stack.currentIndex() == 3 and not lot.next.isEnabled()  # thông tin chuyến và xuất hồ sơ chung một bước
-    assert [lb.property("step") for lb in lot.bar.labels] == ["done", "done", "done", "current"]
+    assert [lb.property("step") for lb in lot.bar.labels] == ["done", "done", "done", "current", "todo"]  # lô chưa có dòng hàng: chưa sang ⑤
     lot.go(99)
-    assert lot.bar.current == 3
+    assert lot.bar.current == 4 and lot.stack.currentWidget() is lot.step6 and not lot.next.isEnabled()  # ⑤ kiểm tra tờ khai là bước cuối
     lot.go(-5)
     assert lot.bar.current == 0 and not lot.back.isEnabled()
 
@@ -226,7 +226,7 @@ def test_info_step_edits_flow_into_record(win, tmp_path):
 def test_export_all_then_save_then_reopen(win, tmp_path, store):
     load_kodi_po(win, tmp_path)
     win.lot.lot.form.update(pxk="0000777", hd="0000888")
-    win.lot.go(4)
+    win.lot.go(3)
     step = win.lot.step5
     assert step.big.isEnabled()
     step.do_export("ALL")
@@ -241,16 +241,39 @@ def test_export_all_then_save_then_reopen(win, tmp_path, store):
     assert win.nav.currentRow() == 0 and win.lot.bar.current == 2 and win.lot.lot.form["pxk"] == "0000777"
 
 
+def test_tokhai_step_checks_and_opens_excel(win, tmp_path, store, monkeypatch):
+    """Bước ⑤: lô Kodi đủ dòng hàng thì sang được ⑤; nạp tờ khai, bấm kiểm tra: ghi file vào thư mục lô và mở bằng Excel."""
+    from pathlib import Path
+    load_kodi_po(win, tmp_path)
+    win.lot.lot.form.update(pxk="0000777")
+    win.lot.go(3)
+    assert win.lot.next.isEnabled()
+    win.lot.next.click()
+    step = win.lot.step6
+    assert win.lot.bar.current == 4 and not step.check_btn.isEnabled()  # chưa có tờ khai
+    opened = []
+    monkeypatch.setattr(widgets, "open_file", lambda p: opened.append(p) or True)
+    tk = Path(__file__).parent / "fixtures" / "tokhai_nhap_shirai_mau.xlsx"
+    step.load([str(tk)])
+    assert step.check_btn.isEnabled() and "tokhai_nhap_shirai_mau.xlsx" in step.files_lb.text()
+    step.do_check()
+    res = win.lot.lot.tk_result
+    assert opened == [res["path"]] and os.path.basename(res["path"]).startswith("KiemTraToKhai_kodi_")
+    assert "THIẾU TRÊN INV" in " ".join(res["lines"]) or res["lines"][0].startswith("❌")  # tờ khai Shirai không khớp lô Kodi
+    assert any(f["mode"] == "TKCHECK" for f in win.lot.lot.files)
+    assert win.lot.lot.tk_files and os.path.basename(win.lot.lot.tk_files[0]).startswith("ToKhaiNhap_kodi_")
+
+
 def test_export_blocked_without_items(win):
     win.lot.step1.cards["kodi"].click()
-    win.lot.go(4)
+    win.lot.go(3)
     assert not win.lot.step5.big.isEnabled()
     assert "Chưa có dòng hàng" in win.lot.step5.check_lines[0]
 
 
 def test_new_lot_resets(win, tmp_path):
     load_kodi_po(win, tmp_path)
-    win.lot.go(4)
+    win.lot.go(3)
     win.lot.step5.on_new()
     assert win.lot.lot.customer is None and win.lot.bar.current == 0 and not win.lot.next.isEnabled()
 
@@ -261,7 +284,7 @@ def test_check_text_is_wrapped_and_complete(win, tmp_path):
     long_name = "Ống lõi giấy phi 33.02 x 2.65 x 1750mm_51036 blue red (39817-91750-00)- FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013123)" * 2
     lot.items[0]["ten_sp"] = long_name
     lot.items[0]["kg"] = 0
-    win.lot.go(4)
+    win.lot.go(3)
     step = win.lot.step5
     assert step.checks.wordWrap()  # tự xuống dòng thay vì cắt chữ
     assert any("TAH-COC-013123" in t for t in step.check_lines)  # hiện đủ tên hàng dài
@@ -270,7 +293,7 @@ def test_check_text_is_wrapped_and_complete(win, tmp_path):
 
 def test_export_shows_each_file_in_done_list(win, tmp_path):
     load_kodi_po(win, tmp_path)
-    win.lot.go(4)
+    win.lot.go(3)
     win.lot.step5.do_export("ALL")
     text = " ".join(win.lot.step5.done_lines)
     for label in ("Hóa đơn VAT", "Phiếu xuất kho", "Đề nghị thanh toán", "Kiểm tra chéo"):
@@ -442,7 +465,7 @@ def test_catalog_and_customer_pages_list_data(win):
 def test_export_files_land_in_customs_customer_month_day_folder(win, tmp_path, store):
     load_kodi_po(win, tmp_path)
     win.lot.lot.form["doc_date"] = "2026-11-01"
-    win.lot.go(4)
+    win.lot.go(3)
     win.lot.step5.do_export("ALL")
     day = os.path.join(store.base_dir, "HAI_QUAN", "Kodi", "2026_Thang_11", "2026-11-01")
     files = [f for f in win.lot.lot.files]
@@ -452,7 +475,7 @@ def test_export_files_land_in_customs_customer_month_day_folder(win, tmp_path, s
     assert not os.path.exists(os.path.join(day, "DO_PHAN_MEM_TAO"))
     assert os.listdir(os.path.join(store.base_dir, "HAI_QUAN", "Kodi")) == ["2026_Thang_11"]
     win.lot.step5.do_save()
-    win.lot.go(4)
+    win.lot.go(3)
     win.lot.step5.do_export("VAT")  # xuất lại cùng lô: vẫn cùng thư mục, không tạo thêm
     assert os.listdir(os.path.join(store.base_dir, "HAI_QUAN", "Kodi", "2026_Thang_11")) == ["2026-11-01"]
     rec = next(r for r in store.records if r["customer"] == "kodi" and r["poNumber"] == "03102026-01KDHT" and r["docDate"] == "2026-11-01")

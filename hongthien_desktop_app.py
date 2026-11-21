@@ -3569,6 +3569,7 @@ class DedicatedDataStore:
     MADE_PREFIXES = (("invoice_", "Invoice (Excel)"), ("DongGoi_", "Đóng gói (Excel)"), ("Hoa_Don_VAT", "Hóa đơn Bkav (Excel)"), ("PXK_", "PXK Bkav (Excel)"),
                      ("ToKhai_B11", "Dữ liệu tờ khai B11"), ("PhieuGiaoHang", "Phiếu giao hàng"), ("DoiChieuCongNo", "Đối chiếu công nợ"),
                      ("DNTT", "Đề nghị thanh toán"), ("dsh_", "Danh sách hàng ECUS (Excel)"), ("KiemTraCheo", "Kiểm tra chéo"),
+                     ("KiemTraToKhai", "Kiểm tra tờ khai"), ("ToKhaiNhap_", "Tờ khai nháp ECUS"),
                      ("Bo_Ho_So_Xuat_Hang", "Bộ hồ sơ"), ("00_HO_SO_", "Hồ sơ lưu"), ("PLX_", "PLX (Excel)"), ("SO_", "Đơn đặt hàng"), ("PO_goc_", "PO gốc"), ("BienBanBanGiao", "Biên bản bàn giao"), ("DonDatHang", "Đơn đặt hàng (PO)"), ("dccn", "Đối chiếu công nợ"))
     MODE_TO_MADE = {"PKL": "Invoice (Excel)", "PACK": "Đóng gói (Excel)", "VAT": "Hóa đơn Bkav (Excel)", "PXK": "PXK Bkav (Excel)",
                     "PGH": "Phiếu giao hàng", "DCCN": "Đối chiếu công nợ", "DNTT": "Đề nghị thanh toán", "PLX": "PLX (Excel)", "SO": "Đơn đặt hàng",
@@ -9532,6 +9533,8 @@ def lot_build_record(store, form, items):
         "totalKien": tot_kien,
         "updatedAt": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
         "poFiles": [str(x) for x in (form.get("po_files") or []) if x],
+        "tkDraftFiles": [str(x) for x in (form.get("tk_files") or []) if x],  # tờ khai nháp đã nạp ở bước ⑤ (bản sao trong thư mục lô)
+        "tkTol": form.get("tk_tol") or 0.01,
         "workedBy": store.user_name(),  # người làm hồ sơ (tên đặt ở Cài đặt của từng máy)
         "items": [dict(x) for x in items],
         "files": {"po": None, "pxk": None, "vat": None, "pkl": None, "tk": None, "scan": None},
@@ -9770,7 +9773,15 @@ LOT_MODE_LABELS = {
     "PLX": "Phụ lục X", "PGH": "Phiếu giao hàng", "DCCN": "Đối chiếu công nợ", "DNTT": "Đề nghị thanh toán",
     "CHECK": "Kiểm tra chéo", "BBGH": "Biên bản bàn giao", "PO": "Đơn đặt hàng (PO)",
     "BDC": "Bảng đối chiếu hàng hóa", "SC": "Sale Contract 销售合同", "M22": "Mẫu số 22 (nhập khẩu tại chỗ)", "BKLS": "Bảng kê lâm sản (pallet)",
+    "TKCHECK": "Kiểm tra tờ khai",
 }
+
+
+def lot_tokhai_check(store, rec, paths, tol=0.01, paste_text=None):
+    """Bước ⑤: đối chiếu tờ khai nháp ECUS (file Excel/CSV hoặc đoạn dán) với Invoice, Hóa đơn VAT, PXK của lô; ghi
+    KiemTraToKhai_<khách>_<ngày>.xlsx vào thư mục lô. Logic ở tokhai_check.py (chép macro ModToKhai). Không nằm trong 'Xuất trọn bộ'."""
+    import tokhai_check
+    return tokhai_check.run_check(sys.modules[__name__], store, rec, paths, tol, paste_text)
 
 
 def lot_bundle_modes(rec):

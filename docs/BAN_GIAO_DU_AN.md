@@ -401,6 +401,7 @@ PO của Best (PDF scan hoặc PDF xuất từ ERP; có Item Code, Spec, SL, gi�
 | #10 | 01/11 | Đọc PO PDF có lớp chữ (xuất từ ERP) theo bố cục trang; PO Best từ 0 dòng lên 11/11 dòng |
 | (Kho mẫu) | 08/11 | Kho mẫu thành nơi sửa form chứng từ theo từng khách: chứng từ dựng sẵn đổi thành form Excel/Word có ô `{{...}}` (`form_from_builtin`, lưu ở `MAU_CHUNG_TU/<khách>/thay/<MÃ>.xlsx`), sửa từng ô/đoạn ngay trong app, lần xuất sau dùng form; bản gốc ở `_goc/` để khôi phục |
 | (Kho mẫu) | 17/11 | Kho mẫu giữ bộ chứng từ xuất gần nhất của từng khách: mỗi lần xuất, bản sao file vào `MAU_CHUNG_TU/<khách>/bo_moi_nhat/` (`latest_set_save`, thẻ `_bo.json`); cùng thư mục lô thì thay từng chứng từ, lô khác thì thay cả bộ. Nút "Bộ xuất gần nhất" ở Kho mẫu xem trước từng file (hình xem trước tự tính công thức đơn giản SUM/ROUNDUP/SUBTOTAL…). PDF phiếu xuất kho / hóa đơn Bkav trong thư mục lô cũng được chép vào bộ và xem trước bằng QtPdf (bản .exe không còn bỏ QtPdf/QtNetwork) |
+| (Bước ⑤) | 21/11 | Bước ⑤ "Kiểm tra tờ khai": nạp tờ khai nháp ECUS (Excel/CSV/dán), đối chiếu từng dòng với Invoice (ghép tên + SL/giá, gần đúng Levenshtein ≤ 3 = SAI TÊN), kiểm tra nội bộ tờ khai và 9 mục phần đầu như macro `ModToKhai` của `Check_hang_XML_vs_ERP.xlsm`, thêm số dòng khai báo và tổng HĐ VAT/PXK; ghi `KiemTraToKhai_<khách>_<ngày>.xlsx` (KetQua, ToKhai, Invoice, HoaDon_VAT, PXK) vào thư mục lô rồi mở bằng Excel. Logic ở `tokhai_check.py`; mẫu thật ở `tests/fixtures/tokhai_nhap_shirai_mau.xlsx` |
 
 Xem chi tiết từng PR trên GitHub (tab Pull requests, trạng thái Closed).
 
