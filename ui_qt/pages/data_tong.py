@@ -82,6 +82,7 @@ class DataTongPage(_Page):
         row = QHBoxLayout()
         b1 = QPushButton("📥  Nạp file ERP (Excel)…")
         b1.clicked.connect(self.import_erp)
+        b1.setVisible(bool(getattr(core, "DUNG_ERP", False)))  # từ 21/11/2026 không dùng ERP: mỗi khách chỉ dùng dữ liệu riêng
         b1b = QPushButton("🔗  Nạp mã sản phẩm theo khách…")
         b1b.setObjectName("sec")
         b1b.clicked.connect(self.import_mapping)
