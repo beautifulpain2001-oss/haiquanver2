@@ -758,7 +758,7 @@ def merge_catalog(base, mine, disk):
             m, d = (x if isinstance(x, list) else [] for x in (m, d))
             seen = {json.dumps(x, sort_keys=True) for x in m}
             out[k] = [x for x in d if json.dumps(x, sort_keys=True) not in seen] + m
-        elif k in ("tesa_dinh_muc_v", "tesa_dinh_muc_dt_v"):
+        elif k in ("tesa_dinh_muc_v", "tesa_dinh_muc_dt_v", "dinh_muc_kh_v"):
             out[k] = max(int(x or 0) for x in (m, d) if x is not _MISSING)
         else:
             v = merge3(b, m, d)
@@ -792,7 +792,10 @@ class DedicatedDataStore:
         self.erp_map = {}
         self.kodi_items = list(DEFAULT_KODI_ITEMS)
         self.tesa_items = list(DEFAULT_TESA_ITEMS)
-        self.item_mem = {}
+        self.item_mem = {}  # định mức theo tên kiểu cũ (mọi khách chung): chỉ còn để đọc khi không biết khách; app tra theo dinh_muc_kh
+        self.dinh_muc_kh = {}  # định mức theo tên RIÊNG từng khách: {mã khách: {tên hàng: {div, kg, hs}}}
+        self.dinh_muc_kh_v = 0  # 1 = đã chia định mức chung cũ (item_mem) vào từng khách
+        self.erp_rieng = {}  # mã ERP theo tên hàng RIÊNG của khách (Shirai): {mã khách: [{ma_sp, ten_sp}]}, chép từ ERP cũ một lần
         self.suppliers = []  # nhà cung ứng của Shirai: [{name, mst, addr}]
         self.supplier_pref = {}  # lựa chọn đã nhớ: 'nhom:carton' / 'ma:<mã>' -> tên nhà cung ứng
         self.ten_kh_tay = {}  # tên theo khách hàng do người dùng nhập khi ERP chưa có: {mã: tên}
@@ -810,6 +813,7 @@ class DedicatedDataStore:
         self._kbase, self._kh_paths, self._kh_names = {}, {}, {}  # cách lưu mỗi khách một file: bản gốc từng file, đường dẫn, tên khách
         self._rec_rel, self._rec_inline, self._rec_hashes = {}, set(), {}  # hồ sơ: thư mục lô (tương đối), hồ sơ giữ trong file khách, dấu nội dung
         self.last_sync, self.last_conflicts, self.orphan_files = "", 0, 0
+        self.tu_chuyen = None  # kết quả tự chuyển sang mỗi khách một file lúc mở phần mềm (tu_chuyen_theo_khach)
         # chỉ mục quét thư mục: chỉ đọc lại thư mục có giờ sửa đổi (xem _dir_listing, _activity, read_lot_card)
         self._ls_cache, self._act_cache, self._card_cache, self._card_paths = {}, {}, {}, {}
         self._scan_ls = None
@@ -1000,9 +1004,10 @@ class DedicatedDataStore:
     def load_all(self):
         if self.theo_khach():
             self._load_theo_khach()
-            if self.apply_tesa_dinh_muc() | self.apply_tesa_dinh_muc_dt():
+            if self.apply_tesa_dinh_muc() | self.apply_tesa_dinh_muc_dt() | self.tach_dinh_muc_theo_khach() | self.dong_bo_nhom_khach():
                 self._save_theo_khach()
             self.absorb_khach_conflicts()
+            self.tao_file_moi_khach()
             return
         if not os.path.exists(self.catalog_file) and EMBEDDED_MASTER_CATALOG_B64:
             try:
@@ -1036,6 +1041,8 @@ class DedicatedDataStore:
         if self.apply_tesa_dinh_muc_dt():
             self.dt_save()
             self.save_catalog()
+        if self.tach_dinh_muc_theo_khach():
+            self.save_catalog()
         self.absorb_orphan_khach_files()
         self._note_sigs()
         if not self.records:
@@ -1064,7 +1071,7 @@ class DedicatedDataStore:
         for _k, b in bodies:  # 1) danh mục (khách, mã hàng, thiết lập riêng của khách): thêm cái chưa có, để khách vào PROFILES trước
             dm = merge_catalog(None, dm, b["danh_muc"]) if dm else copy.deepcopy(b["danh_muc"])
         self._take_merged_catalog(merge_catalog(None, copy.deepcopy(self._catalog_payload()), {k: v for k, v in dm.items() if k in
-                                  ("custom_profiles", "custom_items", "profile_overrides", "read_fixes", "weights_db", "supplier_pref", "ten_kh_tay")}))
+                                  self._PER_KH_CAT_KEYS + ("read_fixes", "weights_db", "supplier_pref", "ten_kh_tay")}))
         parts = self._split_parts()  # 2) Kg & kiện + hồ sơ: gộp vào phần của đúng khách
         for key, b in bodies:
             r = self._route(key)
@@ -1084,6 +1091,9 @@ class DedicatedDataStore:
         if data.get("item_mem"):
             self.item_mem = data["item_mem"]
         self.read_fixes = list(data.get("read_fixes") or [])
+        self.dinh_muc_kh = {k: dict(v) for k, v in (data.get("dinh_muc_kh") or {}).items() if isinstance(v, dict)}
+        self.dinh_muc_kh_v = int(data.get("dinh_muc_kh_v") or 0)
+        self.erp_rieng = {k: list(v) for k, v in (data.get("erp_rieng") or {}).items() if isinstance(v, list)}
         self.custom_profiles = data.get("custom_profiles") or {}
         self.custom_items = data.get("custom_items") or {}
         self.company = data.get("company_info") or {}
@@ -1105,8 +1115,9 @@ class DedicatedDataStore:
         self.rebuild_erp_map()
 
     def rebuild_erp_map(self):
+        """Bảng tên -> mã ERP cho PO Shirai: từ file riêng của Shirai (erp_rieng); chỉ khi bật DUNG_ERP mới dùng danh mục ERP chung."""
         self.erp_map = {}
-        for it in self.erp_catalog:
+        for it in (self.erp_catalog if DUNG_ERP else self.erp_rieng.get("shirai") or []):
             k = clean_str(it.get("ten_sp", ""))
             if k:
                 self.erp_map[k] = it.get("ma_sp", "")
@@ -1117,9 +1128,17 @@ class DedicatedDataStore:
         if not name:
             return
         code = str(code or "").strip()
-        self.item_mem[name] = {"div": div, "kg": kg, "hs": hs}
-        lists = [self.kodi_items, self.tesa_items] + ([self.custom_items.get(customer, [])] if customer else list(self.custom_items.values()))
-        for lst in lists:
+        owners = [customer] if customer else sorted(self._chu_ten_hang(name, code)) or [""]
+        self.item_mem[name] = {"div": div, "kg": kg, "hs": hs}  # bản kiểu cũ (chỉ đọc khi không biết khách)
+        for k in owners:
+            if k:
+                self._mem_kh(k)[name] = {"div": div, "kg": kg, "hs": hs}
+        seen = set()
+        for k in owners:
+            lst = self.items_for_customer(k) if k else []
+            if id(lst) in seen:
+                continue
+            seen.add(id(lst))
             for it in lst:
                 if it["name"] == name or (code and str(it.get("code") or "").strip() == code):
                     if div > 0:
@@ -1129,8 +1148,78 @@ class DedicatedDataStore:
                     if hs:
                         it["hs"] = hs
                     if it["name"] != name:  # tên trong danh mục khác tên trên PO: ghi cả bộ nhớ định mức theo tên danh mục
-                        self.item_mem[it["name"]] = {"div": div if div > 0 else it.get("div", 0), "kg": kg if kg > 0 else it.get("kg", 0), "hs": hs or it.get("hs", "")}
+                        m = {"div": div if div > 0 else it.get("div", 0), "kg": kg if kg > 0 else it.get("kg", 0), "hs": hs or it.get("hs", "")}
+                        self.item_mem[it["name"]] = dict(m)
+                        self._mem_kh(k)[it["name"]] = dict(m)
+        if customer == "shirai" and code and not any(str(x.get("ma_sp") or "").strip() == code and clean_str(x.get("ten_sp")) == clean_str(name)
+                                                      for x in self.erp_rieng.get("shirai") or []):
+            self.erp_rieng.setdefault("shirai", []).append({"ma_sp": code, "ten_sp": name})  # mã người dùng nhập cho hàng Shirai: nhớ riêng cho Shirai
+            self.rebuild_erp_map()
         self.save_catalog()
+
+    # ---- ĐỊNH MỨC THEO TÊN RIÊNG TỪNG KHÁCH -------------------------------------------------------------------------
+    def _mem_kh(self, key):
+        """Bảng định mức theo tên của khách `key` (tạo nếu chưa có). Khách cùng nhóm (Deli BN/HD) dùng cùng một bảng trong bộ nhớ,
+        mỗi khách vẫn ghi một bản riêng vào file của mình."""
+        return self.dinh_muc_kh.setdefault(key, {})
+
+    def _chu_ten_hang(self, name, code="", dt_names=None):
+        """Các khách có mặt hàng tên `name` (hoặc mã `code`) trong danh mục hay Kg & kiện của chính khách đó. Tên không thuộc khách nào
+        mà có dạng hàng Shirai (thùng carton / Inner Pad / Pad) thì là của Shirai (Shirai không có danh mục riêng)."""
+        out = set()
+        code = str(code or "").strip()
+        for k in PROFILES:
+            if any(it.get("name") == name or (code and str(it.get("code") or "").strip() == code) for it in self.items_for_customer(k) or []):
+                out.add(k)
+        if "tesa" in PROFILES:
+            try:
+                import tesa_names
+                if any(name in v for v in tesa_names.TESA_NAMES.values()):
+                    out.add("tesa")
+            except ImportError:
+                pass
+        if dt_names is None:
+            dt_names = {}
+            for row in self.data_tong:
+                for f in ("ten", "ten_kh"):
+                    if row.get(f):
+                        dt_names.setdefault(clean_str(row[f]), set()).add(self.dt_khach_key(row))
+        out |= {k for k in dt_names.get(clean_str(name), ()) if k in PROFILES}
+        if not out and "shirai" in PROFILES and (name in self.weights_db or self.shirai_group(name) != "khac"):
+            out.add("shirai")
+        return out
+
+    def tach_dinh_muc_theo_khach(self):
+        """MỘT lần: chia bảng định mức theo tên dùng chung cũ (item_mem) vào bảng riêng từng khách, và chép riêng cho Shirai các mã ERP
+        khớp hàng Shirai (Shirai cần mã ERP theo tên hàng). Không xóa gì: item_mem và danh mục ERP cũ giữ nguyên. Trả True nếu đã làm."""
+        if self.dinh_muc_kh_v >= 1:
+            return False
+        dt_names = {}
+        for row in self.data_tong:
+            for f in ("ten", "ten_kh"):
+                if row.get(f):
+                    dt_names.setdefault(clean_str(row[f]), set()).add(self.dt_khach_key(row))
+        for name, v in list(self.item_mem.items()):
+            if not isinstance(v, dict):
+                continue
+            for k in self._chu_ten_hang(name, dt_names=dt_names):
+                self._mem_kh(k).setdefault(name, dict(v))
+        if "shirai" not in self.erp_rieng and self.erp_catalog:
+            names = {clean_str(n) for n in self.weights_db} | {clean_str(n) for n, v in self.dinh_muc_kh.get("shirai", {}).items()}
+            for r in self.records:
+                if r.get("customer") == "shirai":
+                    names |= {clean_str(it.get("ten_sp")) for it in r.get("items") or [] if it.get("ten_sp")}
+            names.discard("")
+            rows = []
+            for it in self.erp_catalog:
+                ek = clean_str(it.get("ten_sp", ""))
+                if ek and any(n == ek or n in ek or ek in n for n in names):
+                    rows.append({"ma_sp": it.get("ma_sp", ""), "ten_sp": it.get("ten_sp", "")})
+            self.erp_rieng["shirai"] = rows
+        self.dinh_muc_kh_v = 1
+        self._link_shared_catalogs()
+        self.rebuild_erp_map()
+        return True
 
     def apply_tesa_dinh_muc(self):
         """Áp kg/ống và số ống/kiện theo bảng tổng hợp của Tesa (tesa_names.TESA_DINH_MUC) vào danh mục Tesa và bộ nhớ định mức, MỘT lần cho
@@ -1153,6 +1242,8 @@ class DedicatedDataStore:
             for name in names:
                 mem = self.item_mem.get(name) or {}
                 self.item_mem[name] = {"div": div, "kg": kg, "hs": mem.get("hs") or "48229090"}
+                mem = self._mem_kh("tesa").get(name) or {}
+                self._mem_kh("tesa")[name] = {"div": div, "kg": kg, "hs": mem.get("hs") or "48229090"}
         self.tesa_dinh_muc_v = tesa_names.TESA_DINH_MUC_V
         return True
 
@@ -1192,7 +1283,11 @@ class DedicatedDataStore:
                     self.save_catalog()
                 return
 
-    def get_item_norm(self, name):
+    def get_item_norm(self, name, customer=""):
+        """Định mức đã nhớ (SL/kiện, kg, HS) của mặt hàng `name`: chỉ trong bảng RIÊNG của khách `customer`.
+        Không truyền khách (mã cũ) thì đọc bảng chung kiểu cũ."""
+        if customer:
+            return (self.dinh_muc_kh.get(customer) or {}).get(name)
         return self.item_mem.get(name)
 
     def register_custom_profiles(self):
@@ -1238,6 +1333,12 @@ class DedicatedDataStore:
             base[:] = merged
             for k in keys[1:]:
                 self.custom_items[k] = base
+            mem = {}  # định mức theo tên: hai khách cùng nhóm (Deli BN/HD) có cùng nội dung, mỗi khách một bản trong file của mình
+            for k in keys:
+                for n, v in (self.dinh_muc_kh.get(k) or {}).items():
+                    mem.setdefault(n, v)
+            for k in keys:
+                self.dinh_muc_kh[k] = mem
 
     def save_learned_customer(self, key, profile_fields, items):
         """Lưu khách hàng mới (đã được người dùng xác nhận) vào master_catalog.json."""
@@ -1269,6 +1370,7 @@ class DedicatedDataStore:
                 lst.append(row)
             if row["div"] or row["kg"] or row["hs"]:
                 self.item_mem[name] = {"div": row["div"], "kg": row["kg"], "hs": row["hs"]}
+                self._mem_kh(key)[name] = {"div": row["div"], "kg": row["kg"], "hs": row["hs"]}
         PROFILES[key] = prof
         self._link_shared_catalogs()
         self.save_catalog()
@@ -1342,6 +1444,7 @@ class DedicatedDataStore:
                 if n:
                     it["div"] = n
                     self.item_mem.setdefault(it["name"], {"div": 0, "kg": it.get("kg") or 0, "hs": it.get("hs") or ""})["div"] = n
+                    self._mem_kh(key).setdefault(it["name"], {"div": 0, "kg": it.get("kg") or 0, "hs": it.get("hs") or ""})["div"] = n
                     done.add(str(it["code"]).strip())
             res["kien"], res["kien_thieu"] = len(done), sorted(set(table) - done)
         cm = data.get("cap_nhat_ma")
@@ -1374,6 +1477,7 @@ class DedicatedDataStore:
                 self.save_learned_customer(key, dict(cust.get("profile") or {}), list(cust.get("items") or []))
                 res["khach"] = key
                 res["mau"] = self.save_templates(key, cust.get("mau") or {}, overwrite)
+        file_key = res["khach"] or ("tesa" if data.get("tesa_items") else "")
         for name, v in (data.get("item_mem") or {}).items():
             if not isinstance(v, dict) or not str(name).strip():
                 continue
@@ -1381,7 +1485,8 @@ class DedicatedDataStore:
                 new = {"div": float(v.get("div") or 0), "kg": float(v.get("kg") or 0), "hs": str(v.get("hs") or "")}
             except (TypeError, ValueError):
                 raise ValueError(f"Định mức của “{name}” không phải số.")
-            if name in self.item_mem:
+            owners = [file_key] if file_key else sorted(self._chu_ten_hang(name))  # định mức vào bảng riêng của khách có mặt hàng đó
+            if name in self.item_mem or any(name in (self.dinh_muc_kh.get(k) or {}) for k in owners):
                 if not overwrite:
                     res["bo_qua"] += 1
                     continue
@@ -1389,6 +1494,8 @@ class DedicatedDataStore:
             else:
                 res["them"] += 1
             self.item_mem[name] = new
+            for k in owners:
+                self._mem_kh(k)[name] = dict(new)
         self.save_catalog()
         return res
 
@@ -1438,6 +1545,7 @@ class DedicatedDataStore:
                         it[f] = v[f]
                 mem = self.item_mem.setdefault(it["name"], {"div": 0, "kg": 0, "hs": it.get("hs") or ""})
                 mem.update({f: v[f] for f in ("div", "kg") if v[f]})
+                self._mem_kh(key)[it["name"]] = dict(mem)
         return {"ma_sua": len(sua), "ma_them": len(them)}
 
     # ---- Quản lý kg & kiện theo khách (trang Khách hàng → "Kg & kiện theo khách") ------------------------------------
@@ -1457,7 +1565,7 @@ class DedicatedDataStore:
     def _dm_effective(self, key, it):
         """Số phần mềm đang dùng thật cho một mặt hàng: bộ nhớ định mức theo tên > danh mục; số Data tổng đã xác nhận (tay) theo mã thắng cả hai
         (đúng thứ tự lúc đọc PO / tra mặt hàng)."""
-        mem = self.get_item_norm(it.get("name")) or {}
+        mem = self.get_item_norm(it.get("name"), key) or {}
         div, kg = float(mem.get("div") or it.get("div") or 0), float(mem.get("kg") or it.get("kg") or 0)
         code = str(it.get("code") or "").strip()
         if code:
@@ -1500,6 +1608,8 @@ class DedicatedDataStore:
             if name:
                 old = self.item_mem.get(name) or {}
                 self.item_mem[name] = {"div": div, "kg": kg, "hs": hs or old.get("hs", "")}
+                old = self._mem_kh(key).get(name) or {}
+                self._mem_kh(key)[name] = {"div": div, "kg": kg, "hs": hs or old.get("hs", "")}
             if not name or (div <= 0 and kg <= 0):
                 continue
             try:
@@ -1636,7 +1746,8 @@ class DedicatedDataStore:
         """Mã Tesa đã thêm thêm sau khi cài (không nằm trong danh mục có sẵn) để máy khác nạp bằng "Nạp dữ liệu học"."""
         base = {x["code"] for x in DEFAULT_TESA_ITEMS if x.get("code")} | {x["name"] for x in DEFAULT_TESA_ITEMS}
         items = [dict(x) for x in self.tesa_items if x.get("name") not in base and (x.get("code") or "") not in base]
-        mem = {it["name"]: self.item_mem[it["name"]] for it in items if it.get("name") in self.item_mem}
+        own = self.dinh_muc_kh.get("tesa") or {}
+        mem = {it["name"]: own.get(it["name"]) or self.item_mem[it["name"]] for it in items if it.get("name") in own or it.get("name") in self.item_mem}
         return {"version": "hongthien-hoc-v1", "tesa_items": items, "item_mem": mem}
 
     def export_learned(self, key):
@@ -1662,7 +1773,8 @@ class DedicatedDataStore:
             if p:
                 with open(p, "rb") as f:
                     mau["thay/" + os.path.basename(p)] = base64.b64encode(f.read()).decode("ascii")
-        mem = {it["name"]: self.item_mem[it["name"]] for it in items if it.get("name") in self.item_mem}
+        own = self.dinh_muc_kh.get(key) or {}
+        mem = {it["name"]: own.get(it["name"]) or self.item_mem[it["name"]] for it in items if it.get("name") in own or it.get("name") in self.item_mem}
         return {"version": "hongthien-hoc-v1", "khach_moi": {"key": key, "profile": dict(self.custom_profiles[key]), "items": items, "mau": mau}, "item_mem": mem}
 
     # ---- MẪU RIÊNG của khách (Word/Excel do người dùng nhập, ghi ô {{...}} để phần mềm điền) -----------------------------------
@@ -2142,7 +2254,7 @@ class DedicatedDataStore:
         if cust_key not in self._dt_cache:
             prof = PROFILES.get(cust_key) or {}
             rows = [x for x in self.data_tong if self._khach_match(prof, x.get("khach")) or self._khach_match(prof, x.get("khach_day_du"))]
-            if not uses_erp(prof):  # khách không dùng ERP (Anyone): bỏ mục nạp từ ERP, chỉ giữ số học từ invoice / nhập tay
+            if bo_so_erp(prof):  # khách không dùng ERP (Anyone): bỏ mục nạp từ ERP, chỉ giữ số học từ invoice / nhập tay
                 rows = [x for x in rows if x.get("kg_nguon") in ("invoice", "tay") or x.get("kien_nguon") in ("invoice", "tay")]
             self._dt_cache[cust_key] = rows
         return self._dt_cache[cust_key]
@@ -2686,7 +2798,8 @@ class DedicatedDataStore:
     # Lưu: chỉ ghi file của khách có thay đổi; máy khác vừa ghi file đó thì gộp 3 bên (như PR đồng bộ thư mục chung).
     HE_THONG_DIR, HE_THONG_FILE, KHACH_FILE_PRE = "_HE_THONG", "he_thong.json", "DU_LIEU_"
     _HT_CAT_KEYS = ("company", "address", "tax_code", "company_info", "vehicle_pairs", "erp_catalog", "item_mem", "suppliers",
-                    "tesa_dinh_muc_v", "tesa_dinh_muc_dt_v")
+                    "tesa_dinh_muc_v", "tesa_dinh_muc_dt_v", "dinh_muc_kh_v")
+    _PER_KH_CAT_KEYS = ("custom_profiles", "custom_items", "profile_overrides", "dinh_muc_kh", "erp_rieng")  # {mã khách: ...}: mỗi khách vào file của mình
     _SHIRAI_CAT_KEYS = ("weights_db", "supplier_pref", "ten_kh_tay")
 
     def he_thong_path(self):
@@ -2789,7 +2902,7 @@ class DedicatedDataStore:
             part("shirai")["danh_muc"][k] = cat.get(k) or {}
         part("kodi")["danh_muc"]["kodi_items"] = cat.get("kodi_items") or []
         part("tesa")["danh_muc"]["tesa_items"] = cat.get("tesa_items") or []
-        for field in ("custom_profiles", "custom_items", "profile_overrides"):
+        for field in self._PER_KH_CAT_KEYS:
             for key, v in (cat.get(field) or {}).items():
                 part(self._route(key))["danh_muc"].setdefault(field, {})[key] = v
         for x in cat.get("read_fixes") or []:
@@ -2881,6 +2994,10 @@ class DedicatedDataStore:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         head = ({"loai": "HE_THONG", "phienBan": 1, "cachLuu": "theo_khach"} if not key else
                 {"loai": "DU_LIEU_KHACH", "phienBan": 1, "khach": key, "ten": (PROFILES.get(key) or {}).get("label") or self._kh_names.get(key, key)})
+        if key in PROFILES:  # thông tin khách để mở file ra là biết khách nào (chỉ để đọc; số liệu dùng thật nằm ở danh_muc)
+            prof = PROFILES[key]
+            head["thong_tin"] = {"ten_day_du": prof.get("name", ""), "mst": prof.get("mst", ""), "dia_chi": prof.get("addr", ""),
+                                 "dvt": prof.get("unit", ""), "co_san_trong_app": key in BUILTIN_CUSTOMERS}
         head["capNhat"] = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
         head["may"] = self.user_name() or self._machine_tag()
         self._backup(path)
@@ -2895,7 +3012,7 @@ class DedicatedDataStore:
         for key, p in parts.items():
             dm = p.get("danh_muc") or {}
             for k, v in dm.items():
-                if k in ("custom_profiles", "custom_items", "profile_overrides", "weights_db", "supplier_pref", "ten_kh_tay"):
+                if k in self._PER_KH_CAT_KEYS + ("weights_db", "supplier_pref", "ten_kh_tay"):
                     cat.setdefault(k, {}).update(v or {})
                 elif k == "read_fixes":
                     cat.setdefault(k, []).extend(v or [])
@@ -2951,7 +3068,7 @@ class DedicatedDataStore:
                 if key not in self._kh_paths:
                     self._kh_paths[key] = path
                     mine.setdefault(key, {"danh_muc": {}, "data_tong": [], "ho_so": [], "ten_goi": []})
-            for key in self._kh_paths:
+            for key in list(self._kh_paths) + list(PROFILES):  # mọi khách có trong app đều có thư mục + file riêng, kể cả khi chưa có dữ liệu
                 mine.setdefault(key, {"danh_muc": {}, "data_tong": [], "ho_so": [], "ten_goi": []})
             merged_any, final = False, {}
             for key, body in mine.items():
@@ -2961,8 +3078,8 @@ class DedicatedDataStore:
                     disk = self._part_body(self._read_json(path, {}))
                     body = self._merge_part(base, body, disk)
                     merged_any = True
-                if base is None and not any(body.get(k) for k in ("danh_muc", "data_tong", "ho_so")):
-                    continue  # khách không có gì: không tạo file rỗng
+                if base is None and not any(body.get(k) for k in ("danh_muc", "data_tong", "ho_so")) and key not in PROFILES:
+                    continue  # tên khách không có trong app và không có gì: không tạo file rỗng
                 if body != base or not os.path.isfile(path):
                     self._write_part(key, body)
                 final[key] = body
@@ -2997,6 +3114,86 @@ class DedicatedDataStore:
         if n:
             self.last_conflicts = n
         return n
+
+    def tao_file_moi_khach(self):
+        """Khách có trong app mà chưa có thư mục + file DU_LIEU_<MÃ>.json (khách có sẵn chưa có dữ liệu, khách vừa nạp): tạo ngay.
+        Trả số file đã tạo."""
+        if not self.theo_khach():
+            return 0
+        thieu = [k for k in PROFILES if not os.path.isfile(self._khach_path(k))]
+        if thieu:
+            try:
+                self._save_theo_khach()
+            except Exception as e:  # noqa: BLE001
+                print("Warning creating customer files:", e)
+        return sum(1 for k in thieu if os.path.isfile(self._khach_path(k)))
+
+    def nhom_khach(self):
+        """Các nhóm khách có CÙNG dữ liệu (VD Deli Bắc Ninh + Deli Hải Phòng): [[mã khách, ...]] (mỗi nhóm ≥ 2 khách có trong app)."""
+        groups = {}
+        for key in PROFILES:
+            if key in BUILTIN_CUSTOMERS:
+                continue
+            g = self._catalog_group(key)
+            if g:
+                groups.setdefault(g, []).append(key)
+        return [sorted(v) for v in groups.values() if len(v) > 1]
+
+    _NHOM_DT_FIELDS = ("kg", "kg_nguon", "kien", "kien_nguon", "khoa", "hs", "ma_hang", "ma_kh", "ten_kh", "don_vi")
+
+    def dong_bo_nhom_khach(self):
+        """Khách cùng nhóm (Deli BN/HD) có 2 bản Kg & kiện như nhau: mặt hàng bên này có mà bên kia chưa có thì chép sang (đổi tên khách);
+        cùng mặt hàng mà số khác nhau thì theo bản mạnh hơn (khóa > sửa tay > invoice > ERP, rồi bản mới hơn). Trả True nếu có đổi."""
+        changed = False
+        for keys in self.nhom_khach():
+            by = {}
+            for row in self.data_tong:
+                k = self.dt_khach_key(row)
+                if k in keys and clean_str(row.get("ten")):
+                    by.setdefault(clean_str(row.get("ten")), {}).setdefault(k, row)
+            for _name, rows in by.items():
+                best = max(rows.values(), key=self._dt_row_rank)
+                for k in keys:
+                    r = rows.get(k)
+                    if r is None:
+                        new = {f: v for f, v in best.items() if f != "khach_day_du"}
+                        new["khach"] = PROFILES[k].get("label") or k
+                        self.data_tong.append(new)
+                        changed = True
+                    elif r is not best and any(r.get(f) != best.get(f) for f in self._NHOM_DT_FIELDS if f in best or f in r):
+                        for f in self._NHOM_DT_FIELDS:
+                            if f in best:
+                                r[f] = best[f]
+                            else:
+                                r.pop(f, None)
+                        changed = True
+        if changed:
+            self._dt_cache, self._dt_idx = {}, None
+        return changed
+
+    def _hoan_tac_marker(self):
+        return os.path.join(self.customs_root(), self.HE_THONG_DIR, "DA_HOAN_TAC.json")
+
+    def tu_chuyen_theo_khach(self):
+        """Gọi khi mở phần mềm: thư mục dữ liệu còn kiểu cũ (3 file chung) thì TỰ chuyển sang mỗi khách một file, đúng thủ tục của nút
+        'Xem trước và chuyển' (sao lưu nguyên vẹn vào _SAO_LUU, đọc lại đếm khớp, file cũ đổi tên *.DA_CHUYEN.json, không xóa).
+        Đã bấm Hoàn tác thì không tự chuyển lại. Đã chuyển rồi thì chỉ tạo thư mục/file còn thiếu cho khách có trong app.
+        Trả {"chuyen": kết quả chuyển | None, "file_moi": n, "loi": ""}; kết quả cũng ghi ở self.tu_chuyen."""
+        out = {"chuyen": None, "file_moi": 0, "loi": ""}
+        if not self.theo_khach():
+            if os.path.isfile(self._hoan_tac_marker()):
+                out["loi"] = "Đã hoàn tác về cách lưu cũ trước đó nên không tự chuyển; bấm 'Xem trước và chuyển' ở Cài đặt khi muốn chuyển lại."
+                self.tu_chuyen = out
+                return out
+            try:
+                out["chuyen"] = self.chuyen_doi_thuc_hien()
+            except Exception as e:  # noqa: BLE001 - không chuyển được thì vẫn chạy kiểu cũ, báo ở Cài đặt
+                out["loi"] = f"Chưa tự chuyển được sang mỗi khách một file: {e}"
+                self.tu_chuyen = out
+                return out
+        out["file_moi"] = self.tao_file_moi_khach()
+        self.tu_chuyen = out
+        return out
 
     # ---- chuyển dữ liệu cũ (3 file chung) sang mỗi khách một file ----------------------------------------------
     def old_data_files(self):
@@ -3098,6 +3295,8 @@ class DedicatedDataStore:
         for p in (self.catalog_file, self.records_file, self.dt_path()):
             if os.path.isfile(p):
                 os.replace(p, os.path.splitext(p)[0] + ".DA_CHUYEN.json")
+        if os.path.isfile(self._hoan_tac_marker()):
+            os.remove(self._hoan_tac_marker())
         with open(os.path.join(bdir, "KET_QUA.txt"), "w", encoding="utf-8") as f:
             f.write(f"Chuyển lúc {stamp} trên máy {self._machine_tag()}: {written} file khách, {want['ho_so']} hồ sơ, {want['data_tong']} dòng Data tổng.\n")
         self._sigs = {}
@@ -3125,6 +3324,10 @@ class DedicatedDataStore:
                 if os.path.isfile(done):
                     os.remove(done)
         os.replace(self.he_thong_path(), os.path.join(bdir, f"he_thong_hoan_tac_{datetime.datetime.now():%Y%m%d_%H%M%S}.json"))
+        try:  # dấu đã hoàn tác: lần mở phần mềm sau không tự chuyển lại (mọi máy dùng chung thư mục đều thấy)
+            self._write_json(self._hoan_tac_marker(), {"luc": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"), "may": self._machine_tag(), "sao_luu": bdir})
+        except OSError:
+            pass
         self._sigs, self._kbase, self._kh_paths = {}, {}, {}
         self.load_all()
         return bdir
@@ -3419,6 +3622,9 @@ class DedicatedDataStore:
             "kodi_items": self.kodi_items,
             "tesa_items": self.tesa_items,
             "item_mem": self.item_mem,
+            "dinh_muc_kh": self.dinh_muc_kh,
+            "dinh_muc_kh_v": self.dinh_muc_kh_v,
+            "erp_rieng": self.erp_rieng,
             "custom_profiles": self.custom_profiles,
             "custom_items": self.custom_items,
             "suppliers": self.suppliers,
@@ -4690,7 +4896,7 @@ def parse_kodi_po_text(text, kodi_catalog, data_store=None, tare_val=1.0):
             note = (note + "; " if note else "") + "Tên hàng không khớp danh mục Kodi: kg/chiếc và SL/kiện đang là số mặc định"
         if qty > 0:
             item_name = known["name"] if known else name
-            mem = data_store.get_item_norm(item_name) if data_store else None
+            mem = data_store.get_item_norm(item_name, "kodi") if data_store else None
             div = mem["div"] if (mem and mem.get("div")) else (known["div"] if known else 5)
             kg = mem["kg"] if (mem and mem.get("kg")) else (known["kg"] if known else 1.96)
             kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
@@ -4908,7 +5114,7 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
             if old and old.get("qty"):
                 rows2 = [dict(old, fix="Dòng hàng OCR không rõ cột: đọc lại theo mã hàng và tổng PO, kiểm lại SL, đơn giá")]
         for r2 in rows2:
-            item, name, code, src = resolve_tesa_item(r2, tesa_catalog, getattr(data_store, "erp_catalog", None))
+            item, name, code, src = resolve_tesa_item(r2, tesa_catalog, getattr(data_store, "erp_catalog", None) if uses_erp(PROFILES.get("tesa")) else None)
             dt = tesa_erp_entry(data_store, r2["code"], r2["desc"])
             if dt and (dt.get("ten") or dt.get("ten_kh")) and src != "tesa":  # mã đã có trong danh mục Tesa (học từ invoice): giữ tên đó, ERP chỉ để đối chiếu
                 # mã chưa có trong danh mục riêng của Tesa: dùng cột "Tên sản phẩm theo KH" của ERP
@@ -4924,7 +5130,7 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
                 name = ("Ống lõi giấy phi " + " x ".join(str(int(float(d))) if float(d) == int(float(d)) else d for d in dims) + "mm") if dims else (r2["desc"] or "Ống lõi giấy")
             if item is None and data_store is not None and hasattr(data_store, "add_tesa_item"):
                 item = data_store.add_tesa_item(name, code, price=r2["price"], source=src or "po")
-            mem = data_store.get_item_norm(name) if data_store else None
+            mem = data_store.get_item_norm(name, "tesa") if data_store else None
             div = (mem or {}).get("div") or (item or {}).get("div") or 0
             kg = (mem or {}).get("kg") or (item or {}).get("kg") or 0
             tare = (item or {}).get("tare", 1.0)
@@ -4963,7 +5169,7 @@ def parse_tesa_po_text(text, tesa_catalog, data_store=None):
         hq_std, hd_std = tesa_names_for(res["code"])
         if hd_std:
             name = hd_std
-        mem = data_store.get_item_norm(name) if data_store else None
+        mem = data_store.get_item_norm(name, "tesa") if data_store else None
         div = mem["div"] if (mem and mem.get("div")) else (known["div"] if known else 0)
         kg = mem["kg"] if (mem and mem.get("kg")) else (known["kg"] if known else 0)
         tare = known.get("tare", 1.0) if known else 1.0
@@ -5066,7 +5272,7 @@ def parse_shirai_po_excel(file_path, data_store, tare_text="0.02"):
                 final_name = "Tấm lót " + desc
 
             # Định mức đã nhớ cho mặt hàng (SL/kiện, kg/cái, HS) được ưu tiên; chưa có thì dùng quy tắc theo loại hàng
-            mem = data_store.get_item_norm(final_name) or {}
+            mem = data_store.get_item_norm(final_name, "shirai") or {}
             if not w_kg and mem.get("kg"):
                 w_kg = float(mem["kg"])
             div = float(mem.get("div") or 0) or float(shirai_default_div(final_name))
@@ -6387,7 +6593,7 @@ def lot_fixed_order_items(store, customer, po, qty, price, tare_text="1.0"):
         raise ValueError("Hãy nhập đơn giá.")
     if not str(po or "").strip():
         raise ValueError("Chưa có số PO.")
-    mem = store.get_item_norm(item.get("name")) or {}
+    mem = store.get_item_norm(item.get("name"), customer) or {}
     hit = {"ma_sp": str(item.get("code") or ""), "ten_sp": item.get("name", ""), "price": p, "unit": item.get("unit") or (PROFILES.get(customer) or {}).get("unit", ""),
            "div": mem.get("div") or item.get("div", 0), "kg": mem.get("kg") or item.get("kg", 0), "hs": mem.get("hs") or item.get("hs") or "48229090"}
     line = lot_item_from_catalog(store, customer, hit, q, str(po).strip(), tare_text)
@@ -9036,7 +9242,7 @@ def lot_pick_items(store, customer, picks, po, tare_text="1.0", pr=""):
             raise ValueError(f"Hãy nhập số lượng cho mã {code}.")
         if p <= 0:
             raise ValueError(f"Hãy nhập đơn giá cho mã {code}.")
-        mem = store.get_item_norm(item.get("name")) or {}
+        mem = store.get_item_norm(item.get("name"), customer) or {}
         hit = {"ma_sp": str(item.get("code") or ""), "ten_sp": item.get("name", ""), "price": int(p) if p == int(p) else p,
                "unit": item.get("unit") or (PROFILES.get(customer) or {}).get("unit", ""),
                "div": mem.get("div") or item.get("div", 0), "kg": mem.get("kg") or item.get("kg", 0), "hs": mem.get("hs") or item.get("hs") or "48229090"}
@@ -9083,7 +9289,7 @@ def lot_search_items(store, customer, query, limit=60):
     seen, out = set(), []
     cat = list(store.items_for_customer(customer) or [])
     for it in cat:
-        mem = store.get_item_norm(it.get("name")) or {}
+        mem = store.get_item_norm(it.get("name"), customer) or {}
         out_item = {"ma_sp": str(it.get("code") or ""), "ten_sp": it.get("name", ""), "price": it.get("price", 0), "unit": it.get("unit", ""),
                     "div": mem.get("div") or it.get("div", 0), "kg": mem.get("kg") or it.get("kg", 0), "hs": mem.get("hs") or it.get("hs", "")}
         hay = norm(out_item["ma_sp"] + " " + out_item["ten_sp"])
@@ -9127,9 +9333,22 @@ def is_dccn_month(prof):
     return is_able(prof) or (prof or {}).get("dccnStyle") == "thang"
 
 
+# Từ 21/11/2026 không tra danh mục ERP chung của công ty nữa: mỗi khách chỉ dùng dữ liệu trong file riêng của khách đó
+# (HAI_QUAN/<Khách>/DU_LIEU_<MÃ>.json). Danh mục ERP cũ vẫn giữ nguyên trong _HE_THONG, chỉ không dùng.
+DUNG_ERP = False
+# Số kg/kiện nạp từ ERP trước đây đã nằm trong Kg & kiện của từng khách (dữ liệu riêng của khách đó): giữ làm số dự phòng,
+# xếp dưới số học từ invoice và số sửa tay. False = bỏ hẳn các số đó.
+GIU_SO_ERP_CU = True
+
+
 def uses_erp(prof):
-    """Khách có dùng dữ liệu ERP không. noErp (VD Anyone): mã/tên/kg chỉ lấy từ chứng từ và danh mục khách, không lấy từ ERP."""
-    return not (prof or {}).get("noErp")
+    """Khách có tra danh mục ERP chung không. Tắt cho mọi khách (DUNG_ERP = False); noErp (VD Anyone) thì luôn tắt."""
+    return DUNG_ERP and not (prof or {}).get("noErp")
+
+
+def bo_so_erp(prof):
+    """Bỏ các số kg/kiện nạp từ ERP trong Kg & kiện của khách: khách noErp (Anyone), hoặc khi đã chọn bỏ hẳn số ERP cũ."""
+    return bool((prof or {}).get("noErp")) or not GIU_SO_ERP_CU
 
 
 def parse_able_po_rows(text, catalog_items):
@@ -9250,7 +9469,7 @@ def lines_from_erp_rows(rows, po_no, profile, catalog_items, data_store=None, ta
             known = next((it for it in catalog_items if len(nums) >= 3 and _name_dims(it.get("name"))[0] == nums[-3:]), {}) if nums else {}
         name = known.get("name") or r["desc"] or r["code"]
         code = known.get("code") or r["code"]
-        mem = data_store.get_item_norm(name) if data_store else None
+        mem = data_store.get_item_norm(name, profile.get("key") or "") if data_store else None
         div = (mem or {}).get("div") or known.get("div") or profile.get("defaultDiv") or 0
         kg = (mem or {}).get("kg") or known.get("kg") or 0
         qty = int(round(r["qty"])) if abs(r["qty"] - round(r["qty"])) < 1e-9 else r["qty"]
@@ -9378,7 +9597,7 @@ def parse_generic_po_text(text, profile, catalog_items, data_store=None, tare_va
         if conf == 0 and lines and lines[-1]["ten_sp"] == known["name"]:
             continue  # PO song ngữ: dòng chữ Hán/OCR lặp lại quy cách của dòng ngay trên, không có giá hay thành tiền -> không phải dòng hàng mới
         qty = int(qty) if float(qty).is_integer() else qty
-        mem = data_store.get_item_norm(known["name"]) if data_store else None
+        mem = data_store.get_item_norm(known["name"], profile.get("key") or "") if data_store else None
         div = (mem or {}).get("div") or known.get("div") or profile.get("defaultDiv") or 0
         kg = (mem or {}).get("kg") or known.get("kg") or 0
         kien = math.ceil(round(qty / div * 1e6) / 1e6) if div > 0 else 0
@@ -10418,7 +10637,7 @@ def lot_lookup_code(store, customer, code):
         dt = None
     if not hit and not dt:
         return None
-    mem = store.get_item_norm(hit["name"]) if hit else None
+    mem = store.get_item_norm(hit["name"], customer) if hit else None
     dt_tay = lambda dk: (dt or {}).get(dk) if (dt or {}).get(dk + "_nguon") == "tay" else 0
     pick = lambda mk, dk: (mem or {}).get(mk) or dt_tay(dk) or (hit or {}).get(mk) or (dt or {}).get(dk) or 0
     out = {"ten_sp": (hit or {}).get("name") or (dt or {}).get("ten_kh") or (dt or {}).get("ten", ""), "hs": (hit or {}).get("hs") or (dt or {}).get("hs") or "48229090",
@@ -10468,7 +10687,7 @@ def lot_item_from_values(store, customer, vals, tare_text="1.0", base=None):
     net = round_up(qty * kg) if kg > 0 else 0.0
     gross = lot_gross(net, tare_spec)
     # ô mã trống nhưng tên ghi sẵn mã trong ngoặc (tên HQ của Tesa): vẫn nhớ theo mã đó để mục danh mục của mã nhận số vừa sửa
-    store.remember_item_norm(name, div, kg, hs, code=code or code_in_name(name), customer=customer if customer not in BUILTIN_CUSTOMERS else "")
+    store.remember_item_norm(name, div, kg, hs, code=code or code_in_name(name), customer=customer)
     if kg > 0 or div > 0:
         try:
             store.dt_confirm_item(customer, name, code, kg, div, hs)  # kho dữ liệu (Data tổng): số vừa xác nhận thắng số ERP/invoice cũ, ở mọi mục cùng sản phẩm
@@ -10614,6 +10833,10 @@ if __name__ == "__main__":
             sys.exit(1)
         sys.exit(0)
     store = DedicatedDataStore()
+    try:  # từ bản này: dữ liệu luôn lưu và đọc theo từng khách (HAI_QUAN/<Khách>/DU_LIEU_<MÃ>.json)
+        store.tu_chuyen_theo_khach()
+    except Exception as e:  # noqa: BLE001
+        print("Warning auto convert:", e)
     try:
         from ui_qt.main_window import run as run_qt
     except ImportError as e:  # thiếu PySide6 khi chạy từ mã nguồn

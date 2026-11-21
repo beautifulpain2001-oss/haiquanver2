@@ -153,10 +153,12 @@ class SettingsPage(_Page):
 
         kbox = QGroupBox("Mỗi khách một file dữ liệu")
         kl = QVBoxLayout(kbox)
-        tip = QLabel("Cách lưu mới: dữ liệu riêng của khách nào (danh mục mã hàng, học, Kg & kiện, danh sách hồ sơ) nằm trong thư mục khách đó, "
-                     "file HAI_QUAN/<Khách>/DU_LIEU_<MÃ>.json; chi tiết từng bộ hồ sơ ở thẻ 00_HO_SO.json trong thư mục lô. Chỉ phần dùng chung "
-                     "(thông tin công ty, lái xe, ERP chung, định mức theo tên) nằm ở HAI_QUAN/_HE_THONG. Lưu khách nào chỉ ghi file khách đó. "
-                     "TRƯỚC KHI CHUYỂN: cập nhật bản phần mềm này cho MỌI máy dùng chung thư mục (bản cũ không đọc được cách mới).")
+        tip = QLabel("Mỗi khách có trong app có thư mục + file riêng HAI_QUAN/<Khách>/DU_LIEU_<MÃ>.json: thông tin khách, danh mục mã hàng, "
+                     "định mức theo tên, Kg & kiện, danh sách hồ sơ. Khi mở, phần mềm đọc các file này để biết có khách nào; khi khai hải quan chỉ lấy "
+                     "dữ liệu trong file của chính khách đó (không dùng ERP, không dùng chung giữa các khách; Deli Bắc Ninh / Hải Phòng có 2 bản giống nhau). "
+                     "Chi tiết từng bộ hồ sơ ở thẻ 00_HO_SO.json trong thư mục lô; HAI_QUAN/_HE_THONG chỉ giữ thông tin công ty, lái xe. "
+                     "Thư mục còn kiểu cũ thì phần mềm TỰ chuyển khi mở (có sao lưu trong _SAO_LUU, có Hoàn tác). "
+                     "Cập nhật bản phần mềm này cho MỌI máy dùng chung thư mục (bản cũ không đọc được cách mới).")
         tip.setObjectName("hint")
         tip.setWordWrap(True)
         kl.addWidget(tip)
@@ -291,6 +293,15 @@ class SettingsPage(_Page):
         txt = "✅  Đang dùng cách lưu mỗi khách một file." if on else "Đang dùng cách lưu cũ (3 file chung cho mọi khách)."
         if not on and getattr(self.store, "orphan_files", 0):
             txt += f"  Đã đọc thêm {self.store.orphan_files} file khách có sẵn; bấm 'Xem trước và chuyển' để hoàn tất."
+        tc = getattr(self.store, "tu_chuyen", None) or {}
+        if tc.get("chuyen"):
+            r = tc["chuyen"]
+            txt += (f"  Lần mở này đã TỰ chuyển: {r.get('files', 0)} file khách, {r.get('ho_so', 0)} hồ sơ, {r.get('data_tong', 0)} dòng Kg & kiện; "
+                    f"bản sao lưu trước khi chuyển: {r.get('sao_luu', '')}.")
+        elif tc.get("file_moi"):
+            txt += f"  Đã tạo thêm thư mục + file cho {tc['file_moi']} khách chưa có."
+        if tc.get("loi"):
+            txt += "  ⚠ " + tc["loi"]
         self.kh_state.setText(txt)
         self.kh_btn.setEnabled(not on)
         self.kh_undo.setEnabled(on)
