@@ -495,6 +495,7 @@ class Lot:
     def record(self):
         self.apply_suppliers()
         self.core.lot_fix_code_names(self.store, self.customer, self.items)  # dòng đã đọc từ bản cũ có tên = mã: sửa trước khi xuất
+        self.core.lot_apply_ten_khai_bao(self.store, self.customer, self.items)  # tên khai báo đã học từ tờ khai (bước ⑤)
         self.normalize()
         self.core.lot_recalc(self.items, self.customer, self.form.get("tare", ""))  # cả bì = tịnh + bì cộng thêm mỗi dòng đang nhập ở bước ④, cho mọi invoice
         form = dict(self.form, customer=self.customer, schedule="", po_dates=self.po_dates, record_id=self.record_id, po_files=self.po_files,
@@ -613,6 +614,26 @@ class Lot:
         self.tk_result = res
         self._note_file("TKCHECK", res["fname"], res["path"], datetime.datetime.now().strftime("%d/%m/%Y %H:%M"))
         return res
+
+    def name_fixes(self):
+        """Các dòng SAI TÊN của lần kiểm tra gần nhất: [(tên trên Invoice, tên trên tờ khai)]."""
+        res = (self.tk_result or {}).get("result")
+        if not res:
+            return []
+        return [(r["inv"]["name"], r["tk"]["raw"]) for r in res["rows"] if r["status"] == "SAI TÊN" and r["tk"] and r["inv"]]
+
+    def learn_tokhai_names(self):
+        """Tên trên tờ khai là đúng: nhớ cho mã hàng và áp luôn vào các dòng của lô. Trả số dòng đã học."""
+        res = (self.tk_result or {}).get("result")
+        if not res:
+            return 0
+        rec = self.record()
+        done = self.core.lot_learn_tokhai_names(self.store, rec, res)
+        for i, _old, new in done:
+            if 0 <= i < len(self.items):
+                self.items[i]["ten_hq"] = new
+        self.saved = False
+        return len(done)
 
     def save(self):
         rec = self.core.lot_save_new(self.store, self.record(), self.exported)

@@ -1465,8 +1465,13 @@ class TokhaiStep(QWidget):
         self.dir_btn = QPushButton("📁  Mở thư mục lô")
         self.dir_btn.setObjectName("sec")
         self.dir_btn.clicked.connect(lambda: widgets.open_folder(self.lot.folder()))
+        self.learn_btn = QPushButton("🧠  Học tên khai báo đúng")
+        self.learn_btn.setObjectName("sec")
+        self.learn_btn.setToolTip("Các dòng SAI TÊN: nếu tên trên tờ khai là đúng, nhớ tên đó cho mã hàng để lô sau Invoice dùng đúng tên")
+        self.learn_btn.clicked.connect(self.learn)
         brow.addWidget(self.reopen_btn)
         brow.addWidget(self.dir_btn)
+        brow.addWidget(self.learn_btn)
         brow.addStretch(1)
         lay.addLayout(brow)
         self.msg = _label("", "hint", wrap=True)
@@ -1491,6 +1496,9 @@ class TokhaiStep(QWidget):
         else:
             self.result.setText(_lines_html(["Chưa kiểm tra. Nạp tờ khai rồi bấm “Kiểm tra & mở Excel”."]))
         self.reopen_btn.setEnabled(bool(res and os.path.exists(res["path"])))
+        n_fix = len(self.lot.name_fixes())
+        self.learn_btn.setVisible(n_fix > 0)
+        self.learn_btn.setText(f"🧠  Học tên khai báo đúng ({n_fix} dòng)")
 
     def choose(self, append):
         paths, _ = QFileDialog.getOpenFileNames(self, "Chọn file tờ khai nháp", "", "Tờ khai (*.xlsx *.xlsm *.xls *.csv)")
@@ -1529,6 +1537,17 @@ class TokhaiStep(QWidget):
         note = " File kiểm tra cũ đang mở trong Excel nên đã ghi bản mới." if res.get("renamed") else ""
         self.msg.setText(f"Đã ghi {res['fname']} vào thư mục lô.{note}")
         widgets.open_file(res["path"])
+
+    def learn(self):
+        fixes = self.lot.name_fixes()
+        if not fixes:
+            return
+        show = "\n".join(f"• {a}\n   → {b}" for a, b in fixes[:6]) + (f"\n… và {len(fixes) - 6} dòng nữa" if len(fixes) > 6 else "")
+        if not widgets.ask(self, "Học tên khai báo", f"Tên trên tờ khai là ĐÚNG? Lô sau Invoice sẽ ghi theo tên này:\n\n{show}"):
+            return
+        n = self.lot.learn_tokhai_names()
+        self.msg.setText(f"Đã học {n} tên khai báo. Từ giờ Invoice của khách này ghi theo tên đó; bấm “Kiểm tra & mở Excel” để kiểm tra lại.")
+        self.refresh()
 
     def reopen(self):
         if self.lot.tk_result:

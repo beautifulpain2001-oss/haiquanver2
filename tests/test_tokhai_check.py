@@ -248,3 +248,26 @@ def test_record_keeps_tokhai_files(store):
 def test_no_items_raises(store):
     with pytest.raises(ValueError):
         app.lot_tokhai_check(store, shirai_rec(items=[]), [str(TK_FILE)])
+
+
+def test_learn_declared_name(store):
+    """Học tên khai báo đúng: dòng SAI TÊN -> nhớ tên tờ khai, lô sau Invoice dùng tên đó và khớp."""
+    rows = tk_rows()
+    r3 = find_row(rows, "<03>")
+    d_row = next(i for i in range(r3, r3 + 6) if tc.cell_text(rows[i][2]) == "Mô tả hàng hóa")
+    set_cell(rows, d_row, 5, "Tấm lót Pad NTI-LS0019060SDH(AF_2X:W130xD5xH290) Po.No 202639HT . Hàng mới 100%")
+    rec = shirai_rec()
+    _wb, res = run(rec, rows)
+    sai = [r for r in res["rows"] if r["status"] == "SAI TÊN"]
+    assert len(sai) == 1
+    done = app.lot_learn_tokhai_names(store, rec, res)
+    assert len(done) == 1
+    items = rec["items"]
+    assert items[done[0][0]]["ten_hq"] == done[0][2]
+    assert store.ten_khai_bao_for("shirai", items[done[0][0]]) == done[0][2]
+    # lô mới: tên đã học được áp lại
+    fresh = shirai_rec()
+    assert app.lot_apply_ten_khai_bao(store, "shirai", fresh["items"]) == 1
+    # kiểm tra lại với tên đã sửa -> hết SAI TÊN
+    _wb, res2 = run(rec, rows)
+    assert not [r for r in res2["rows"] if r["status"] == "SAI TÊN"]
