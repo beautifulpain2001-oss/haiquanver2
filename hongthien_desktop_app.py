@@ -1296,6 +1296,20 @@ class DedicatedDataStore:
         self.save_catalog()
         return it
 
+    def add_custom_item(self, cust_key, name, price=0, unit="", source="po"):
+        """Thêm mặt hàng mới (VD quy cách mới đọc từ PO Shuangsheng) vào danh mục của khách đã học. Đã có (trùng tên) thì trả mục cũ.
+        kg/chiếc, SL/kiện, HS để trống: người dùng điền một lần ở bước kiểm tra dòng, app nhớ vào chính mục này cho các lần sau."""
+        lst = self.custom_items.setdefault(cust_key, [])
+        hit = next((it for it in lst if it.get("name") == name), None)
+        if hit:
+            return hit
+        prof = PROFILES.get(cust_key) or {}
+        it = {"name": name, "code": "", "price": price or 0, "div": 0, "kg": 0, "hs": "", "unit": unit or prof.get("unit", ""),
+              "ten_hq": name, "tare": prof.get("tare", 0.0), "src": source}
+        lst.append(it)
+        self.save_catalog()
+        return it
+
     def remember_item_refs(self, cust_key, name, refs):
         """Nhớ mã vật liệu / Inquiry No / Customs No người dùng đã sửa, để lần quét PO sau dùng thay chữ OCR."""
         for it in self.custom_items.get(cust_key, []):
@@ -9562,13 +9576,30 @@ def lines_from_spec_rows(rows, po_no, profile, catalog_items, data_store=None, t
     for ln, r, ok in zip(lines, rows, known_flags):
         if profile.get("dept"):
             ln["dept"] = profile["dept"]
-        if ok:
+        if ok and not (ln.get("kg") and ln.get("div")):
+            ln["read"], ln["read_note"] = "suy_ra", "Quy cách đã có trong danh mục nhưng chưa có kg/chiếc hoặc SL/kiện: điền một lần, app nhớ cho lần sau"
+        elif ok:
             ln["read"], ln["read_note"] = "ok", ""
         elif r["dims"]:
             ln["read"], ln["read_note"] = "suy_ra", "Quy cách mới, chưa học: điền kg/ống và SL/kiện (SL x đơn giá đã khớp thành tiền trên PO)"
         else:
             ln["read"], ln["read_note"] = "suy_ra", "Không đọc được quy cách trên PO: sửa tên hàng, điền kg/ống và SL/kiện (SL x đơn giá đã khớp thành tiền)"
     return lines
+
+
+def spec_new_items_to_catalog(store, customer, lines, rows):
+    """Quy cách mới đọc được trên PO (đủ 3 số, SL x giá đã khớp thành tiền) được tự thêm vào danh mục của khách, để người dùng
+    chỉ điền kg/chiếc, SL/kiện một lần (app nhớ vào mục này) thay vì tạo mã mới bằng tay. Trả danh sách tên đã thêm."""
+    added = []
+    known = {it.get("name") for it in store.items_for_customer(customer)}
+    for ln, r in zip(lines, rows):
+        if ln.get("read") != "suy_ra" or not r.get("dims") or ln["ten_sp"] in known:
+            continue
+        store.add_custom_item(customer, ln["ten_sp"], price=ln.get("price") or 0, unit=ln.get("unit") or "")
+        known.add(ln["ten_sp"])
+        added.append(ln["ten_sp"])
+        ln["read_note"] = "Quy cách mới, đã tự thêm vào danh mục khách: điền kg/chiếc và SL/kiện (SL x đơn giá đã khớp thành tiền trên PO)"
+    return added
 
 
 def lines_from_erp_rows(rows, po_no, profile, catalog_items, data_store=None, tare_val=0.0):
@@ -10656,6 +10687,7 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
             lines = lines_from_best_rows(best_rows, po_no, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
         elif spec_rows:
             lines = lines_from_spec_rows(spec_rows, po_no, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
+            res["new_items"] = spec_new_items_to_catalog(store, customer, lines, spec_rows)
         elif scan_rep and scan_rep["rows"]:
             lines = lines_from_able_scan(scan_rep["rows"], prof, store.items_for_customer(customer), store, tare_v)
             po_no = lines[0].get("po") or po_no
@@ -10699,6 +10731,7 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
             spec_rows = [] if is_pick_items(prof) else parse_spec_po_rows(raw_text)
             if len(spec_rows) > len(lines):
                 lines = lines_from_spec_rows(spec_rows, po_no, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
+                res["new_items"] = spec_new_items_to_catalog(store, customer, lines, spec_rows)
             res["ocr_retry"] = bool(lines)
         if lines and not (scan_rep and scan_rep["rows"]):
             chk = po_total_check(raw_text, lines)
@@ -10735,6 +10768,9 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
             res["msg"] += " (Lớp chữ có sẵn của PDF không có dòng hàng nên app đã OCR lại ảnh trang.)"
         if res.get("po_check"):
             res["msg"] += " " + res["po_check"]
+        if res.get("new_items"):
+            res["msg"] += (f" Đã tự thêm {len(res['new_items'])} quy cách mới vào danh mục khách ({', '.join(res['new_items'])}):"
+                           " điền kg/chiếc và SL/kiện ở bước kiểm tra dòng, app nhớ cho lần sau.")
         if res.get("read_report"):
             res["msg"] = res["read_report"]["text"]
         return res
