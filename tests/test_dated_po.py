@@ -152,7 +152,8 @@ def test_excel_table_po_skips_empty_rows_matches_by_paren_code_or_dims_and_reads
     assert unknown["qty"] == 10 and unknown["price"] == 500 and unknown.get("read") == "suy_ra"
 
 
-def test_po_item_names_resolved_by_material_code_and_spec_from_customer_then_erp(tmp_path):
+def test_po_item_names_resolved_by_material_code_and_spec_from_customer_then_erp(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DUNG_ERP", True)  # kiểm tra đường tra ERP khi bật lại (mặc định từ 21/11/2026 đã tắt)
     store = app.DedicatedDataStore(base_dir=str(tmp_path / "d"))
     items = [
         # mã 203020046 bị học nhầm cho tấm slip: kích thước trong mô tả PO (ống 53x50x220) mâu thuẫn nên không được tin
@@ -252,7 +253,8 @@ tesa Purchase Order: 5200049042 Page 2
 """
 
 
-def test_tesa_new_po_format_adds_code_from_erp(tmp_path):
+def test_tesa_new_po_format_adds_code_from_erp(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "DUNG_ERP", True)  # kiểm tra đường tra ERP khi bật lại (mặc định từ 21/11/2026 đã tắt)
     store = app.DedicatedDataStore(base_dir=str(tmp_path / "d"))
     n0 = len(store.tesa_items)
     store.erp_catalog = [{"ma_sp": "TM91120-001-00099", "ten_sp": "Ống lõi giấy phi 153 x 15 x 1500mm", "mota": ""}]

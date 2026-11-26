@@ -173,8 +173,9 @@ def test_merged_lot_refreshes_and_exports(qapp, store, tmp_path):
     page.close()
 
 
-def test_code_links_erp_and_customer_entries(store):
+def test_code_links_erp_and_customer_entries(store, monkeypatch):
     """Cùng mã khách: mục ERP (70g, mã ERP) và mục học từ invoice (67g, SL/kiện) gộp một; số khai theo invoice (ưu tiên hơn ERP), ERP chỉ để đối chiếu; sửa tay thắng cả hai."""
+    monkeypatch.setattr(app, "DUNG_ERP", True)  # kiểm tra đường tra ERP khi bật lại (mặc định từ 21/11/2026 đã tắt)
     store.save_learned_customer("arzl", {"name": "CÔNG TY TNHH ARIZON L", "label": "ArzL", "mst": "0100000032", "addr": "HY", "unit": "Chiếc"},
                                 [{"name": "Ống giấy 76x5x67", "code": "3609100670001", "price": 10, "div": 0, "kg": 0.067}])
     store._dt_upsert("ArzL", "Ống giấy 76x5x67", ma_hang="3609100670001", kg=0.067, kg_nguon="invoice", kien=200, kien_nguon="invoice", exact=True)
@@ -420,8 +421,9 @@ def test_cap_nhat_ma_sets_unit_kien_kg_by_code_and_adds_missing(store):
 
 
 
-def test_items_step_erp_button_shows_erp_columns_without_changing_invoice_numbers(qapp, store):
+def test_items_step_erp_button_shows_erp_columns_without_changing_invoice_numbers(qapp, store, monkeypatch):
     """Bước kiểm tra dòng: cột ERP ẩn mặc định; bấm "Hiện dữ liệu ERP" thì hiện mã/tên/kg ERP để đối chiếu, số khai vẫn theo invoice."""
+    monkeypatch.setattr(app, "DUNG_ERP", True)  # kiểm tra đường tra ERP khi bật lại (mặc định từ 21/11/2026 đã tắt)
     from ui_qt.pages_lot import C_ERP, COLS, ItemsStep
     from ui_qt.state import Lot
     store.save_learned_customer("arzn", {"name": "CÔNG TY TNHH ARIZON N", "label": "ArzN", "mst": "0100000033", "addr": "HY", "unit": "Chiếc"},

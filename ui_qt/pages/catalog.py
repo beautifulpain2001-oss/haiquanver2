@@ -170,7 +170,7 @@ class CatalogPage(_Page):
         e = [x for x in self.store.erp_catalog if not q or q in f"{x.get('ma_sp','')} {x.get('ten_sp','')}".lower()]
         self.erp.model().set_rows([[k, x.get("ma_sp", ""), x.get("ten_sp", ""), x.get("mota", "")] for k, x in enumerate(e, 1)])
         self.tabs.setTabText(2, f"Thư viện cân nặng ({len(w)})")
-        self.tabs.setTabText(3, f"Danh mục ERP ({len(e)})")
+        self.tabs.setTabText(3, f"Danh mục ERP cũ, không dùng ({len(e)})")
 
     def refresh_tabs(self):
         i = self.tabs.currentIndex()
