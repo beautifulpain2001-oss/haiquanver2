@@ -70,4 +70,29 @@ def test_bilingual_learned_po_still_reads_by_catalog():
     rows = app.parse_spec_po_rows(text)
     assert [(r["dims"][2], r["qty"], r["price"]) for r in rows] == [("1002", 2000, 32023), ("1030", 200, 33000)]
     lines = app.lines_from_spec_rows(rows, "P", PROF, CAT)
-    assert [x["read"] for x in lines] == ["ok", "ok"]
+    assert [x["read"] for x in lines] == ["ok", "suy_ra"]  # 1030mm đã học nhưng chưa có kg/chiếc
+
+
+def test_new_specs_added_to_customer_catalog_and_remembered(store, tmp_path, monkeypatch):
+    """Quy cách mới tự thêm vào danh mục khách; người dùng điền kg/SL kiện một lần, lần đọc PO sau ra đủ số (read=ok)."""
+    store.save_learned_customer("shuangsheng", {"name": "CÔNG TY TNHH VẬT LIỆU MỚI SHUANGSHENG VIETNAM", "label": "Shuangsheng",
+                                                "mst": "4601622355", "addr": "TN", "unit": "Cái", "po_pattern": PROF["po_pattern"]}, CAT)
+    pdf = tmp_path / "PO.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    monkeypatch.setattr(app, "read_document_text", lambda path, force_ocr=False: OCR)
+    monkeypatch.setattr(app, "_pdf_has_text", lambda path: True)
+    res = app.lot_load_po(store, str(pdf), "shuangsheng")
+    assert res["new_items"] == ["Ống lõi giấy 78 x 6 x 1005mm", "Ống lõi giấy 78 x 6 x 1022mm"] and "tự thêm 2 quy cách" in res["msg"]
+    names = [it["name"] for it in store.items_for_customer("shuangsheng")]
+    assert "Ống lõi giấy 78 x 6 x 1005mm" in names and "Ống lõi giấy 78 x 6 x 1022mm" in names
+    new = next(it for it in store.items_for_customer("shuangsheng") if it["name"].endswith("1005mm"))
+    assert (new["price"], new["unit"], new["kg"], new["div"]) == (32119, "Cái", 0, 0)
+    # đọc lại khi chưa điền: không thêm trùng, vẫn báo cần điền kg/SL kiện
+    res2 = app.lot_load_po(store, str(pdf), "shuangsheng")
+    assert not res2.get("new_items") and len(store.items_for_customer("shuangsheng")) == 4
+    assert all(x["read"] == "suy_ra" for x in res2["items"])
+    # người dùng điền ở bước kiểm tra dòng -> lần sau ra đủ số
+    store.remember_item_norm("Ống lõi giấy 78 x 6 x 1005mm", 5, 1.37, customer="shuangsheng")
+    res3 = app.lot_load_po(store, str(pdf), "shuangsheng")
+    first = res3["items"][0]
+    assert (first["read"], first["div"], first["kien"], first["kg"]) == ("ok", 5, 400, 1.37)
