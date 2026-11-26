@@ -741,6 +741,7 @@ class ItemsStep(QWidget):
         self.erp_btn.setCheckable(True)
         self.erp_btn.setToolTip("Mã hàng, tên, kg/chiếc khai hải quan luôn lấy theo invoice (danh mục khách). Bấm để hiện thêm cột dữ liệu ERP đối chiếu; ô kg ERP tô cam khi khác invoice.")
         self.erp_btn.clicked.connect(self.toggle_erp)
+        self.erp_btn.setVisible(bool(getattr(self.lot.core, "DUNG_ERP", False)))  # không dùng ERP nữa: ẩn nút đối chiếu ERP
         bar.addWidget(self.erp_btn)
         bar.addStretch(1)
         self.view_btn = QPushButton("📄  Xem PO")
