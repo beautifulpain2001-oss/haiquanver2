@@ -9238,6 +9238,95 @@ def lines_from_best_rows(rows, po_no, profile, catalog_items, data_store=None, t
     return lines
 
 
+# PO scan song ngữ (VD Shuangsheng): dòng hàng bắt đầu bằng STT '01', quy cách 'phi*dày*dài mm' nằm trên dòng đó
+# hoặc dòng chữ Hán lặp lại ngay dưới. OCR hay đọc '*' thành '%', '6' thành 'ó', chèn dấu cách trong '1 022'.
+_SPEC_ROW_START = re.compile(r"^\W{0,3}(\d{1,2})(?=[\s|])")
+_SPEC_OCR = re.compile(r"(?<![\d.,])(\d{2,3}(?:[.,]\d)?)\s*[^\d\s.,]{1,2}\s*(\d{1,2}(?:[.,]\d)?|[óÓ])\s*[^\d\s.,]{1,2}\s*(\d(?:\s?\d){2,3})\s*mm", re.I)
+
+
+def _spec_in(line):
+    m = _SPEC_OCR.search(line or "")
+    if not m:
+        return None
+    a, b, c = m.groups()
+    b = "6" if b in "óÓ" else b
+    return [a.replace(",", "."), b.replace(",", "."), re.sub(r"\s", "", c)]
+
+
+def parse_spec_po_rows(text):
+    """PO không ghi mã hàng, chỉ ghi quy cách (VD Shuangsheng 'Ống lõi giấy quy cách 78*6*1005mm'), kể cả quy cách chưa học.
+    Dòng hàng = dòng bắt đầu bằng STT có bộ ba SL x đơn giá = thành tiền (số nguyên, không đoán); quy cách lấy trên dòng đó,
+    không có thì ở 3 dòng ngay dưới (dòng chữ Hán lặp quy cách) rồi dòng ngay trên. Trả [] nếu không có dòng nào chắc chắn."""
+    src = (text or "").splitlines()
+    rows = []
+    for i, line in enumerate(src):
+        m = _SPEC_ROW_START.match(line)
+        if not m or _TOTAL_LABEL.search(line):
+            continue
+        body = _normalize_ocr_numbers(line[m.end():])
+        body = _SPEC_OCR.sub(" ", body)  # số quy cách không phải SL/giá
+        vals = [v for v in (parse_vn_number(x) for x in re.findall(r"\d{1,3}(?:[.,]\d{3})+(?![\d])|\d+", body)) if v]
+        trio = None
+        for a in vals:  # thành tiền = số lớn nhất khớp SL x giá; SL là số nguyên
+            for j, q in enumerate(vals):
+                for k, p in enumerate(vals):
+                    if j != k and q != a and p != a and q >= 1 and float(q).is_integer() and p > 0 \
+                            and abs(q * p - a) <= max(1, a * 1e-6) and (trio is None or a > trio[2]):
+                        trio = (q, p, a)
+        if not trio:
+            continue
+        below = []
+        for nxt in src[i + 1:i + 4]:
+            if _SPEC_ROW_START.match(nxt) and any(parse_vn_number(x) for x in re.findall(r"\d{1,3}(?:[.,]\d{3})+", nxt)) or _TOTAL_LABEL.search(nxt):
+                break
+            below.append(nxt)
+        dims = None
+        for cand in [line] + below + (src[i - 1:i] if i else []):
+            dims = _spec_in(cand)
+            if dims:
+                break
+        rows.append({"no": int(m.group(1)), "dims": dims, "qty": trio[0], "price": trio[1], "amount": trio[2]})
+    return rows
+
+
+def lines_from_spec_rows(rows, po_no, profile, catalog_items, data_store=None, tare_val=0.0):
+    """Dòng hàng từ parse_spec_po_rows. Nhận mặt hàng đã học theo đủ 3 số quy cách; không đọc được quy cách thì theo đơn giá
+    đã học (đúng một mặt hàng). Quy cách mới đặt tên theo kiểu tên đã học của khách ('Ống lõi giấy 78 x 6 x 1005mm'),
+    kg/ống và SL/kiện để người dùng điền (không chia ngược từ số khác)."""
+    with_dims = [(it, _name_dims(it.get("name"))[0]) for it in catalog_items]
+    rows2, known_flags = [], []
+    for r in rows:
+        known = None
+        if r["dims"]:
+            known = next((it for it, d in with_dims if d == r["dims"]), None)
+        else:
+            same = [it for it in catalog_items if it.get("price") and abs(float(it["price"]) - r["price"]) < 0.5]
+            known = same[0] if len(same) == 1 else None
+        if known:
+            name = known["name"]
+        elif r["dims"]:
+            a, b, c = r["dims"]
+            tpl = next((it for it, d in with_dims if len(d) == 3 and d[:2] == [a, b]), None) \
+                or next((it for it, d in with_dims if len(d) == 3), None)
+            m = re.search(_dims_regex(_name_dims(tpl["name"])[0]), tpl["name"], re.I) if tpl else None
+            name = (tpl["name"][:m.start()] + f"{a} x {b} x {c}" + tpl["name"][m.end():]) if m else f"Ống lõi giấy {a} x {b} x {c}mm"
+        else:
+            name = "Ống lõi giấy (chưa đọc được quy cách)"
+        rows2.append({"code": (known or {}).get("code") or "", "desc": name, "qty": r["qty"], "price": r["price"], "_known": known or {}})
+        known_flags.append(bool(known))
+    lines = lines_from_erp_rows(rows2, po_no, profile, catalog_items, data_store=data_store, tare_val=tare_val)
+    for ln, r, ok in zip(lines, rows, known_flags):
+        if profile.get("dept"):
+            ln["dept"] = profile["dept"]
+        if ok:
+            ln["read"], ln["read_note"] = "ok", ""
+        elif r["dims"]:
+            ln["read"], ln["read_note"] = "suy_ra", "Quy cách mới, chưa học: điền kg/ống và SL/kiện (SL x đơn giá đã khớp thành tiền trên PO)"
+        else:
+            ln["read"], ln["read_note"] = "suy_ra", "Không đọc được quy cách trên PO: sửa tên hàng, điền kg/ống và SL/kiện (SL x đơn giá đã khớp thành tiền)"
+    return lines
+
+
 def lines_from_erp_rows(rows, po_no, profile, catalog_items, data_store=None, tare_val=0.0):
     """Dòng hàng từ parse_erp_po_rows: mặt hàng đã học (theo mã) lấy tên, kg, định mức đã nhớ; mặt hàng mới lấy tên/giá theo PO
     (kg, định mức để trống cho người dùng điền ở Bước 3, rồi được nhớ cho lần sau)."""
@@ -10274,8 +10363,15 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
             best_rows = parse_best_po_rows(raw_text)  # PO Best có lớp chữ: đọc đủ mọi dòng, cả quy cách chưa học
             if len(best_rows) < len(lines):
                 best_rows = []
+        spec_rows = []
+        if raw_text and not is_pick_items(prof) and not (best_rows or table_rows or dated_rows or erp_rows or (scan_rep and scan_rep["rows"])):
+            spec_rows = parse_spec_po_rows(raw_text)  # PO chỉ ghi quy cách (Shuangsheng): đọc đủ mọi dòng, cả quy cách chưa học
+            if len(spec_rows) <= len(lines):
+                spec_rows = []
         if best_rows:
             lines = lines_from_best_rows(best_rows, po_no, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
+        elif spec_rows:
+            lines = lines_from_spec_rows(spec_rows, po_no, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
         elif scan_rep and scan_rep["rows"]:
             lines = lines_from_able_scan(scan_rep["rows"], prof, store.items_for_customer(customer), store, tare_v)
             po_no = lines[0].get("po") or po_no
@@ -10316,6 +10412,9 @@ def lot_load_po(store, path, customer, tare_text="", existing_items=None, append
             raw_text = read_document_text(path, force_ocr=True)
             po_no2, po_date2, lines = parse_generic_po_text(raw_text, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
             po_no, po_date = po_no or po_no2, po_date or po_date2
+            spec_rows = [] if is_pick_items(prof) else parse_spec_po_rows(raw_text)
+            if len(spec_rows) > len(lines):
+                lines = lines_from_spec_rows(spec_rows, po_no, prof, store.items_for_customer(customer), data_store=store, tare_val=tare_v)
             res["ocr_retry"] = bool(lines)
         if lines and not (scan_rep and scan_rep["rows"]):
             chk = po_total_check(raw_text, lines)
