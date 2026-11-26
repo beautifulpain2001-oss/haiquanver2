@@ -796,6 +796,7 @@ class DedicatedDataStore:
         self.dinh_muc_kh = {}  # định mức theo tên RIÊNG từng khách: {mã khách: {tên hàng: {div, kg, hs}}}
         self.dinh_muc_kh_v = 0  # 1 = đã chia định mức chung cũ (item_mem) vào từng khách
         self.erp_rieng = {}  # mã ERP theo tên hàng RIÊNG của khách (Shirai): {mã khách: [{ma_sp, ten_sp}]}, chép từ ERP cũ một lần
+        self.ten_khai_bao = {}  # tên khai báo đúng học từ tờ khai (bước ⑤): {khách: {mã hoặc tên hàng: tên trên tờ khai}}
         self.suppliers = []  # nhà cung ứng của Shirai: [{name, mst, addr}]
         self.supplier_pref = {}  # lựa chọn đã nhớ: 'nhom:carton' / 'ma:<mã>' -> tên nhà cung ứng
         self.ten_kh_tay = {}  # tên theo khách hàng do người dùng nhập khi ERP chưa có: {mã: tên}
@@ -1090,6 +1091,7 @@ class DedicatedDataStore:
             self.tesa_items = data["tesa_items"]
         if data.get("item_mem"):
             self.item_mem = data["item_mem"]
+        self.ten_khai_bao = data.get("ten_khai_bao") or {}
         self.read_fixes = list(data.get("read_fixes") or [])
         self.dinh_muc_kh = {k: dict(v) for k, v in (data.get("dinh_muc_kh") or {}).items() if isinstance(v, dict)}
         self.dinh_muc_kh_v = int(data.get("dinh_muc_kh_v") or 0)
@@ -1121,6 +1123,27 @@ class DedicatedDataStore:
             k = clean_str(it.get("ten_sp", ""))
             if k:
                 self.erp_map[k] = it.get("ma_sp", "")
+
+    @staticmethod
+    def _tkb_key(it):
+        """Khóa nhớ tên khai báo của một dòng hàng: mã hàng nếu có, không thì tên hàng."""
+        return str(it.get("ma_sp") or "").strip() or str(it.get("ten_sp") or "").strip()
+
+    def ten_khai_bao_for(self, customer, it):
+        return (self.ten_khai_bao.get(customer) or {}).get(self._tkb_key(it), "")
+
+    def learn_ten_khai_bao(self, customer, pairs):
+        """Nhớ tên khai báo đúng: pairs = [(dòng hàng, tên trên tờ khai)]. Trả số mục đã thêm/đổi."""
+        n = 0
+        mem = self.ten_khai_bao.setdefault(customer, {})
+        for it, name in pairs:
+            key, name = self._tkb_key(it), str(name or "").strip()
+            if key and name and mem.get(key) != name:
+                mem[key] = name
+                n += 1
+        if n:
+            self.save_catalog()
+        return n
 
     def remember_item_norm(self, name, div, kg, hs="", code="", customer=""):
         """Nhớ định mức người dùng đã sửa (SL/kiện, kg/chiếc, HS) cho mặt hàng: theo TÊN và theo MÃ HÀNG (danh mục khách của mã đó, kể cả khi tên trên PO
@@ -2799,7 +2822,7 @@ class DedicatedDataStore:
     HE_THONG_DIR, HE_THONG_FILE, KHACH_FILE_PRE = "_HE_THONG", "he_thong.json", "DU_LIEU_"
     _HT_CAT_KEYS = ("company", "address", "tax_code", "company_info", "vehicle_pairs", "erp_catalog", "item_mem", "suppliers",
                     "tesa_dinh_muc_v", "tesa_dinh_muc_dt_v", "dinh_muc_kh_v")
-    _PER_KH_CAT_KEYS = ("custom_profiles", "custom_items", "profile_overrides", "dinh_muc_kh", "erp_rieng")  # {mã khách: ...}: mỗi khách vào file của mình
+    _PER_KH_CAT_KEYS = ("custom_profiles", "custom_items", "profile_overrides", "dinh_muc_kh", "erp_rieng", "ten_khai_bao")  # {mã khách: ...}: mỗi khách vào file của mình
     _SHIRAI_CAT_KEYS = ("weights_db", "supplier_pref", "ten_kh_tay")
 
     def he_thong_path(self):
@@ -3625,6 +3648,7 @@ class DedicatedDataStore:
             "dinh_muc_kh": self.dinh_muc_kh,
             "dinh_muc_kh_v": self.dinh_muc_kh_v,
             "erp_rieng": self.erp_rieng,
+            "ten_khai_bao": self.ten_khai_bao,
             "custom_profiles": self.custom_profiles,
             "custom_items": self.custom_items,
             "suppliers": self.suppliers,
@@ -3775,6 +3799,7 @@ class DedicatedDataStore:
     MADE_PREFIXES = (("invoice_", "Invoice (Excel)"), ("DongGoi_", "Đóng gói (Excel)"), ("Hoa_Don_VAT", "Hóa đơn Bkav (Excel)"), ("PXK_", "PXK Bkav (Excel)"),
                      ("ToKhai_B11", "Dữ liệu tờ khai B11"), ("PhieuGiaoHang", "Phiếu giao hàng"), ("DoiChieuCongNo", "Đối chiếu công nợ"),
                      ("DNTT", "Đề nghị thanh toán"), ("dsh_", "Danh sách hàng ECUS (Excel)"), ("KiemTraCheo", "Kiểm tra chéo"),
+                     ("KiemTraToKhai", "Kiểm tra tờ khai"), ("ToKhaiNhap_", "Tờ khai nháp ECUS"),
                      ("Bo_Ho_So_Xuat_Hang", "Bộ hồ sơ"), ("00_HO_SO_", "Hồ sơ lưu"), ("PLX_", "PLX (Excel)"), ("SO_", "Đơn đặt hàng"), ("PO_goc_", "PO gốc"), ("BienBanBanGiao", "Biên bản bàn giao"), ("DonDatHang", "Đơn đặt hàng (PO)"), ("dccn", "Đối chiếu công nợ"))
     MODE_TO_MADE = {"PKL": "Invoice (Excel)", "PACK": "Đóng gói (Excel)", "VAT": "Hóa đơn Bkav (Excel)", "PXK": "PXK Bkav (Excel)",
                     "PGH": "Phiếu giao hàng", "DCCN": "Đối chiếu công nợ", "DNTT": "Đề nghị thanh toán", "PLX": "PLX (Excel)", "SO": "Đơn đặt hàng",
@@ -9840,6 +9865,8 @@ def lot_build_record(store, form, items):
         "totalKien": tot_kien,
         "updatedAt": datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
         "poFiles": [str(x) for x in (form.get("po_files") or []) if x],
+        "tkDraftFiles": [str(x) for x in (form.get("tk_files") or []) if x],  # tờ khai nháp đã nạp ở bước ⑤ (bản sao trong thư mục lô)
+        "tkTol": form.get("tk_tol") or 0.0,
         "workedBy": store.user_name(),  # người làm hồ sơ (tên đặt ở Cài đặt của từng máy)
         "items": [dict(x) for x in items],
         "files": {"po": None, "pxk": None, "vat": None, "pkl": None, "tk": None, "scan": None},
@@ -10078,7 +10105,15 @@ LOT_MODE_LABELS = {
     "PLX": "Phụ lục X", "PGH": "Phiếu giao hàng", "DCCN": "Đối chiếu công nợ", "DNTT": "Đề nghị thanh toán",
     "CHECK": "Kiểm tra chéo", "BBGH": "Biên bản bàn giao", "PO": "Đơn đặt hàng (PO)",
     "BDC": "Bảng đối chiếu hàng hóa", "SC": "Sale Contract 销售合同", "M22": "Mẫu số 22 (nhập khẩu tại chỗ)", "BKLS": "Bảng kê lâm sản (pallet)",
+    "TKCHECK": "Kiểm tra tờ khai",
 }
+
+
+def lot_tokhai_check(store, rec, paths, tol=0.0, paste_text=None):
+    """Bước ⑤: đối chiếu tờ khai nháp ECUS (file Excel/CSV hoặc đoạn dán) với Invoice, Hóa đơn VAT, PXK của lô; ghi
+    KiemTraToKhai_<khách>_<ngày>.xlsx vào thư mục lô. Logic ở tokhai_check.py (chép macro ModToKhai). Không nằm trong 'Xuất trọn bộ'."""
+    import tokhai_check
+    return tokhai_check.run_check(sys.modules[__name__], store, rec, paths, tol, paste_text)
 
 
 def lot_bundle_modes(rec):
@@ -10484,6 +10519,36 @@ def tesa_names_for(code):
 
 
 _BARE_CODE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/\u2010-\u2015-]{6,}")
+
+
+def lot_apply_ten_khai_bao(store, customer, items):
+    """Dòng hàng có tên khai báo đã học từ tờ khai (bước ⑤) thì dùng tên đó làm tên khai hải quan (ten_hq). Trả số dòng đổi."""
+    n = 0
+    for it in items:
+        name = store.ten_khai_bao_for(customer, it)
+        if name and it.get("ten_hq") != name:
+            it["ten_hq"] = name
+            n += 1
+    return n
+
+
+def lot_learn_tokhai_names(store, rec, result):
+    """Huy xác nhận tên trên tờ khai là đúng: với mỗi dòng SAI TÊN, nhớ tên đó cho mã hàng để lô sau Invoice dùng đúng tên.
+    Trả [(dòng hàng trong rec, tên cũ, tên mới)] đã học; dòng hàng của rec cũng được đổi ten_hq."""
+    pairs, out = [], []
+    items = rec.get("items") or []
+    for r in result["rows"]:
+        if r["status"] != "SAI TÊN" or not r["tk"] or not r["inv"]:
+            continue
+        i = r["inv"]["row"] - 1
+        if 0 <= i < len(items):
+            new = r["tk"]["raw"]
+            out.append((i, r["inv"]["name"], new))
+            pairs.append((items[i], new))
+    store.learn_ten_khai_bao(rec["customer"], pairs)
+    for i, _old, new in out:
+        items[i]["ten_hq"] = new
+    return out
 
 
 def lot_fix_code_names(store, customer, items):

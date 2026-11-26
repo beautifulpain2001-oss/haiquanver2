@@ -83,6 +83,22 @@ def open_folder(path):
             pass
 
 
+def open_file(path):
+    """Mở file bằng chương trình mặc định (Windows: Excel cho .xlsx)."""
+    if not path or not os.path.exists(path):
+        return False
+    if QDesktopServices.openUrl(QUrl.fromLocalFile(path)):
+        return True
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(path)  # noqa: S606 - mở file người dùng vừa tạo
+        else:
+            subprocess.Popen(["xdg-open", path])
+        return True
+    except Exception:
+        return False
+
+
 def fmt_num(v, nd=0):
     try:
         return f"{float(v):,.{nd}f}"
