@@ -32,7 +32,7 @@ class TestProfiles:
     def test_company_constants(self):
         assert app.MST_HT == "2300723980"
         assert app.PROFILES["kodi"]["poInDocs"] is False
-        assert app.PROFILES["tesa"]["linePo"] is True and app.PROFILES["tesa"]["vatPoSuffix"] is True
+        assert app.PROFILES["tesa"]["linePo"] is True and app.PROFILES["tesa"]["vatPoSuffix"] is False
 
     def test_tesa_customs_defaults(self):
         c = app.PROFILES["tesa"]["customs"]
@@ -135,11 +135,11 @@ class TestTesa:
         ws = app.build_vat_bkav_sheet(new_wb(), seed["tesa"])
         assert [r[3] for r in ws.iter_rows(min_row=6, values_only=True)][0] == "8600226354"
 
-    def test_vat_name_has_fsc_and_po_suffix_but_pxk_has_only_fsc(self, seed):
+    def test_vat_and_pxk_name_have_fsc_but_no_po_suffix(self, seed):
         vat = app.build_vat_bkav_sheet(new_wb(), seed["tesa"])["C6"].value
         pxk = app.build_pxk_bkav_sheet(new_wb(), seed["tesa"])["E3"].value
         assert "FSC RECYCLED 100%(Số chứng chỉ:TAH-COC-013550)" in vat
-        assert vat.endswith(", PO:8600226354")
+        assert "PO:" not in vat and vat.endswith("TAH-COC-013550)")  # 27/11 Huy: số PO chỉ ở cột PO, không ghi đuôi tên hàng
         assert "FSC RECYCLED 100%" in pxk and "PO:" not in pxk
 
     def test_pkl_uses_line_po_and_unit(self, seed):

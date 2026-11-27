@@ -231,7 +231,7 @@ PROFILES = {
         "unit": "cái",
         "poInDocs": True,
         "linePo": True,
-        "vatPoSuffix": True,
+        "vatPoSuffix": False,  # 27/11 Huy: tên hàng hóa đơn Bkav Tesa không ghi đuôi ", PO:..." (PO đã có cột riêng)
         "lenhSeq": "01",
         "veViec": "",
         "driver": "",  # trống = mỗi lô chọn ngẫu nhiên 1 cặp lái xe + biển số (VEHICLE_PAIRS)
