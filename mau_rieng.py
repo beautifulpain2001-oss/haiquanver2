@@ -29,7 +29,7 @@ TOKENS = [
 ]
 ITEM_TOKENS = [
     ("stt", "Số thứ tự"), ("ma", "Mã hàng"), ("ten", "Tên hàng"), ("dvt", "Đơn vị tính"), ("sl", "Số lượng"), ("gia", "Đơn giá"),
-    ("thanh_tien", "Thành tiền"), ("kg", "kg/chiếc"), ("bi", "Bì của dòng (cả bì - tịnh, kg)"), ("kien", "Số kiện"), ("net", "Trọng lượng tịnh"), ("gross", "Trọng lượng cả bì"), ("hs_dong", "Mã HS"),
+    ("thanh_tien", "Thành tiền"), ("kg", "kg/chiếc"), ("bi", "Bì của dòng (cả bì - tịnh, kg)"), ("kien", "Số kiện"), ("dm_kien", "Số lượng mỗi kiện của dòng (định mức, VD công thức số kiện =ROUNDUP(I18/ô này,0))"), ("net", "Trọng lượng tịnh"), ("gross", "Trọng lượng cả bì"), ("hs_dong", "Mã HS"),
     ("dvt_hoa", "Đơn vị tính viết hoa chữ đầu"),
     ("quy_cach", "Quy cách 'phi x dày x dài' (VD 114 x 2.5 x 265)"), ("phi", "Đường kính trong (số)"), ("day", "Độ dày (số)"), ("dai", "Chiều dài (số)"),
     ("tc_phi", "Tiêu chuẩn đường kính trong (VD 114±0,5)"), ("tc_day", "Tiêu chuẩn độ dày (VD 2.5±0,2)"), ("tc_dai", "Tiêu chuẩn chiều dài (VD 265±2)"),
@@ -137,6 +137,7 @@ def item_values(rec, qc_items=None):
         out.append({"stt": i, "ma": it.get("ma_sp", ""), "ten": it.get("ten_sp", ""), "dvt": it.get("unit", ""), "sl": qty, "gia": price,
                     "thanh_tien": float(it.get("amount") or 0) or qty * price, "kg": float(it.get("kg") or 0), "kien": float(it.get("kien") or 0),
                     "net": float(it.get("net") or 0), "gross": float(it.get("gross") or 0), "hs_dong": it.get("hs", ""),
+                    "dm_kien": float(it.get("div") or 0),
                     "bi": round(float(it.get("gross") or 0) - float(it.get("net") or 0), 6),
                     "dvt_hoa": str(it.get("unit") or "")[:1].upper() + str(it.get("unit") or "")[1:]})
         out[-1].update(qc_values(it, (qc_items or {}).get(str(it.get("ma_sp") or ""))))

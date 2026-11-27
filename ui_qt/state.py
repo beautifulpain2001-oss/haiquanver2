@@ -127,6 +127,16 @@ class Lot:
         """Khách ít mã hàng (VD Inoac, cờ pickItems): PO không đọc được hoặc đọc chưa chắc thì người dùng chọn mã trong danh mục."""
         return bool(self.customer) and self.customer not in self.core.BUILTIN_CUSTOMERS and self.core.is_pick_items(self.profile)
 
+    @property
+    def no_po(self):
+        """Khách không có PO đầu vào (VD Betterial, cờ noPo): bước ② không quét PO, chọn mã + số lượng; số PO tự tạo theo poGen."""
+        return bool(self.customer) and self.customer not in self.core.BUILTIN_CUSTOMERS and self.core.is_no_po(self.profile)
+
+    def no_po_defaults(self):
+        """Số PO kế tiếp theo công thức của khách (VD HT20260901) và ngày PO hôm nay (dd/mm/yyyy)."""
+        po = self.store.next_po_number(self.customer, self.form.get("doc_date", "")) if self.customer else ""
+        return {"po": po, "po_date": datetime.date.today().strftime("%d/%m/%Y")}
+
     def pick_choices(self):
         """Các mã của khách để chọn: [{code, name, price, price_from}] (giá = giá của hồ sơ gần nhất có mã đó, chưa có thì giá danh mục)."""
         out = []

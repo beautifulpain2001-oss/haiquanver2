@@ -470,7 +470,11 @@ def fill_bbgh(core, wb, rec, prof, tws, title):
 def fill_po(core, wb, rec, prof, tws, title):
     """Đơn đặt hàng (PO) song ngữ theo mẫu của khách (VD Betterial): STT | Tên hàng | ĐVT | Thông số quy cách | SL | Đơn giá | Thành tiền, tổng, VAT, bằng chữ, điều khoản."""
     items = rec.get("items", [])
-    ws, pl = clone_sheet(wb, tws, title, [(18, 25, max(len(items), 1))], max_col=8)
+    # Dòng 'TỔNG TIỀN' của mẫu: mẫu cũ ở hàng 26 (dòng hàng 18-25), PO Betterial gửi sau ở hàng 25 (dòng hàng 18-24). Tìm theo chữ, không đoán số hàng.
+    tot = next((r for r in range(19, min(tws.max_row, 80) + 1) if str(tws[f"A{r}"].value or "").strip().upper().startswith("TỔNG TIỀN")), 26)
+    below = lambda key, default: next((r for r in range(tot, min(tws.max_row, 80) + 1) if key in str(tws[f"A{r}"].value or "")), default)
+    words_r, giao_r = below("bằng chữ", tot + 3), below("Thời gian giao hàng", tot + 4)
+    ws, pl = clone_sheet(wb, tws, title, [(18, tot - 1, max(len(items), 1))], max_col=8)
     d_po = core._parse_dmy(rec.get("poDate")) or core._iso_to_date(rec.get("docDate"))
     d_giao = core._iso_to_date(rec.get("deliveryDate") or rec.get("docDate"))
     ws["A7"] = f"Ngày/ 日期 : {d_po.year}.{d_po.month:02d}.{d_po.day:02d}"
@@ -492,14 +496,14 @@ def fill_po(core, wb, rec, prof, tws, title):
         for col, v in (("A", i + 1), ("B", kind), ("C", "PCS个"), ("D", spec), ("E", it.get("qty", 0)), ("F", it.get("price", 0)), ("G", f"=E{r}*F{r}")):
             ws[f"{col}{r}"] = v
     last = r0 + max(len(items), 1) - 1
-    t = pl.map(26)
+    t = pl.map(tot)
     ws[f"E{t}"] = f"=SUM(E{r0}:E{last})"
     ws[f"G{t}"] = f"=SUM(G{r0}:G{last})"
     ws[f"G{t + 1}"] = 0
     ws[f"G{t + 2}"] = f"=G{t}+G{t + 1}"
     total = round(sum(float(it.get("qty", 0)) * float(it.get("price", 0)) for it in items))
-    ws[f"C{pl.map(29)}"] = core.num_to_vn_words(total)
-    ws[f"A{pl.map(30)}"] = f"* Thời gian giao hàng 交货时间:{d_giao.day:02d}/{d_giao.month:02d}/{d_giao.year}"
+    ws[f"C{pl.map(words_r)}"] = core.num_to_vn_words(total)
+    ws[f"A{pl.map(giao_r)}"] = f"* Thời gian giao hàng 交货时间:{d_giao.day:02d}/{d_giao.month:02d}/{d_giao.year}"
     return ws
 
 

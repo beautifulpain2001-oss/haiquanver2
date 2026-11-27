@@ -303,8 +303,9 @@ class PoStep(QWidget):
         box = QGroupBox("Không đọc được PO? Chọn mã hàng (khách chỉ có vài mã)")
         lay = QVBoxLayout(box)
         lay.setContentsMargins(14, 18, 14, 12)
-        lay.addWidget(_label("Tích mã có trong PO, nhập số lượng (đơn giá điền sẵn theo lần gần nhất), rồi bấm “Dùng các mã đã chọn”. "
-                             "Đọc được PO rồi mà có dòng sai thì cũng làm lại ở đây được.", "hint", wrap=True))
+        self.pick_hint = _label("Tích mã có trong PO, nhập số lượng (đơn giá điền sẵn theo lần gần nhất), rồi bấm “Dùng các mã đã chọn”. "
+                                "Đọc được PO rồi mà có dòng sai thì cũng làm lại ở đây được.", "hint", wrap=True)
+        lay.addWidget(self.pick_hint)
         self.pick_grid = QGridLayout()
         self.pick_grid.setHorizontalSpacing(10)
         lay.addLayout(self.pick_grid)
@@ -316,6 +317,7 @@ class PoStep(QWidget):
         form.addRow("Số PO", self.p_po)
         form.addRow("Ngày PO (dd/mm/yyyy)", self.p_po_date)
         form.addRow("Số PR", self.p_pr)
+        self.p_form = form
         lay.addLayout(form)
         self.p_ok = QPushButton("✅  Dùng các mã đã chọn")
         self.p_ok.clicked.connect(self.confirm_pick)
@@ -348,6 +350,8 @@ class PoStep(QWidget):
             self.pick_grid.addWidget(price, i, 2)
             self.pick_rows.append((c["code"], chk, qty, price))
         guess = getattr(self, "_pick_guess", None) or {}
+        if self.lot.no_po:  # khách không có PO đầu vào: số PO tự tạo theo công thức của khách (VD HT20260901), ngày PO hôm nay
+            guess = self.lot.no_po_defaults()
         self.p_po.setText(str(self.lot.form.get("po", "")).strip() or guess.get("po", ""))
         self.p_po_date.setText(str(self.lot.form.get("po_date", "")).strip() or guess.get("po_date", ""))
         self.p_pr.setText(next((str(it.get("pr")) for it in self.lot.items if it.get("pr")), "") or guess.get("pr", ""))
@@ -480,8 +484,18 @@ class PoStep(QWidget):
         contract = self.lot.contract_order and not fixed
         self.fixed_box.setVisible(fixed)
         self.contract_box.setVisible(contract)
+        no_po = self.lot.no_po and not fixed and not contract
         for w in (self.pick_title, self.drop, self.no_file_hint):
-            w.setVisible(not fixed and not contract)
+            w.setVisible(not fixed and not contract and not no_po)
+        self.pick_box.setTitle("Chọn mã hàng và số lượng (khách không có PO: phần mềm lập Đơn đặt hàng)" if no_po
+                               else "Không đọc được PO? Chọn mã hàng (khách chỉ có vài mã)")
+        self.pick_hint.setText("Tích mã hàng, nhập số lượng (đơn giá điền sẵn theo lần gần nhất), rồi bấm “Dùng các mã đã chọn”. "
+                               "Số PO tự tạo theo quy chuẩn của khách, sửa được nếu cần." if no_po else
+                               "Tích mã có trong PO, nhập số lượng (đơn giá điền sẵn theo lần gần nhất), rồi bấm “Dùng các mã đã chọn”. "
+                               "Đọc được PO rồi mà có dòng sai thì cũng làm lại ở đây được.")
+        for w in (self.p_pr, self.p_form.labelForField(self.p_pr)):
+            if w is not None:
+                w.setVisible(not no_po)
         if fixed and (self._fixed_for != c or not self.lot.items):
             self._fixed_for = c
             self.fill_fixed()
@@ -496,11 +510,13 @@ class PoStep(QWidget):
             self._pick_for = (c, id(self.lot.items), len(self.lot.items))
             self.fill_pick()
         self.drop.setEnabled(bool(c) and not self.busy.isVisible())
-        self.add_po.setVisible(self.lot.multi_po and not fixed and not contract)
+        self.add_po.setVisible(self.lot.multi_po and not fixed and not contract and not no_po)
         self.refresh_dates()
         self.refresh_ncu()
         if not self.status.text() and c and contract:
             self.set_status("Kiểm tra số hợp đồng, bấm “Xác nhận số hợp đồng”, rồi “Tra mã để thêm dòng”.", ok=None)
+        elif not self.status.text() and c and no_po:
+            self.set_status("Tích mã hàng, nhập số lượng rồi bấm “Dùng các mã đã chọn”.", ok=None)
         elif not self.status.text() and c and fixed:
             self.set_status("Kiểm tra số PO, số lượng, đơn giá rồi bấm “Xác nhận đơn hàng”.", ok=None)
         elif not self.status.text() and c:

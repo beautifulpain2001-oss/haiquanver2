@@ -1399,7 +1399,8 @@ class DedicatedDataStore:
                 "hs": str(it.get("hs") or ""),
                 "unit": it.get("unit") or prof["unit"],
                 "ten_hq": it.get("ten_hq") or name,
-                "tare": prof.get("tare", 0.0),
+                # bì riêng của mã nếu file học có (khách noPo, VD Betterial: ống dài +4 kg); không có thì bì chung của khách
+                "tare": float(it["tare"]) if is_no_po(prof) and it.get("tare") not in (None, "") else prof.get("tare", 0.0),
             }
             if hit:
                 hit.update({k: v for k, v in row.items() if v})
@@ -9153,8 +9154,16 @@ def mark_read(items, catalog=None):
 
 def is_pick_items(prof):
     """Khách có ít mã hàng (VD Inoac: 2 mã ống giấy, PO scan không ghi mã hàng): PO đọc theo đơn giá + chiều dài đã học,
-    và luôn có ô chọn mã bằng tay ở bước ② khi PO không đọc được hoặc đọc chưa chắc (cờ hồ sơ `pickItems`)."""
-    return bool((prof or {}).get("pickItems"))
+    và luôn có ô chọn mã bằng tay ở bước ② khi PO không đọc được hoặc đọc chưa chắc (cờ hồ sơ `pickItems`).
+    Khách không có PO đầu vào (cờ `noPo`) cũng dùng ô chọn mã này."""
+    return bool((prof or {}).get("pickItems")) or is_no_po(prof)
+
+
+def is_no_po(prof):
+    """Khách KHÔNG có PO đầu vào (VD Betterial): bước ② không quét PO, chỉ chọn mã + số lượng; số PO do Hồng Thiên tự tạo
+    theo `poGen` (VD HT{yyyymm}{nn} -> HT20260901) và xuất Đơn đặt hàng (PO) theo form mẫu của khách (cờ hồ sơ `noPo`).
+    Bì cộng thêm theo từng mã (mục `tare` của mã trong danh mục, học từ công thức cả bì =L18+4 của invoice) thay cho bì chung của lô."""
+    return bool((prof or {}).get("noPo"))
 
 
 def _few_num(tok):
@@ -9294,7 +9303,11 @@ def lot_pick_items(store, customer, picks, po, tare_text="1.0", pr=""):
         hit = {"ma_sp": str(item.get("code") or ""), "ten_sp": item.get("name", ""), "price": int(p) if p == int(p) else p,
                "unit": item.get("unit") or (PROFILES.get(customer) or {}).get("unit", ""),
                "div": mem.get("div") or item.get("div", 0), "kg": mem.get("kg") or item.get("kg", 0), "hs": mem.get("hs") or item.get("hs") or "48229090"}
-        line = lot_item_from_catalog(store, customer, hit, int(q) if q == int(q) else q, str(po).strip(), tare_text)
+        own_tare = item.get("tare") if is_no_po(PROFILES.get(customer)) and item.get("tare") not in (None, "") else None
+        line = lot_item_from_catalog(store, customer, hit, int(q) if q == int(q) else q, str(po).strip(),
+                                     f"{float(own_tare):g}" if own_tare is not None else tare_text)
+        if own_tare is not None:
+            line["bi_ma"] = float(own_tare)  # bì riêng của mã (VD ống dài +4 kg, ống ngắn +1 kg): giữ khi tính lại cả lô
         if item.get("ten_hq"):
             line["ten_hq"] = item["ten_hq"]
         if str(pr or "").strip():
@@ -9859,6 +9872,10 @@ def lot_recalc(items, customer, tare_text):
             it["kien"] = math.ceil(round(qty / div * 1e6) / 1e6)
         if kg > 0:
             it["net"] = round_up(qty * kg)
+            if it.get("bi_ma") is not None:  # khách bì theo mã (noPo, VD Betterial): bì riêng của mã thắng bì chung của lô
+                it["gross"] = lot_gross(it["net"], f"{float(it['bi_ma']):g}")
+                it["tare"] = float(it["bi_ma"])
+                continue
             it["gross"] = lot_gross(it["net"], spec)
             it["tare"] = 0.0 if str(spec).strip().endswith("%") else _tare_number(spec, 0.0)  # bì cộng thêm mỗi dòng theo ô trên màn hình: invoice ghi công thức tịnh + bì
 
