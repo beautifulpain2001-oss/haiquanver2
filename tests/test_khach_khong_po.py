@@ -1,5 +1,5 @@
 """Khách KHÔNG có PO đầu vào (cờ hồ sơ `noPo`, kiểu Betterial):
-- Bước ② không quét PO: tích mã hàng + nhập số lượng; số PO do Hồng Thiên tự tạo theo `poGen` (HT{yyyymm}{nn}).
+- Bước ② không quét PO: tích mã hàng + nhập số lượng; số PO do Hồng Thiên tự tạo theo `poGen` (HT{yyyymmdd}).
 - Bì cộng thêm theo từng mã (ống dài +4 kg, ống ngắn +1 kg), giữ nguyên khi tính lại cả lô.
 - Đơn đặt hàng (PO) xuất theo form mẫu của khách: dòng 'TỔNG TIỀN' tìm theo chữ (mẫu có 7 dòng hàng, tổng ở hàng 25).
 - Invoice theo form ô {{...}}: số kiện =ROUNDUP(SL/{{dm_kien}},0), cả bì =tịnh+{{bi}}.
@@ -19,7 +19,7 @@ from ui_qt.state import Lot
 
 FAKE = {
     "name": "CÔNG TY TNHH KHÔNG PO MẪU THỬ", "label": "KhongPo", "mst": "0100000088", "addr": "Lô Z, KCN Mẫu, Phường Thử, Tỉnh Bắc Ninh, Việt Nam.",
-    "emails": "a@vd.test", "unit": "Chiếc", "tare": 1.0, "payDays": 30, "noPo": True, "pickItems": True, "poGen": "HT{yyyymm}{nn}",
+    "emails": "a@vd.test", "unit": "Chiếc", "tare": 1.0, "payDays": 30, "noPo": True, "pickItems": True, "poGen": "HT{yyyymmdd}",
     "linePo": False, "poInDocs": False, "bkavId": "khongpo {d}/{m}", "veViec": "xuất kho bán hàng cho", "extraDocs": "PO",
 }
 ITEMS = [
@@ -98,29 +98,29 @@ def test_lot_pick_with_generated_po_and_tare_per_code(store, cust):
     lot.form["doc_date"] = "2026-10-29"
     assert lot.no_po and lot.pick_items
     d = lot.no_po_defaults()
-    assert d["po"] == "HT20261001"
+    assert d["po"] == "HT20261029"  # HT + năm tháng ngày làm, không có số thứ tự
     items = lot.confirm_pick([("99X000.0001", "1200", "20000"), ("99X000.0002", "882", "100000")], d["po"], "03/10/2026")
     assert [(it["kien"], it["net"], it["gross"], it["tare"]) for it in items] == [(60, 840.0, 841.0, 1.0), (294, 4410.0, 4414.0, 4.0)]
     lot.form["tare"] = "1.0"
     app.lot_recalc(lot.items, cust, "1.0")  # tính lại cả lô (bước ④ / lúc xuất): bì theo mã vẫn giữ
     assert [it["gross"] for it in lot.items] == [841.0, 4414.0]
     app.lot_save_new(store, make_rec(store, cust, lot.items, d["po"]), {})
-    assert store.next_po_number(cust, "2026-10-30") == "HT20261002"
+    assert store.next_po_number(cust, "2026-10-30") == "HT20261030"
 
 
 def test_export_po_invoice_bkav(store, cust):
-    items = app.lot_pick_items(store, cust, [("99X000.0001", "1200", "20000"), ("99X000.0002", "882", "100000")], "HT20261001")
-    rec = make_rec(store, cust, items, "HT20261001")
+    items = app.lot_pick_items(store, cust, [("99X000.0001", "1200", "20000"), ("99X000.0002", "882", "100000")], "HT20261029")
+    rec = make_rec(store, cust, items, "HT20261029")
     path = {f["mode"]: f["path"] for f in app.lot_export_each(store, rec)["files"]}
     po = openpyxl.load_workbook(path["PO"]).active
-    assert po["A7"].value == "Ngày/ 日期 : 2026.10.03" and po["D7"].value == "Số/ No.  HT20261001"
+    assert po["A7"].value == "Ngày/ 日期 : 2026.10.03" and po["D7"].value == "Số/ No.  HT20261029"
     assert [(po[f"B{r}"].value, po[f"D{r}"].value, po[f"E{r}"].value) for r in (18, 19)] == [
         ("Ống giấy", ITEMS[0]["name"], 1200), ("Ống giấy", ITEMS[1]["name"], 882)]
     assert po["A20"].value.startswith("TỔNG TIỀN") and po["E20"].value == "=SUM(E18:E19)" and po["G20"].value == "=SUM(G18:G19)"
     assert po["G22"].value == "=G20+G21" and po["C23"].value.startswith("Một trăm mười hai triệu")
     assert po["A24"].value == "* Thời gian giao hàng 交货时间:29/10/2026"
     inv = openpyxl.load_workbook(path["PKL"]).active
-    assert (inv["I6"].value, inv["I7"].value, inv["N7"].value) == ("Số hóa đơn  : 00000300", "Số ĐĐH : HT20261001", "Ngày: 03/10/2026")
+    assert (inv["I6"].value, inv["I7"].value, inv["N7"].value) == ("Số hóa đơn  : 00000300", "Số ĐĐH : HT20261029", "Ngày: 03/10/2026")
     assert [(inv[f"K{r}"].value, inv[f"M{r}"].value) for r in (18, 19)] == [("=L18+1", "=ROUNDUP(I18/20,0)"), ("=L19+4", "=ROUNDUP(I19/3,0)")]
     wb = openpyxl.Workbook()
     vat, pxk = app.build_vat_bkav_sheet(wb, rec), app.build_pxk_bkav_sheet(wb, rec)
