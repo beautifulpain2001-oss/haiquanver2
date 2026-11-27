@@ -4251,8 +4251,17 @@ class DedicatedDataStore:
                 found.append((int(m.group(1)), str(r["pxkNo"]).strip()))
         try:
             for o in self.declaration_folders():
+                m = re.fullmatch(r"\d{4}-\d{2}-\d{2}_(\d{1,9})(?:_\d{1,2})?", os.path.basename(os.path.normpath(o["path"])))
+                if m:  # tên thư mục lô <ngày>_<số PXK>: lô đã xuất mà chưa bấm Lưu vẫn giữ số này
+                    found.append((int(m.group(1)), m.group(1)))
+                card = o.get("card") or {}
+                recs = [card.get("record")] + list((card.get("records") or {}).values())
+                for cr in recs + [o.get("record")]:  # số PXK ghi trong thẻ 00_HO_SO.json
+                    m = re.fullmatch(r"\s*0*(\d{1,9})\s*", str((cr or {}).get("pxkNo") or card.get("pxkNo") or ""))
+                    if m:
+                        found.append((int(m.group(1)), str(cr.get("pxkNo") if cr and cr.get("pxkNo") else card.get("pxkNo")).strip()))
                 for n in os.listdir(o["path"]):
-                    m = re.match(r"PXK\s+0*(\d{1,9})\b", n, re.I) or re.match(r"0*(\d{3,9})_\d{12}", n)
+                    m = re.match(r"PXK\s*[_ -]?\s*0*(\d{1,9})\b", n, re.I) or re.match(r"0*(\d{3,9})_\d{12}", n)
                     if m:
                         found.append((int(m.group(1)), m.group(1)))
         except OSError:

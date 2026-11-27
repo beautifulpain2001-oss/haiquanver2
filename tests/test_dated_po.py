@@ -402,3 +402,19 @@ def test_tesa_blurry_ocr_row_still_read_and_flags_fixes(tmp_path):
     store = app.DedicatedDataStore(base_dir=str(tmp_path / "d"))
     _po, ls = app.parse_tesa_po_text(hdr + "10 186,000 PC 39817-90019-00 Dec 16, 2026 26,500.00 100 PC 39,040,000.00\nNet Value: VND 36,040,000.00\nAmount: VND 36,040,000.00\n@@HDR@@\n", store.tesa_items, store)
     assert ls[0]["qty"] == 136000 and ls[0]["amount"] == 36040000 and ls[0]["read"] != "ok" and "136,000" in ls[0]["read_note"]
+
+
+def test_next_pxk_reads_lot_folder_name_and_card_not_only_saved_records(tmp_path):
+    """Lô đã xuất nhưng chưa bấm Lưu: số PXK chỉ nằm ở tên thư mục lô / thẻ hồ sơ, vẫn phải tính để không cấp trùng."""
+    import json
+    store = app.DedicatedDataStore(base_dir=str(tmp_path / "d"))
+    store.records = [{"customer": "tesa", "pxkNo": "00000350", "docDate": "2026-11-25"}]
+    lot = tmp_path / "d" / "HAI_QUAN" / "Quang Ích" / "2026_Thang_11" / "2026-11-25_00000351"
+    lot.mkdir(parents=True)
+    (lot / "PXK_KVCNB_BKAV_quangich_25.11.xlsx").write_text("x")
+    assert store.next_pxk() == "00000352"
+    lot2 = tmp_path / "d" / "HAI_QUAN" / "Able" / "2026_Thang_11" / "2026-11-26"
+    lot2.mkdir(parents=True)
+    (lot2 / "00_HO_SO.json").write_text(json.dumps({"id": "X", "pxkNo": "00000355", "record": {"id": "X", "pxkNo": "00000355"}}), encoding="utf-8")
+    (lot2 / "a.xlsx").write_text("x")
+    assert store.next_pxk() == "00000356"
