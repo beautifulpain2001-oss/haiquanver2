@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
-from .. import widgets
+from .. import theme, widgets
 from ._base import _Page, _fill, _head, _table
 
 
@@ -75,10 +75,9 @@ class CustomersPage(_Page):
     changed = Signal()
     make_lot = Signal(str)
 
-    CARD = "QFrame#card{background:white;border:1px solid #E2E8F0;border-radius:10px}"
-    FLAT = ("QLineEdit{border:1px solid transparent;background:transparent;font-weight:600;font-size:13px;padding:3px}"
-            "QLineEdit:focus{border:1px solid #93C5FD;background:white}")
-    CHIP = "background:#F1F5F9;color:#475569;border-radius:4px;padding:1px 6px;font-family:monospace;font-size:11px"
+    # kiểu dáng lấy từ theme (đổi được lúc đang chạy): xem restyle()
+    FLAT = ("QLineEdit{border:1px solid transparent;background:transparent;font-weight:600;font-size:13px;padding:3px;min-height:0}"
+            "QLineEdit:focus{border:1px solid #2B6CB0;background:rgba(255,255,255,60%)}")
 
     def __init__(self, core, store):
         super().__init__()
@@ -109,7 +108,6 @@ class CustomersPage(_Page):
         # ---- trái: tìm kiếm + bảng
         left = QFrame()
         left.setObjectName("card")
-        left.setStyleSheet(self.CARD)
         lv = QVBoxLayout(left)
         lv.setContentsMargins(12, 12, 12, 12)
         self.search = QLineEdit()
@@ -119,9 +117,10 @@ class CustomersPage(_Page):
         self.table = _table(["Mã KH", "Tên Doanh Nghiệp / KCN", "Mã Số Thuế", "Mẫu gắn kèm"], 1)
         self.table.setShowGrid(False)
         self.table.setWordWrap(True)
-        self.table.setStyleSheet("QTableWidget{border:none;font-size:13px}QTableWidget::item{border-bottom:1px solid #E2E8F0;padding:6px}"
-                                 "QTableWidget::item:selected{background:#DBEAFE;color:#0F172A}"
-                                 "QHeaderView::section{background:#F1F5F9;color:#1E293B;font-weight:700;padding:8px;border:none;border-bottom:1px solid #E2E8F0}")
+        self._styled = []  # (widget, hàm tạo QSS từ token) để tô lại khi đổi kiểu giao diện
+        self._styled.append((self.table, lambda t: f"QTableWidget{{border:none;font-size:13px;background:transparent}}QTableWidget::item{{border-bottom:1px solid {t['line']};padding:6px}}"
+                             f"QTableWidget::item:selected{{background:{t['sel_bg']};color:{t['sel_fg']}}}"
+                             f"QHeaderView::section{{background:{t['head_bg']};color:{t['head_fg']};font-weight:700;padding:8px;border:none;border-bottom:1px solid {t['line']}}}"))
         self.table.itemSelectionChanged.connect(self.on_select)
         lv.addWidget(self.table, 1)
         body.addWidget(left, 62)
@@ -130,7 +129,6 @@ class CustomersPage(_Page):
         ed = self.form.edits
         right = QFrame()
         right.setObjectName("card")
-        right.setStyleSheet(self.CARD)
         rv = QVBoxLayout(right)
         rv.setContentsMargins(0, 0, 0, 12)
         sc = QScrollArea()
@@ -142,11 +140,11 @@ class CustomersPage(_Page):
         iv.setContentsMargins(16, 14, 16, 8)
         iv.setSpacing(8)
         cap = QLabel("CHI TIẾT KHÁCH HÀNG")
-        cap.setStyleSheet("color:#64748B;font-weight:700;font-size:11px")
+        self._styled.append((cap, lambda t: f"color:{t['muted']};font-weight:700;font-size:11px;background:transparent"))
         iv.addWidget(cap)
         self.title = QLabel("")
         self.title.setWordWrap(True)
-        self.title.setStyleSheet("font-size:16px;font-weight:700;color:#0F172A")
+        self._styled.append((self.title, lambda t: f"font-size:16px;font-weight:700;color:{t['deep']};background:transparent"))
         iv.addWidget(self.title)
 
         def sec(text):
@@ -160,15 +158,15 @@ class CustomersPage(_Page):
             lb.setFixedWidth(118)
             lb.setWordWrap(True)
             lb.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-            lb.setStyleSheet("color:#475569;padding-top:4px")
+            self._styled.append((lb, lambda t: f"color:{t['muted']};padding-top:4px;background:transparent"))
             g.addWidget(lb)
             col = QVBoxLayout()
             col.setSpacing(2)
-            ed[key].setStyleSheet(self.FLAT)
+            self._styled.append((ed[key], lambda t: self.FLAT.replace("#2B6CB0", t["accent"])))
             col.addWidget(ed[key])
             if chip:
                 c = QLabel(chip)
-                c.setStyleSheet(self.CHIP)
+                self._styled.append((c, lambda t: f"background:{t['accent_soft']};color:{t['muted']};border-radius:6px;padding:1px 6px;font-family:monospace;font-size:11px"))
                 c.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
                 col.addWidget(c, 0, Qt.AlignLeft)
             g.addLayout(col, 1)
@@ -180,17 +178,17 @@ class CustomersPage(_Page):
         row("Địa chỉ nhận hàng", "addrKho", "{{khach_dia_chi}}")
         sec("2. Lưu ý khi làm chứng từ")
         self.note_frame = QFrame()
-        self.note_frame.setStyleSheet("QFrame{background:#FEF9C3;border:1px solid #FDE047;border-radius:8px}QLabel{border:none;color:#451A03}")
+        self._styled.append((self.note_frame, lambda t: f"QFrame{{background:{t['warn_soft']};border:none;border-radius:12px}}QLabel{{border:none;color:{t['warn']};background:transparent}}"))
         nl = QHBoxLayout(self.note_frame)
         nl.setContentsMargins(10, 8, 10, 8)
         nl.addWidget(QLabel("⚠  Lưu ý đặc thù:"))
-        ed["note"].setStyleSheet("QLineEdit{border:none;background:transparent;font-size:12px;color:#451A03}")
+        self._styled.append((ed["note"], lambda t: f"QLineEdit{{border:none;background:transparent;font-size:12px;color:{t['warn']};min-height:0}}"))
         ed["note"].setPlaceholderText("Ghi lưu ý khi làm chứng từ cho khách này (hiện nhắc ở bước xuất)")
         nl.addWidget(ed["note"], 1)
         iv.addWidget(self.note_frame)
         sec("3. Mẫu chứng từ gắn kèm")
         self.forms_box = QFrame()
-        self.forms_box.setStyleSheet("QFrame#fb{border:1px solid #E2E8F0;border-radius:8px}QLabel{border:none;padding:5px}")
+        self._styled.append((self.forms_box, lambda t: f"QFrame#fb{{border:1px solid {t['line']};border-radius:12px;background:transparent}}QLabel{{border:none;padding:5px;background:transparent}}"))
         self.forms_box.setObjectName("fb")
         self.forms_lay = QVBoxLayout(self.forms_box)
         self.forms_lay.setContentsMargins(6, 6, 6, 6)
@@ -199,7 +197,7 @@ class CustomersPage(_Page):
         dm = QVBoxLayout()
         self.dm_info = QLabel("")
         self.dm_info.setWordWrap(True)
-        self.dm_info.setStyleSheet("color:#475569")
+        self._styled.append((self.dm_info, lambda t: f"color:{t['muted']};background:transparent"))
         dm.addWidget(self.dm_info, 1)
         self.dm_open = QPushButton("Mở bảng kg && kiện")
         self.dm_open.setObjectName("sec")
@@ -210,7 +208,7 @@ class CustomersPage(_Page):
         self.more_btn = QToolButton()
         self.more_btn.setText("Thông tin khác và công cụ  ▸")
         self.more_btn.setCheckable(True)
-        self.more_btn.setStyleSheet("QToolButton{border:none;color:#1E3A5F;font-weight:600;padding:6px 0}")
+        self._styled.append((self.more_btn, lambda t: f"QToolButton{{border:none;color:{t['deep']};font-weight:600;padding:6px 0;background:transparent}}"))
         self.more_btn.toggled.connect(self._toggle_more)
         iv.addWidget(self.more_btn)
         self.more = QWidget()
@@ -262,6 +260,13 @@ class CustomersPage(_Page):
         body.addWidget(right, 38)
         self.form.set_enabled(False)
         self.save_btn.setEnabled(False)
+        self.restyle()
+        theme.on_change(lambda _n: self.restyle())
+
+    def restyle(self):
+        t = theme.tokens()
+        for w, fn in self._styled:
+            w.setStyleSheet(fn(t))
 
     def _toggle_more(self, on):
         self.more.setVisible(on)

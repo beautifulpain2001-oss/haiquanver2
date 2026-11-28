@@ -106,6 +106,27 @@ def make_icon(name, color="#FFFFFF", disabled="#A0AEC0", size=SIZE):
 ROLE_COLOR = {"": "#FFFFFF", "sec": "#0B4FA8", "dng": "#A21B1B", "ghost": "#0B4FA8", "big": "#FFFFFF", "chip": "#0B4FA8"}
 
 
+def _role_color(role):
+    """Màu biểu tượng theo vai trò nút và kiểu giao diện đang bật (theme.PALETTES[..]["icon"])."""
+    from . import theme
+    t = theme.tokens()
+    return t["icon"].get(role, t["icon"]["sec"] if role else t["icon"][""])
+
+
+def _set_icon(btn, name):
+    from . import theme
+    btn.setIcon(make_icon(name, _role_color(btn.objectName()), theme.tokens()["icon_off"]))
+    btn.setProperty("_icon_name", name)
+
+
+def recolor_all(app):
+    """Đổi kiểu giao diện: tô lại biểu tượng của mọi nút đã đổi emoji."""
+    from PySide6.QtWidgets import QApplication
+    for w in (app or QApplication.instance()).allWidgets():
+        if isinstance(w, QPushButton) and w.property("_icon_name"):
+            _set_icon(w, w.property("_icon_name"))
+
+
 def split_emoji(text):
     """('📁  Mở thư mục', ...) -> ('folder', 'Mở thư mục'); không có emoji nhận ra thì (None, text)."""
     for emo in sorted(EMOJI, key=len, reverse=True):
@@ -123,13 +144,12 @@ def style_button(btn):
     name, rest = split_emoji(btn.text())
     if not name and btn.text().rstrip().endswith("→"):  # "Tiếp tục →": mũi tên đặt bên phải chữ
         btn.setText(btn.text().rstrip()[:-1].rstrip() + "  ")
-        btn.setIcon(make_icon("right", ROLE_COLOR.get(btn.objectName(), "#FFFFFF")))
+        _set_icon(btn, "right")
         btn.setLayoutDirection(Qt.RightToLeft)
         return
     if name:
         btn.setText(" " + rest)  # chừa khoảng thở giữa biểu tượng và chữ
-        role = btn.objectName()
-        btn.setIcon(make_icon(name, ROLE_COLOR.get(role, "#FFFFFF" if not role else "#0B4FA8")))
+        _set_icon(btn, name)
         btn.setIconSize(btn.iconSize().__class__(SIZE, SIZE))
 
 

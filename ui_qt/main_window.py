@@ -7,7 +7,7 @@ import traceback
 
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QFontDatabase
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QListView, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QPushButton, QLabel, QListView, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QStackedWidget, QVBoxLayout, QWidget
 
 from . import icons, theme, widgets
 from .frame import BANNERS, Banner
@@ -31,7 +31,7 @@ class MainWindow(QMainWindow):
             name, rest = icons.split_emoji(text)
             it = QListWidgetItem(rest)
             if name:
-                it.setIcon(icons.make_icon(name, "#36506F", "#94A3B8", 24))
+                it.setIcon(icons.make_icon(name, theme.tokens()["nav_icon"], theme.tokens()["icon_off"], 24))
             self.nav.addItem(it)
         self.nav.setIconSize(QSize(24, 24))
         self.nav.setViewMode(QListView.IconMode)  # biểu tượng ở trên, tên mục ở dưới
@@ -56,7 +56,7 @@ class MainWindow(QMainWindow):
         logo = QLabel("H")  # logo ô vuông; tên công ty nằm ở thanh trên cùng
         logo.setFixedSize(48, 48)
         logo.setAlignment(Qt.AlignCenter)
-        logo.setStyleSheet("background:#1570D8;color:white;font-size:22px;font-weight:700;border-radius:14px")
+        self.logo = logo
         sl.addSpacing(14)
         sl.addWidget(logo, 0, Qt.AlignHCenter)
         sl.addSpacing(10)
@@ -105,6 +105,21 @@ class MainWindow(QMainWindow):
         brand.setObjectName("brand")
         tl.addWidget(brand)
         tl.addStretch(1)
+        lab = QLabel("Giao diện")
+        lab.setObjectName("themelabel")
+        tl.addWidget(lab)
+        self.theme_btns = {}
+        for key in theme.PALETTES:  # công tắc kiểu giao diện như file mẫu: Kính mờ | Tactile
+            b = QPushButton(theme.PALETTES[key]["label"])
+            b.setObjectName("chip")
+            b.setCheckable(True)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setToolTip("Đổi kiểu giao diện; máy nhớ lựa chọn cho lần mở sau.")
+            b.clicked.connect(lambda _c=False, k=key: theme.apply(QApplication.instance(), k))
+            tl.addWidget(b)
+            self.theme_btns[key] = b
+        theme.on_change(self.on_theme)
+        self.on_theme(theme.CURRENT)
         rv.addWidget(top)
         bw = QWidget()
         bl = QVBoxLayout(bw)
@@ -124,6 +139,19 @@ class MainWindow(QMainWindow):
         self.folder_timer = QTimer(self)  # Danh mục / Tờ khai đang làm theo thư mục THẬT: xóa hay thêm thư mục ngoài Explorer thì danh sách tự đổi
         self.folder_timer.timeout.connect(self.watch_folders)
         self.folder_timer.start(3000)
+
+    def on_theme(self, name):
+        """Sau khi đổi kiểu giao diện: tô lại logo, biểu tượng menu và nút, đánh dấu công tắc."""
+        t = theme.tokens(name)
+        self.logo.setStyleSheet(f"background:{t['logo_bg']};color:{t['logo_fg']};font-size:22px;font-weight:700;border-radius:16px;"
+                                + ("border:2px solid;border-color:#FFFFFF #A3B1C6 #A3B1C6 #FFFFFF" if name == "tactile" else ""))
+        for i, text in enumerate(NAV):
+            ic, _rest = icons.split_emoji(text)
+            if ic:
+                self.nav.item(i).setIcon(icons.make_icon(ic, t["nav_icon"], t["icon_off"], 24))
+        for k, b in self.theme_btns.items():
+            b.setChecked(k == name)
+        icons.recolor_all(QApplication.instance())
 
     def watch_folders(self):
         page = self.pages.currentWidget()
@@ -202,8 +230,8 @@ def run(core, store, smoke=False):
     """Mở giao diện mới. `smoke`: tự đóng sau 3 giây (kiểm tra bản đóng gói)."""
     app = QApplication.instance() or QApplication([])
     load_fonts()
-    app.setStyleSheet(theme.STYLE)
     icons.install(app)
+    theme.apply(app, theme.saved_name(), save=False)
     win = MainWindow(core, store)
     _install_error_hook(core, lambda: win)
     win.show()
