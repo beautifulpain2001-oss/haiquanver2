@@ -34,6 +34,8 @@ ITEM_TOKENS = [
     ("quy_cach", "Quy cách 'phi x dày x dài' (VD 114 x 2.5 x 265)"), ("phi", "Đường kính trong (số)"), ("day", "Độ dày (số)"), ("dai", "Chiều dài (số)"),
     ("tc_phi", "Tiêu chuẩn đường kính trong (VD 114±0,5)"), ("tc_day", "Tiêu chuẩn độ dày (VD 2.5±0,2)"), ("tc_dai", "Tiêu chuẩn chiều dài (VD 265±2)"),
     ("ma_kt", "Mã sản phẩm trên phiếu kiểm tra chất lượng (không đặt thì là mã hàng)"),
+    ("sl_phay", "Số lượng dạng 8,509.0 (phẩy ngăn nghìn, như bảng kê Phụ lục X Richsound)"),
+    ("thanh_tien_phay", "Thành tiền dạng 33,950,910.0 (phẩy ngăn nghìn, như bảng kê Phụ lục X Richsound)"),
 ]
 _ITEM_KEYS = {k for k, _ in ITEM_TOKENS}
 _TOKEN = re.compile(r"\{\{\s*([A-Za-z0-9_]+)\s*\}\}")
@@ -140,6 +142,8 @@ def item_values(rec, qc_items=None):
                     "dm_kien": float(it.get("div") or 0),
                     "bi": round(float(it.get("gross") or 0) - float(it.get("net") or 0), 6),
                     "dvt_hoa": str(it.get("unit") or "")[:1].upper() + str(it.get("unit") or "")[1:]})
+        out[-1]["sl_phay"] = f"{qty:,.1f}"
+        out[-1]["thanh_tien_phay"] = f"{out[-1]['thanh_tien']:,.1f}"
         out[-1].update(qc_values(it, (qc_items or {}).get(str(it.get("ma_sp") or ""))))
         if str(it.get("po") or "").strip():  # {{so_po}} nằm trong dòng hàng = số PO của chính dòng đó (lô nhiều PO)
             out[-1]["so_po"] = str(it["po"]).strip()

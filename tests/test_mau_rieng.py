@@ -172,3 +172,13 @@ def test_fill_xlsx_moves_row_heights_merges_and_print_area():
     assert ws.row_dimensions[8].height == 33 and not ws.row_dimensions[6].height
     assert {str(m) for m in ws.merged_cells.ranges} == {"A8:C9", "D2:D7"}
     assert str(ws.print_area).replace("$", "").endswith("A1:C9")
+
+
+def test_item_comma_tokens_like_richsound_plx():
+    """Bảng kê Phụ lục X Richsound ghi số lượng / trị giá dạng 8,509.0 và 33,950,910.0."""
+    rec = {"items": [{"ma_sp": "203019986", "ten_sp": "Ống giấy phi 43.5 x 39.5 x 290 mm", "qty": 8509, "price": 3990, "amount": 33950910},
+                     {"ma_sp": "211000504", "ten_sp": "Tấm slip sheet", "qty": 200, "price": 75430}]}
+    rows = mau_rieng.item_values(rec)
+    assert (rows[0]["sl_phay"], rows[0]["thanh_tien_phay"]) == ("8,509.0", "33,950,910.0")
+    assert (rows[1]["sl_phay"], rows[1]["thanh_tien_phay"]) == ("200.0", "15,086,000.0")
+    assert {"sl_phay", "thanh_tien_phay"} <= {k for k, _ in mau_rieng.ITEM_TOKENS}
