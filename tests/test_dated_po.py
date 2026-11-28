@@ -418,3 +418,15 @@ def test_next_pxk_reads_lot_folder_name_and_card_not_only_saved_records(tmp_path
     (lot2 / "00_HO_SO.json").write_text(json.dumps({"id": "X", "pxkNo": "00000355", "record": {"id": "X", "pxkNo": "00000355"}}), encoding="utf-8")
     (lot2 / "a.xlsx").write_text("x")
     assert store.next_pxk() == "00000356"
+
+
+def test_richsound_name_cell_is_code_newline_name():
+    """Richsound: ô tên hàng Hóa đơn VAT / PXK Bkav và Invoice = mã hàng của khách, xuống dòng, tên hàng (không lặp mã)."""
+    prof = {"name": "CÔNG TY TNHH RICHSOUND VIỆT NAM", "custom": True}
+    it = {"ma_sp": "203019986", "ten_sp": "Ống giấy phi 43.5 x 39.5 x 290 mm"}
+    want = "203019986\nỐng giấy phi 43.5 x 39.5 x 290 mm"
+    assert app.with_code(prof, it, it["ten_sp"]) == want
+    assert app.with_code(prof, it, "203019986 " + it["ten_sp"]) == want
+    assert app.invoice_item_name(prof, it) == want
+    assert app.with_code(prof, {"ma_sp": "", "ten_sp": "X"}, "X") == "X"
+    assert app.with_code({"name": "CTY KHAC", "custom": True}, it, it["ten_sp"]) == it["ten_sp"]

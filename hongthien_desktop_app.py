@@ -6216,6 +6216,12 @@ def code_name_style(prof):
     return (prof or {}).get("nameStyle") == "ma_ten" or "QUANG ICH" in strip_accents_upper(str((prof or {}).get("name") or ""))
 
 
+def code_break_style(prof):
+    """Khách ghi ô tên hàng (Hóa đơn VAT / PXK Bkav, Invoice) dạng mã hàng của khách, xuống dòng, rồi tên hàng
+    (Richsound: '203019986' + xuống dòng + 'Ống giấy phi 43.5 x 39.5 x 290 mm'; hoặc khách có nameStyle = ma_xuong_ten)."""
+    return (prof or {}).get("nameStyle") == "ma_xuong_ten" or "RICHSOUND" in strip_accents_upper(str((prof or {}).get("name") or ""))
+
+
 def strip_leading_code(name, code):
     """Bỏ mã hàng đứng đầu tên (kể cả lặp 2-3 lần, xuống dòng hay dấu ngăn), để ghép 'mã + tên' không bị ghi mã hai lần."""
     n = str(name or "").strip()
@@ -6245,6 +6251,8 @@ def with_code(prof, it, name):
     code = str(it.get("ma_sp") or "").strip()
     if code_is_spec_of_name(code, name):
         code = ""
+    if code and code_break_style(prof):
+        return f"{code}\n{strip_leading_code(name, code)}"
     return f"{code} {strip_leading_code(name, code)}" if code_name_style(prof) and code else name
 
 
@@ -6257,7 +6265,7 @@ def invoice_item_name(prof, it):
         return name
     if code_name_style(prof) and code:
         return f"{code} {strip_leading_code(name, code)}"
-    if prof.get("custom") and code:
+    if (prof.get("custom") or code_break_style(prof)) and code:
         return f"{code}\n{strip_leading_code(name, code)}"
     return name
 
